@@ -6,6 +6,7 @@ import { Suspense } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { GameProvider } from "@/lib/game-data";
 import { StoreProvider } from "@/lib/store";
 import "./globals.css";
 
@@ -35,9 +36,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <TooltipProvider delay={300}>
             <MotionConfig reducedMotion="user">
               <StoreProvider>
-                <Suspense fallback={null}>
-                  <AppShell>{children}</AppShell>
-                </Suspense>
+                <GameProvider>
+                  <Suspense fallback={null}>
+                    <AppShell>{children}</AppShell>
+                  </Suspense>
+                </GameProvider>
               </StoreProvider>
             </MotionConfig>
             <Toaster position="top-center" />

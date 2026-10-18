@@ -10,12 +10,14 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { formatWhen } from "@/lib/format"
+import { useGame } from "@/lib/game-data"
 import { PATIENT } from "@/lib/levels"
 import { sticker } from "@/lib/sticker"
 import { useStride } from "@/lib/store"
 
 export function ProfileSheet() {
   const { profileOpen, setProfileOpen, state, derived, resetDemo } = useStride()
+  const { player } = useGame()
   const [confirming, setConfirming] = useState(false)
   const span = Math.max(derived.levelCeil - derived.levelFloor, 1)
   const progress = Math.min(100, Math.round(((state.xp - derived.levelFloor) / span) * 100))
@@ -30,7 +32,7 @@ export function ProfileSheet() {
     >
       <SheetContent side="right" className="w-full overflow-y-auto data-[side=right]:sm:max-w-md">
         <SheetHeader className="pr-8">
-          <SheetTitle className="font-display text-2xl font-normal tracking-wide text-[#ffd76a]">{PATIENT.name}</SheetTitle>
+          <SheetTitle className="font-display text-2xl font-normal tracking-wide text-[#ffd76a]">{player}</SheetTitle>
           <SheetDescription className="text-white/70">
             Level {derived.playerLevel} · {state.xp.toLocaleString("en-US")} XP
           </SheetDescription>
@@ -75,7 +77,7 @@ export function ProfileSheet() {
           {confirming ? (
             <div className="rounded-2xl border-[2.5px] border-[#ff3d8b]/60 bg-[#2a1220] p-4">
               <p className="text-sm leading-6 text-white/90">
-                This restores Jordan&apos;s clinic history and clears notes, chats, and walks from this browser.
+                This clears the chat and the notes kept in this browser. Walks on the game server stay.
               </p>
               <div className="mt-3 flex gap-2">
                 <Button

@@ -1,3 +1,4 @@
+import { asset } from "@/lib/paths"
 import type { Level, LevelImage } from "@/lib/types"
 
 export const LEVELS: Level[] = [
@@ -136,16 +137,16 @@ export const LEVEL_IMAGE_ALT: Record<LevelImage, string> = {
 }
 
 export const LEVEL_MARKS: Record<number, string> = {
-  1: "/art/seed.png",
-  2: "/art/flower-marigold.png",
-  3: "/art/foot-r.png",
-  4: "/art/flower-bell.png",
-  5: "/art/house.png",
-  6: "/art/seed.png",
-  7: "/art/pod.png",
-  8: "/zombie/portrait.webp",
-  9: "/art/moon.png",
-  10: "/art/flower-rose.png",
+  1: asset("/art/seed.png"),
+  2: asset("/art/flower-marigold.png"),
+  3: asset("/art/foot-r.png"),
+  4: asset("/art/flower-bell.png"),
+  5: asset("/art/house.png"),
+  6: asset("/art/seed.png"),
+  7: asset("/art/pod.png"),
+  8: asset("/zombie/portrait.webp"),
+  9: asset("/art/moon.png"),
+  10: asset("/art/flower-rose.png"),
 }
 
 export function levelById(id: number) {

@@ -1,8 +1,8 @@
-"""Every test runs offline: no API keys, a fresh store file, an empty Perceptron call budget."""
+"""Every test runs offline: no API keys, a fresh store file and moments folder, an empty Perceptron call budget."""
 
 import pytest
 
-from server import api, perceive
+from server import api, moments, perceive
 from server.store import Store
 
 
@@ -13,5 +13,6 @@ def offline(monkeypatch, tmp_path):
     fresh = Store()
     fresh.file = tmp_path / "store.json"
     monkeypatch.setattr(api, "store", fresh)
+    monkeypatch.setattr(moments, "DIR", tmp_path / "moments")
     perceive._calls.clear()
     return fresh

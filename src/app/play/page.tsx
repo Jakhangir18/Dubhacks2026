@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { PlayView } from "@/components/play-view";
+import { LiveView } from "@/components/live-view";
 
 export const metadata: Metadata = {
-  title: "Play and practice · Zombie Walk Home",
+  title: "Live walk · Zombie Walk Home",
 };
 
 export default function PlayPage() {
-  return <PlayView />;
+  return <LiveView />;
 }

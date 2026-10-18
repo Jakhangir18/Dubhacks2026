@@ -28,6 +28,7 @@ Lengths are in cm, scaled by MediaPipe's own 3D (world) leg length, so expect ro
 trends and left/right asymmetry are the trustworthy part.
 """
 import argparse
+import base64
 import bisect
 import csv
 import json
@@ -40,7 +41,9 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from collections import deque
 from dataclasses import dataclass
+from itertools import pairwise
 
 import cv2
 import mediapipe as mp
@@ -65,6 +68,23 @@ PREVIEW_W = 960   # px; the live preview is shrunk so showing it stays cheap
 VALS = [f"{j}_{a}" for j in LEG for a in "xy"] + ["knee", "hip", "ankle", "shoulder_x", "wrist_x"]  # per side
 KEEP = ["t", "frame", "cm_per_px", "trunk_lean"] + [f"{s}_{k}" for s in SIDES for k in VALS]  # what analyze() reads
 
+# Moments: what the side camera tells the player, live (LiveFeed). Knee flexion = 180 - the knee angle, 0 = straight.
+# Typical adult swing-phase peak knee flexion is about 60 deg (Perry & Burnfield); the far leg reads a little lower.
+KNEE_LOW_DEG = 40     # a stride whose peak stays under this is a low lift: the stiff-knee pattern a therapist wants flagged
+KNEE_GOOD_DEG = 55    # a peak at or above this is close to the typical 60: shown as the example to repeat
+UNEVEN_DEG = 15       # left and right peaks (means over the last 4 strides) further apart than this are asymmetric; healthy gait stays within about 10
+MOMENT_GAP_S = 20     # one moment per kind and side in this time: a card every stride would be noise
+GOOD_GAP_S = 60       # a "good" example at most this often, whichever leg: it is there for contrast
+MAX_MOMENTS = 12      # per session: a dozen cards is what a player and a therapist look through after a game
+POSE_EVERY = 0.25     # s between live skeleton posts (4 a second) over the dashboard's 2 pictures a second
+STRIKE_WINDOW = 0.3   # s; a strike is the forward peak of the ankle within this window either side (find_strikes' window)
+STRIDE_RANGE = (0.5, 2.5)   # s from one strike to the next that count as a stride (slow therapy walking to a jog); longer is lost tracking
+MIN_SWING = 0.1       # the ankle must come at least this much of the leg's length ahead of its usual place (a short therapy step is about 0.15, standing jitter 0.02): standing still has no strides
+HIST_S = 4.0          # s of frames a StrideWatcher keeps: three strides, enough for the median baseline
+MOMENT_PX = 480       # long side of a moment picture, with MOMENT_JPEG_Q quality: well under the server's 200 KB
+MOMENT_JPEG_Q = 70
+RING_FPS, RING_S = 15, 2.5   # recent frames kept for the pictures: a stride is confirmed up to about 1.5 s after its peak
+
 
 @dataclass
 class Leg:
@@ -81,6 +101,16 @@ def knee_angle(hip, knee, ankle):
     a = abs(math.degrees(math.atan2(hip[1] - knee[1], hip[0] - knee[0])
                          - math.atan2(ankle[1] - knee[1], ankle[0] - knee[0]))) % 360
     return 360 - a if a > 180 else a
+
+
+POSE_POINTS = {f"{s.lower()}_{j}": i for s, ids in SIDES.items() for j, i in zip(LEG + ("shoulder",), ids, strict=False)}
+
+
+def pose_points(lm):
+    """The live skeleton's points from MediaPipe's normalised landmarks (x, y, visibility each): {name: [x, y, v]},
+    x and y clamped to 0..1 of the picture."""
+    return {k: [round(min(max(lm[i].x, 0.0), 1.0), 4), round(min(max(lm[i].y, 0.0), 1.0), 4), round(lm[i].visibility, 3)]
+            for k, i in POSE_POINTS.items()}
 
 
 def turn(u, v):
@@ -190,13 +220,13 @@ def analyze(rows):
     stance, n_cycles = {}, {}
     for s, rs in side_rows.items():
         ts = [r["t"] for r in rs]
-        col = lambda k: [r[f"{s}_{k}"] for r in rs]
+        col = lambda k, s=s, rs=rs: [r[f"{s}_{k}"] for r in rs]
         st = find_strikes(ts, smooth([d * (r[f"{s}_ankle_x"] - r[f"{s}_hip_x"]) for r in rs])) if rs else []
         to = find_strikes(ts, smooth([-d * (r[f"{s}_toe_x"] - r[f"{s}_hip_x"]) for r in rs])) if rs else []
         res["strikes"][s], res["toe_offs"][s] = st, to
-        strides = [b - a for a, b in zip(st, st[1:])]
+        strides = [b - a for a, b in pairwise(st)]
         typical = statistics.median(strides) if strides else None
-        cycles = [(a, b) for a, b in zip(st, st[1:]) if b - a < 1.6 * typical]  # drop cycles spanning tracking gaps
+        cycles = [(a, b) for a, b in pairwise(st) if b - a < 1.6 * typical]  # drop cycles spanning tracking gaps
         n_cycles[s] = len(cycles)
         res["stride"][s] = statistics.mean(b - a for a, b in cycles) if cycles else None
         res["stride_cv"][s] = cv([b - a for a, b in cycles])
@@ -248,7 +278,7 @@ def analyze(rows):
     by_t = {r["t"]: r for r in rows}
     for s in SIDES:
         o = "R" if s == "L" else "L"
-        times = [t - pt for (pt, ps), (t, ts_) in zip(events, events[1:])
+        times = [t - pt for (pt, ps), (t, ts_) in pairwise(events)
                  if ts_ == s and ps == o and res["stride"][s] and t - pt < res["stride"][s]]
         lens = [d * (by_t[t][f"{s}_heel_x"] - by_t[t][f"{o}_heel_x"])
                 for t in res["strikes"][s] if by_t[t].get(f"{o}_heel_x") is not None]
@@ -260,7 +290,7 @@ def analyze(rows):
     res["cadence"] = 120 / stride if stride else None
     # cross-check: steps counted between consecutive strikes of either foot, leaving out gaps and near-double strikes
     # (one footfall given to both labels). Far from cadence means strikes were missed or labels mixed up.
-    gaps = [b - a for (a, _), (b, _) in zip(events, events[1:])]
+    gaps = [b - a for (a, _), (b, _) in pairwise(events)]
     med = statistics.median(gaps) if gaps else 0
     steps = [x for x in gaps if 0.5 * med <= x <= 1.5 * med]
     res["cadence_steps"] = 60 / statistics.mean(steps) if steps and med > 0 else None
@@ -332,7 +362,7 @@ def summarize(rows, start=None, end=None):
     n = max(1, round((ts[-1] - ts[0]) / WINDOW))
     edges = [ts[0] + (ts[-1] - ts[0]) * i / n for i in range(n)] + [math.inf]
     parts, trend = [], []
-    for a, b in zip(edges, edges[1:]):
+    for a, b in pairwise(edges):
         part = analyze(rows[bisect.bisect_left(ts, a):bisect.bisect_left(ts, b)])
         if part:
             parts.append(part)
@@ -401,17 +431,17 @@ class GaitTracker:
             print(f"Downloading {model} pose model (one time)...")
             try:
                 urllib.request.urlretrieve(url, path)
-            except Exception:
-                # Network proxy may block urllib TLS; fall back to curl.
+            except Exception:  # noqa: BLE001 - a network proxy may block urllib's TLS; curl is the fallback
                 subprocess.run(["curl", "-fsSL", "-o", path, url], check=True)
         self.landmarker = vision.PoseLandmarker.create_from_options(vision.PoseLandmarkerOptions(
             base_options=mp_python.BaseOptions(model_asset_path=path), running_mode=vision.RunningMode.VIDEO))
         self.rows = []     # one small dict per frame (the KEEP fields), the data behind summary(); 20 min fit in memory
         self.found = False  # was a person found in the last frame
+        self.pose = None   # the last frame's live skeleton for the dashboard: {"pts": pose_points(), "knee": {side: flexion}}
         self._seen = []    # (side, points, confidence) of the last frame, for draw()
         self._ms = -1      # last timestamp given to MediaPipe, which needs them strictly increasing
         # every frame with all 33 landmarks streams to disk instead of memory
-        self._csv = open(csv_path, "w", newline="", buffering=1) if csv_path else None
+        self._csv = open(csv_path, "w", newline="", buffering=1) if csv_path else None  # noqa: SIM115 - closed by close()
         self._csv_writer = None
 
     def update(self, frame, t, index=None):
@@ -461,6 +491,7 @@ class GaitTracker:
             mid = lambda a, b: ((px(a)[0] + px(b)[0]) / 2, (px(a)[1] + px(b)[1]) / 2)
             sh, hp = mid(11, 12), mid(23, 24)
             row["trunk_lean"] = round(facings[0] * turn((0, -1), (sh[0] - hp[0], sh[1] - hp[1])), 1)
+        self.pose = {"pts": pose_points(lm), "knee": {s: round(180 - legs[s].angle, 1) if s in legs else None for s in SIDES}} if lm else None
         if self._csv:
             if self._csv_writer is None:
                 self._csv_writer = csv.DictWriter(self._csv, fieldnames=list(row))
@@ -475,7 +506,7 @@ class GaitTracker:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if self.found else (0, 0, 255), 2)
         for s, xy, vis in self._seen:
             color = (0, 255, 0) if vis >= MIN_VIS else (0, 0, 255)
-            for a, b in zip(xy, xy[1:]):
+            for a, b in pairwise(xy):
                 cv2.line(frame, tuple(map(int, a)), tuple(map(int, b)), color, 2)
             cv2.putText(frame, f"{s} vis {vis:.2f}", (int(xy[1][0]) + 8, int(xy[1][1])), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
@@ -504,6 +535,8 @@ class Recorder:
         self.start_epoch = time.time()                 # wall clock at t = 0, to match the game server's timestamps
         self.frames = self.dropped = 0                 # captured; captured but never analysed (queue full)
         self.preview = None                            # last analysed frame with the skeleton drawn
+        self.on_frame = None                           # callback(t, frame, legs) after each analysed frame (LiveFeed)
+        self.feed_failed = False
         self._threads = [threading.Thread(target=self._capture, daemon=True),
                          threading.Thread(target=self._analyse, daemon=True)]
 
@@ -561,7 +594,14 @@ class Recorder:
     def _analyse(self):
         while (item := self.queue.get()) is not None:
             index, t, frame = item
-            self.g.update(frame, t, index)
+            legs = self.g.update(frame, t, index)
+            if self.on_frame:
+                try:
+                    self.on_frame(t, frame, legs)
+                except Exception as e:  # noqa: BLE001 - the live feed is extra; the recording and the summaries go on
+                    if not self.feed_failed:
+                        print(f"Live feed error (reported once): {e!r}")
+                    self.feed_failed = True
             self.g.draw(frame)
             self.preview = frame
 
@@ -789,7 +829,7 @@ class SessionFollower:
         if res is None:   # nothing measurable yet: still check in, so the game knows a side camera follows this walk
             try:
                 post_json(f"{self.server}/api/gait", {"player": cur["player"], "source": "side-camera", "summary": None, "sessionId": cur["id"]}, timeout=5)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 - a missed check-in is harmless; the next one comes in LIVE_EVERY s
                 pass
             return
         try:
@@ -887,6 +927,220 @@ class HttpCap:
         self.ok = False
 
 
+# ---------------------------------------------------------------- live skeleton and moments (the dashboard's side view)
+class StrideWatcher:
+    """Live strides of one leg from the numbers update() already has. A heel strike is the ankle furthest in front
+    of the hip (Zeni et al. 2008, as in find_strikes), told once STRIKE_WINDOW s of later frames are in; each stride,
+    one strike to the next, gives its peak knee flexion, which in walking is the swing-phase peak."""
+
+    def __init__(self):
+        self.samples = []       # (t, ankle_x - hip_x, toe_x - heel_x, flexion, leg length px) of the last HIST_S s
+        self.checked = 0        # samples before this index were already judged as a strike or not
+        self.last_strike = None
+
+    def add(self, t, fwd, face, flex, leg_px):
+        """One frame of this leg. Returns (peak flexion, its t) when a stride just ended, else None."""
+        self.samples.append((t, fwd, face, flex, leg_px))
+        drop = bisect.bisect_left([s[0] for s in self.samples], t - HIST_S)
+        if drop:
+            del self.samples[:drop]
+            self.checked = max(0, self.checked - drop)
+        out = None
+        while self.checked < len(self.samples) and t - self.samples[self.checked][0] >= STRIKE_WINDOW:
+            i, self.checked = self.checked, self.checked + 1
+            ts = [s[0] for s in self.samples]
+            d = 1 if sum(s[2] for s in self.samples) > 0 else -1   # facing: the toes point where we walk
+            sig = [d * s[1] for s in self.samples]
+            lo, hi = bisect.bisect_left(ts, ts[i] - STRIKE_WINDOW), bisect.bisect_right(ts, ts[i] + STRIKE_WINDOW)
+            if sig[i] - statistics.median(sig) < MIN_SWING * self.samples[i][4] or sig[i] < max(sig[lo:hi]) \
+                    or (self.last_strike is not None and ts[i] - self.last_strike <= STRIKE_WINDOW):
+                continue
+            if self.last_strike is not None and STRIDE_RANGE[0] <= ts[i] - self.last_strike <= STRIDE_RANGE[1]:
+                peak = max((s for s in self.samples if self.last_strike < s[0] <= ts[i]), key=lambda s: s[3])
+                out = (peak[3], peak[0])
+            self.last_strike = ts[i]
+        return out
+
+
+class MomentJudge:
+    """Which moments to tell from the stride peaks, with the throttles: knee_low under KNEE_LOW_DEG, good at or over
+    KNEE_GOOD_DEG, uneven when the legs' means over their last 4 strides (2 at least) differ by more than UNEVEN_DEG."""
+
+    def __init__(self):
+        self.peaks = {s: deque(maxlen=4) for s in SIDES}
+        self.at = {}       # side -> t of its latest peak, where that leg's picture is taken from
+        self.last = {}     # (kind, side) -> t it was last told
+        self.count = 0
+
+    def stride(self, side, peak, t):
+        """One finished stride: its peak knee flexion, at time t. Returns the moments to tell, [] mostly."""
+        self.peaks[side].append(peak)
+        self.at[side] = t
+        out = []
+        if peak < KNEE_LOW_DEG:
+            out += self.tell("knee_low", side, peak, KNEE_LOW_DEG, t)
+        elif peak >= KNEE_GOOD_DEG:
+            out += self.tell("good", side, peak, KNEE_GOOD_DEG, t)
+        means = {s: statistics.mean(p) for s, p in self.peaks.items() if len(p) >= 2}
+        if len(means) == 2 and abs(means["L"] - means["R"]) > UNEVEN_DEG:
+            low = min(means, key=means.get)
+            out += self.tell("uneven", low, means[low], means["R" if low == "L" else "L"], self.at[low])
+        return out
+
+    def tell(self, kind, side, value, target, t):
+        key = (kind, None if kind == "good" else side)   # a good example once a minute, whichever leg
+        gap = GOOD_GAP_S if kind == "good" else MOMENT_GAP_S
+        if self.count >= MAX_MOMENTS or t - self.last.get(key, -math.inf) < gap:
+            return []
+        self.last[key], self.count = t, self.count + 1
+        return [{"kind": kind, "side": side, "valueDeg": round(value, 1), "targetDeg": target, "t": t}]
+
+
+def dashed(img, a, b, color, thick, dash=9):
+    """A dashed line from a to b, outlined in black."""
+    n = max(2, round(math.dist(a, b) / dash))
+    for i in range(0, n, 2):
+        p = (round(a[0] + (b[0] - a[0]) * i / n), round(a[1] + (b[1] - a[1]) * i / n))
+        q = (round(a[0] + (b[0] - a[0]) * (i + 1) / n), round(a[1] + (b[1] - a[1]) * (i + 1) / n))
+        cv2.line(img, p, q, (0, 0, 0), thick + 3, cv2.LINE_AA)
+        cv2.line(img, p, q, color, thick, cv2.LINE_AA)
+
+
+def label(img, text, at, color, scale=0.8):
+    """A number with a degree mark (Hershey fonts have none), outlined so it reads on any background."""
+    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)
+    for c, thick in (((0, 0, 0), 5), (color, 2)):
+        cv2.putText(img, text, at, cv2.FONT_HERSHEY_SIMPLEX, scale, c, thick, cv2.LINE_AA)
+        cv2.circle(img, (at[0] + tw + 6, at[1] - th + 3), 4, c, thick - 1, cv2.LINE_AA)
+
+
+def draw_moment(frame, legs, side, value, target):
+    """The legs cut out of a frame (hips to toes plus a margin, long side at most MOMENT_PX) with thick sticks for
+    both legs, `side` bright, the knee flexion `value` as an arc with its number and a dashed ghost shin at `target`.
+    legs: update()'s {"L": Leg, "R": Leg} of that frame, holding `side`. Returns JPEG bytes, None for an empty crop."""
+    h, w = frame.shape[:2]
+    pts = [p for leg in legs.values() for p in (leg.hip, leg.knee, leg.ankle, leg.heel, leg.toe)]
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    m = max(24.0, 0.15 * (max(ys) - min(ys)))
+    x0, y0 = max(0, int(min(xs) - m)), max(0, int(min(ys) - m))
+    x1, y1 = min(w, int(max(xs) + m) + 1), min(h, int(max(ys) + m) + 1)
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return None
+    k = min(1.0, MOMENT_PX / max(x1 - x0, y1 - y0))
+    img = cv2.resize(frame[y0:y1, x0:x1], (round((x1 - x0) * k), round((y1 - y0) * k))) if k < 1 else frame[y0:y1, x0:x1].copy()
+    at = lambda p: (round((p[0] - x0) * k), round((p[1] - y0) * k))
+    bright = (60, 255, 255)   # BGR yellow; the other leg light blue
+    for s, leg in sorted(legs.items(), key=lambda kv: kv[0] == side):   # the leg in question drawn last, on top
+        color, thick = (bright, 6) if s == side else ((255, 200, 120), 3)
+        chain = [at(p) for p in (leg.hip, leg.knee, leg.ankle, leg.toe)]
+        for a, b in pairwise(chain):
+            cv2.line(img, a, b, (0, 0, 0), thick + 3, cv2.LINE_AA)
+            cv2.line(img, a, b, color, thick, cv2.LINE_AA)
+        for p in chain:
+            cv2.circle(img, p, thick + 1, color, -1, cv2.LINE_AA)
+    leg = legs[side]
+    hip, knee, ankle = at(leg.hip), at(leg.knee), at(leg.ankle)
+    straight = math.degrees(math.atan2(knee[1] - hip[1], knee[0] - hip[0]))   # where the shin points with a straight knee
+    shin = math.degrees(math.atan2(ankle[1] - knee[1], ankle[0] - knee[0]))
+    bend = ((shin - straight + 180) % 360) - 180                               # the flexion, signed as seen on screen
+    r = max(18, round(0.35 * math.dist(knee, ankle)))
+    cv2.ellipse(img, knee, (r, r), 0, min(straight, straight + bend), max(straight, straight + bend), bright, 3, cv2.LINE_AA)
+    ghost, length = math.radians(straight + math.copysign(target, bend)), math.dist(knee, ankle)
+    dashed(img, knee, (round(knee[0] + length * math.cos(ghost)), round(knee[1] + length * math.sin(ghost))), (255, 255, 255), 3)
+    mid = math.radians(straight + bend / 2)
+    label(img, f"{round(value)}", (round(knee[0] + (r + 12) * math.cos(mid)), round(knee[1] + (r + 12) * math.sin(mid)) + 10), bright)
+    label(img, f"{round(target)}", (round(knee[0] + 0.75 * length * math.cos(ghost)) + 10, round(knee[1] + 0.75 * length * math.sin(ghost))), (255, 255, 255))
+    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, MOMENT_JPEG_Q])
+    return buf.tobytes() if ok else None
+
+
+class Poster:
+    """Sends the live skeleton and the moments to the server from its own thread, so the frame loop never waits on
+    the network: a pose still waiting is replaced by the newer one, moments queue up. A path that fails is logged
+    once (an older server has no /api/gait/moment, a player without consent gets 403) and tried again next time."""
+
+    def __init__(self, server):
+        self.server = server.rstrip("/")
+        self.pose, self.moments, self.failed = None, deque(), set()
+        self.cond = threading.Condition()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def send_pose(self, event):
+        with self.cond:
+            self.pose = event
+            self.cond.notify()
+
+    def send_moment(self, body):
+        with self.cond:
+            self.moments.append(body)
+            self.cond.notify()
+
+    def _run(self):
+        while True:
+            with self.cond:
+                while self.pose is None and not self.moments:
+                    self.cond.wait()
+                pose, self.pose = self.pose, None
+                moment = self.moments.popleft() if self.moments else None
+            if pose is not None:
+                self._post("/api/events", {"events": [pose]}, 3)
+            if moment is not None:
+                self._post("/api/gait/moment", moment, 10)
+
+    def _post(self, path, body, timeout):
+        try:
+            post_json(f"{self.server}{path}", body, timeout=timeout)
+        except (OSError, ValueError) as e:
+            if path not in self.failed:
+                print(f"POST {path} failed ({e}); carrying on, the dashboard just misses it")
+                self.failed.add(path)
+        else:
+            self.failed.discard(path)
+
+
+class LiveFeed:
+    """What the side camera tells the dashboard while it records: the live skeleton as a "pose" event (at most one
+    per POSE_EVERY s) and, during a game session, the moments: when a stride's knee lift was low, uneven or good,
+    the leg picture from the top of that step, drawn on, goes to /api/gait/moment. Runs on the analysis thread
+    after each frame (Recorder.on_frame); the network is the Poster's."""
+
+    def __init__(self, poster, rec, follower):
+        self.poster, self.rec, self.follower = poster, rec, follower
+        self.last_pose = self.last_kept = -math.inf
+        self.ring = deque(maxlen=round(RING_FPS * RING_S))   # (t, frame, legs): the recent frames a moment is cut from
+        self.watch = {s: StrideWatcher() for s in SIDES}
+        self.session, self.judge = None, MomentJudge()
+
+    def frame(self, t, frame, legs):
+        pose = self.rec.g.pose
+        if pose and t - self.last_pose >= POSE_EVERY:
+            self.last_pose = t
+            self.poster.send_pose({"kind": "pose", "source": "side", "t": round(self.rec.start_epoch + t, 3), **pose})
+        cur = self.follower.current
+        if cur and cur["id"] != self.session:   # a new game: its own dozen, its own throttles
+            self.session, self.judge = cur["id"], MomentJudge()
+        if t - self.last_kept >= 1 / RING_FPS:
+            self.ring.append((t, frame.copy(), legs))   # a copy: the recorder draws its overlay on the frame next
+            self.last_kept = t
+        for s, leg in legs.items():
+            stride = self.watch[s].add(t, leg.ankle[0] - leg.hip[0], leg.toe[0] - leg.heel[0], 180 - leg.angle,
+                                       math.dist(leg.hip, leg.knee) + math.dist(leg.knee, leg.ankle))
+            if stride and cur and stride[1] >= cur["start"]:
+                for m in self.judge.stride(s, *stride):
+                    self.tell(cur, m)
+
+    def tell(self, cur, m):
+        """Cut the leg picture nearest the moment's time out of the ring, draw it, hand it to the poster."""
+        near = min((e for e in self.ring if m["side"] in e[2]), key=lambda e: abs(e[0] - m["t"]), default=None)
+        if near is None or abs(near[0] - m["t"]) > 0.5:
+            return
+        jpg = draw_moment(near[1], near[2], m["side"], m["valueDeg"], m["targetDeg"])
+        if jpg:
+            self.poster.send_moment({"sessionId": cur["id"], "kind": m["kind"], "side": m["side"], "valueDeg": m["valueDeg"],
+                                     "targetDeg": m["targetDeg"], "t": round(m["t"] - cur["start"], 2),
+                                     "jpg": base64.b64encode(jpg).decode()})
+
+
 def main():
     p = argparse.ArgumentParser(description="Gait analysis demo (q to stop)")
     p.add_argument("--video", help="recorded side-view video")
@@ -925,10 +1179,12 @@ def main():
     g = GaitTracker(args.model, csv_path=f"out/gait_{stamp}.csv")
     base = f"out/gait_{stamp}"
     rec = Recorder(cap, g, f"{base}.mp4", live=not args.video)
-    rec.start()
     follower = None
     if args.server and not args.video:
         follower = SessionFollower(args.server, rec, base, args.player, args.once)
+        rec.on_frame = LiveFeed(Poster(args.server), rec, follower).frame   # the dashboard's live skeleton and moments
+    rec.start()
+    if follower:
         threading.Thread(target=follower.run, daemon=True).start()
     sender = ShoeSender(args.server, source="side") if args.server and not args.video and not args.http_frames else None   # the dashboard's side view (a phone's pictures reach it through the server already)
     last_post = 0.0

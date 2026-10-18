@@ -1,579 +1,354 @@
 "use client"
 
+/** One walk in full: the plain words, Maya's note, the numbers, the moments in pictures, the cadence through the
+ * walk, the side camera's measurements and the review itself. */
+
 import Link from "next/link"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback } from "react"
 import { useSearchParams } from "next/navigation"
-import confetti from "canvas-confetti"
-import { motion, useReducedMotion } from "motion/react"
-import { ArrowLeft, Pause, Play, Volume2, VolumeX } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { NumberTicker } from "@/components/ui/number-ticker"
-import { formatLevel } from "@/lib/format"
-import { GardenStage } from "@/components/garden-stage"
-import { levelById } from "@/lib/levels"
-import {
-  MIN_SCORED_STEPS,
-  STEP_MS,
-  WAVE_COUNT,
-  WAVE_STEPS,
-  chipLights,
-  createLive,
-  summarize,
-  takeStep,
-  tick,
-} from "@/lib/scoring"
-import { GAME_BUTTON, ZOMBIE, sticker } from "@/lib/sticker"
-import { useStride } from "@/lib/store"
-import type { Foot, LiveState, Outcome, RoundMetrics } from "@/lib/types"
+import { motion } from "motion/react"
+import { ArrowLeft, Play } from "lucide-react"
+import { PageHeader } from "@/components/page-header"
+import { BlurFade } from "@/components/ui/blur-fade"
+import { TimelineChart } from "@/components/timeline-chart"
+import { DemoTag, EmptyNote, LEFT, RIGHT, MomentCard, NumberGrid, ReviewChip, WalkWords, sidesLabel, walkFigures, type Figure } from "@/components/walk-bits"
+import { api, useMounted, usePoll, type Finding } from "@/lib/game"
+import { useGame } from "@/lib/game-data"
+import { GAME_BUTTON, MAYA_AVATAR, sticker } from "@/lib/sticker"
+import { clockLabel, durationLabel, mayaLine, reviewOf, walkFromSession, whenLabel, type Walk } from "@/lib/walks"
 import { cn } from "cn"
 
-type Phase = "brief" | "count" | "live" | "results"
-
-type ResultState = {
-  outcome: Outcome
-  metrics: RoundMetrics
-  partial: boolean
-}
+const SIDE_NAME = { L: "left", R: "right", both: "both sides", none: "" } as const
 
 export function SessionView() {
   const params = useSearchParams()
-  const requested = Number(params.get("level"))
-  const { state, derived, completeSession } = useStride()
-  const level = Number.isFinite(requested) && requested > 0 ? levelById(requested) : derived.prescribed
-  const known = Number.isFinite(requested) ? requested === level.id : true
-  const locked = level.id > state.unlockedThrough
-  const [phase, setPhase] = useState<Phase>("brief")
-  const [count, setCount] = useState(3)
-  const [live, setLive] = useState<LiveState | null>(null)
-  const [paused, setPaused] = useState(false)
-  const [sound, setSound] = useState(false)
-  const [earlyNote, setEarlyNote] = useState("")
-  const [result, setResult] = useState<ResultState | null>(null)
-  const pausedRef = useRef(false)
-  const savedRef = useRef(false)
+  const id = params.get("id") ?? ""
+  const { walks, loading, player } = useGame()
+  const mounted = useMounted()
+  const listed = walks.find((walk) => walk.id === id) ?? null
+  const real = Boolean(id) && !(listed?.demo ?? false)
+  const loadSession = useCallback(() => api.session(id), [id])
+  const loadMoments = useCallback(() => api.moments(id), [id])
+  const full = usePoll(loadSession, 15000, real, id)
+  const moments = usePoll(loadMoments, 15000, real, id)
+  const walk: Walk | null = full.data ? walkFromSession(full.data) : listed
+  const now = new Date()
 
-  useEffect(() => {
-    pausedRef.current = paused
-  }, [paused])
-
-  useEffect(() => {
-    if (phase !== "count") return
-    const timer = window.setTimeout(() => {
-      if (count <= 1) {
-        setLive(createLive(performance.now()))
-        setPhase("live")
-        setCount(0)
-        return
-      }
-      setCount(count - 1)
-    }, 800)
-    return () => window.clearTimeout(timer)
-  }, [phase, count])
-
-  useEffect(() => {
-    if (phase !== "live") return
-    const timer = window.setInterval(() => {
-      if (pausedRef.current) return
-      setLive((current) => (current && !current.finished ? tick(current, performance.now()) : current))
-    }, 100)
-    return () => window.clearInterval(timer)
-  }, [phase])
-
-  useEffect(() => {
-    if (phase !== "live" || !sound || paused) return
-    const audio = new AudioContext()
-    let next = audio.currentTime + 0.15
-    const timer = window.setInterval(() => {
-      while (next < audio.currentTime + 0.18) {
-        const osc = audio.createOscillator()
-        const gain = audio.createGain()
-        osc.type = "sine"
-        osc.frequency.value = 740
-        gain.gain.setValueAtTime(0.0001, next)
-        gain.gain.exponentialRampToValueAtTime(0.045, next + 0.01)
-        gain.gain.exponentialRampToValueAtTime(0.0001, next + 0.07)
-        osc.connect(gain)
-        gain.connect(audio.destination)
-        osc.start(next)
-        osc.stop(next + 0.08)
-        next += STEP_MS / 1000
-      }
-    }, 50)
-    return () => {
-      window.clearInterval(timer)
-      void audio.close()
+  if (!id) {
+    return <Missing title="Which walk?" body="Open a walk from the sessions list." />
+  }
+  if (!walk) {
+    if (loading || (real && !full.polled)) {
+      return (
+        <div className="grid gap-4" aria-busy="true">
+          <div className="h-24 animate-pulse rounded-[26px] border-[2.5px] border-[#1b2f27] bg-[#0d171c] motion-reduce:animate-none" />
+          <div className="h-64 animate-pulse rounded-[26px] border-[2.5px] border-[#1b2f27] bg-[#0d171c] motion-reduce:animate-none" />
+        </div>
+      )
     }
-  }, [phase, sound, paused])
-
-  useEffect(() => {
-    if (phase !== "live") return
-    function onKey(event: KeyboardEvent) {
-      if (event.repeat) return
-      if (["ArrowLeft", "ArrowRight", "KeyA", "KeyD"].includes(event.code)) {
-        event.preventDefault()
-      }
-      if (pausedRef.current) return
-      const now = performance.now()
-      if (event.code === "ArrowLeft" || event.code === "KeyA") {
-        setLive((current) => (current && !current.finished ? takeStep(current, "L", now) : current))
-      }
-      if (event.code === "ArrowRight" || event.code === "KeyD") {
-        setLive((current) => (current && !current.finished ? takeStep(current, "R", now) : current))
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [phase])
-
-  function step(foot: Foot) {
-    setLive((current) => (current && !current.finished ? takeStep(current, foot, performance.now()) : current))
+    return <Missing title="That walk is not on record." body="It may belong to another player, or the server was restarted with a fresh store." />
   }
 
-  const finish = useCallback((source: LiveState, partial: boolean) => {
-    const metrics = summarize(source)
-    const elapsed = Math.max(1, Math.round(source.elapsed / 60000))
-    const outcome = completeSession({
-      levelId: level.id,
-      levelName: level.name,
-      durationMin: elapsed,
-      walkingScore: metrics.walkingScore,
-      pace: metrics.pace,
-      symmetry: metrics.symmetry,
-      steps: metrics.steps,
-      source: "form-round",
-    })
-    setResult({ outcome, metrics, partial })
-    setPaused(false)
-    setPhase("results")
-  }, [completeSession, level.id, level.name])
+  const review = reviewOf(walk)
+  const maya = mayaLine(walk)
+  const list = (moments.data ?? []).slice().reverse()
+  const extras: Figure[] = [
+    { label: "Time on the pad", value: durationLabel(walk.seconds), tone: "white" },
+    { label: "High steps L / R", value: sidesLabel(walk.highLiftCm, 1), unit: "cm", tone: "violet", hint: walk.shoeMode ? "forward swing" : "lift" },
+    { label: "Steps L / R", value: sidesLabel(walk.stepsByFoot), tone: "white" },
+    {
+      label: "Flowers L / R lane",
+      value: walk.lanes && (walk.lanes.L[1] || walk.lanes.R[1]) ? `${walk.lanes.L[0]}/${walk.lanes.L[1]} · ${walk.lanes.R[0]}/${walk.lanes.R[1]}` : null,
+      tone: "lime",
+      hint: "hit / judged",
+    },
+    { label: "Bouquets", value: walk.bouquets, tone: "rose" },
+    { label: "Score", value: walk.score, unit: "pts", tone: "amber" },
+  ]
+  const gaitFigures: Figure[] = [
+    { label: "Knee bend L / R", value: sidesLabel(walk.kneeDeg), unit: "°", tone: "violet", hint: "peak, in swing" },
+    { label: "Stride time L / R", value: sidesLabel(walk.strideS, 2), unit: "s", tone: "white" },
+    { label: "Stride variation L / R", value: sidesLabel(walk.strideCv), unit: "%", tone: "amber", hint: "lower is steadier" },
+    { label: "Toe lift L / R", value: sidesLabel(walk.toeLiftCm, 1), unit: "cm", tone: "teal" },
+    { label: "Heel first L / R", value: sidesLabel(walk.heelFirstPct), unit: "%", tone: "white" },
+    { label: "Cadence, camera", value: walk.sideCadence !== null ? Math.round(walk.sideCadence) : null, unit: "/min", tone: "amber" },
+    { label: "Camera frames", value: walk.cameraFps !== null ? walk.cameraFps.toFixed(1) : null, unit: "/s", tone: "white" },
+  ]
+  const hasGait = gaitFigures.some((figure) => figure.value !== null)
+  const quality = walk.review?.dataQuality ?? null
 
-  useEffect(() => {
-    if (phase !== "live" || !live?.finished) return
-    const snapshot = live
-    const timer = window.setTimeout(() => {
-      if (savedRef.current) return
-      savedRef.current = true
-      finish(snapshot, false)
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [finish, live, phase])
-
-  function endEarly() {
-    if (!live) return
-    if (live.events.length < MIN_SCORED_STEPS) {
-      setEarlyNote(`Take at least ${MIN_SCORED_STEPS} steps before this round can be scored.`)
-      return
-    }
-    savedRef.current = true
-    finish(live, true)
-  }
-
-  if (!known) {
-    return (
-      <CenterNote
-        title="That stage is not on the path."
-        body="The ten stages are numbered 1 through 10."
+  return (
+    <div>
+      <Link href="/activity" className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-white/80 hover:text-white">
+        <ArrowLeft className="size-4" /> Sessions
+      </Link>
+      <PageHeader
+        eyebrow={mounted ? `WALK · ${whenLabel(walk.at, now).toUpperCase()} ${clockLabel(walk.at).toUpperCase()} · ${durationLabel(walk.seconds).toUpperCase()} · ${player.toUpperCase()}` : "WALK"}
+        title={walk.home ? "Gus got home" : "A short walk"}
+        subtitle={review?.overview ?? walk.note ?? undefined}
+        extra={
+          <p className="mt-3 flex flex-wrap items-center gap-2">
+            <ReviewChip walk={walk} />
+            {walk.demo ? <DemoTag /> : null}
+            {walk.verified ? <span className="rounded-full border-2 border-white/15 px-2.5 py-0.5 text-xs font-semibold text-white/60">verified walk</span> : null}
+            {walk.rewarded ? <span className="rounded-full border-2 border-[#ffb21e]/60 bg-[#2a1f0e] px-2.5 py-0.5 text-xs font-semibold text-[#ffd76a]">reward unlocked</span> : null}
+          </p>
+        }
       />
+
+      <div className="grid gap-5">
+        <BlurFade delay={0.1}>
+          <section className={sticker("ink", "p-5")}>
+            <WalkWords walk={walk} moments={moments.data ?? []} />
+            {maya ? (
+              <div className="mt-4 flex gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={MAYA_AVATAR} alt="" className="mt-1 size-10 shrink-0 rounded-full bg-[#ffd6e7] object-contain ring-2 ring-[#ff3d8b]" />
+                <motion.p
+                  className="rounded-2xl rounded-tl-sm border-[2.5px] border-[#0b1a14] bg-white px-4 py-3 text-[15px] font-medium leading-6 text-[#0b1a14] shadow-[3px_3px_0_#9c2457]"
+                  initial={{ opacity: 0, scale: 0.9, originX: 0 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ type: "spring", stiffness: 260, damping: 18, delay: 0.5 }}
+                >
+                  {maya}
+                </motion.p>
+              </div>
+            ) : null}
+          </section>
+        </BlurFade>
+
+        <BlurFade delay={0.16}>
+          <section className={sticker("ink", "p-5")}>
+            <h2 className="font-display text-2xl tracking-wide">THE NUMBERS</h2>
+            <NumberGrid figures={[...walkFigures(walk), ...extras]} className="mt-3 sm:grid-cols-4" delay={0.2} />
+          </section>
+        </BlurFade>
+
+        <BlurFade delay={0.22}>
+          <section className={sticker("ink", "p-5")}>
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              <h2 className="font-display text-2xl tracking-wide">MOMENTS</h2>
+              <p className="text-sm text-white/60">What the side camera saw, in pictures, with the sticks drawn and a plain explanation.</p>
+            </div>
+            {list.length ? (
+              <ul className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {list.map((moment, index) => (
+                  <li key={moment.id}>
+                    <MomentCard moment={moment} delay={Math.min(index, 8) * 0.05} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm leading-6 text-white/60">
+                {walk.demo
+                  ? "Demo walks have no camera moments."
+                  : moments.polled
+                    ? "No moments were kept for this walk. With the phone at the side of the pad, the next walk shows them here."
+                    : "Looking for the moments…"}
+              </p>
+            )}
+          </section>
+        </BlurFade>
+
+        {walk.timeline.length >= 2 ? (
+          <BlurFade delay={0.28}>
+            <section className={sticker("ink", "p-5")}>
+              <h2 className="font-display text-2xl tracking-wide">CADENCE THROUGH THE WALK</h2>
+              <p className="text-sm text-white/60">Steps a minute, sampled every 15 seconds, through the acts of the walk.</p>
+              <TimelineChart points={walk.timeline} segments={walk.segments} seconds={walk.seconds} />
+            </section>
+          </BlurFade>
+        ) : null}
+
+        {hasGait || quality ? (
+          <BlurFade delay={0.34}>
+            <section className={sticker("violet", "p-5")}>
+              <div className="flex flex-wrap items-baseline justify-between gap-3">
+                <h2 className="font-display text-2xl tracking-wide">THE SIDE CAMERA</h2>
+                {walk.nearSide ? (
+                  <p className="text-sm text-white/65">
+                    The <span className="font-semibold" style={{ color: walk.nearSide === "L" ? LEFT : RIGHT }}>{SIDE_NAME[walk.nearSide]}</span> leg was nearer the camera and is measured best.
+                  </p>
+                ) : null}
+              </div>
+              {hasGait ? <NumberGrid figures={gaitFigures} className="mt-3 sm:grid-cols-4" delay={0.3} /> : null}
+              {quality ? (
+                <div className="mt-4 rounded-2xl bg-black/25 p-4">
+                  <p className="text-[11px] font-bold tracking-[0.16em] text-[#c9a8ff]">DATA QUALITY · {quality.level.toUpperCase()}</p>
+                  <ul className="mt-1.5 grid gap-1 text-sm leading-5 text-white/75">
+                    {quality.issues.map((issue) => (
+                      <li key={issue}>{issue}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </section>
+          </BlurFade>
+        ) : null}
+
+        <BlurFade delay={0.4}>
+          <ReviewSection walk={walk} />
+        </BlurFade>
+
+        <div className="flex flex-wrap gap-3">
+          <Link href="/play" className={GAME_BUTTON}>
+            <Play className="size-5 fill-current" /> LIVE WALK
+          </Link>
+          <Link href="/therapist" className="inline-flex h-12 items-center rounded-2xl border-[2.5px] border-[#2c4639] px-4 text-sm font-medium text-white transition hover:bg-white/10">
+            Ask Maya about this walk
+          </Link>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ReviewSection({ walk }: { walk: Walk }) {
+  const review = reviewOf(walk)
+  const state = walk.review
+  if (!state) {
+    return (
+      <section className={sticker("rose", "p-5")}>
+        <h2 className="font-display text-2xl tracking-wide">MAYA&apos;S REVIEW</h2>
+        <p className="mt-2 text-sm leading-6 text-white/75">
+          {walk.demo ? "Demo walks carry the coach's note only." : "No side camera on this walk, so Maya wrote the coach's note from the game alone."}
+        </p>
+        {walk.note ? <p className="mt-3 rounded-2xl bg-black/25 px-4 py-3 text-[15px] leading-6 text-white/90">{walk.note}</p> : null}
+      </section>
     )
   }
-
+  if (!review) {
+    return (
+      <section className={sticker("rose", "p-5")}>
+        <h2 className="font-display text-2xl tracking-wide">MAYA&apos;S REVIEW</h2>
+        <p className="mt-2 text-sm leading-6 text-white/75">
+          {state.status === "waiting" && "Waiting for the side camera to send the walk. This page looks again by itself."}
+          {state.status === "reviewing" && "Maya is reading the numbers now. This page looks again by itself."}
+          {state.status === "failed" && `The review could not finish${state.reason ? `: ${state.reason}` : ""}.`}
+        </p>
+        {walk.note ? <p className="mt-3 rounded-2xl bg-black/25 px-4 py-3 text-[15px] leading-6 text-white/90">{walk.note}</p> : null}
+      </section>
+    )
+  }
+  const next = review.nextSession ?? { liftCm: null, spacingCm: null, minCadence: null, why: "" }
+  const changes = [
+    ["liftCm", "lift target", "cm"],
+    ["spacingCm", "flower spacing", "cm"],
+    ["minCadence", "minimum pace", "steps/min"],
+  ].filter(([key]) => typeof next[key as keyof typeof next] === "number")
   return (
-    <div className="relative min-h-dvh overflow-hidden bg-[#070b10] text-white">
-      <GardenStage />
-      <div className="absolute inset-0 bg-[#070b10]/40" />
-      <div className="relative z-30 mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-4 py-5 sm:px-6">
-        <div className="flex items-center justify-between gap-3">
-          <Link href="/play" className="inline-flex items-center gap-2 text-sm font-semibold text-white/90 hover:text-white">
-            <ArrowLeft className="size-4" />
-            Path
-          </Link>
-          {phase === "live" ? (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setSound((value) => !value)}
-                className="grid size-10 place-items-center rounded-full bg-white/15 backdrop-blur"
-                aria-label={sound ? "Mute metronome" : "Play metronome"}
-                aria-pressed={sound}
-              >
-                {sound ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}
-              </button>
-              <button
-                type="button"
-                onClick={() => setPaused(true)}
-                className="grid size-10 place-items-center rounded-full bg-white/15 backdrop-blur"
-                aria-label="Pause"
-              >
-                <Pause className="size-4" />
-              </button>
-            </div>
+    <section className={sticker("rose", "p-5")}>
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h2 className="font-display text-2xl tracking-wide">MAYA&apos;S REVIEW</h2>
+        <p className="text-xs text-white/55">
+          {state.source === "gemini" ? `Gemini${state.model ? ` · ${state.model}` : ""}` : "rules on this computer"}
+          {state.filledByRules?.length ? ` · ${state.filledByRules.length} part${state.filledByRules.length === 1 ? "" : "s"} by the rules` : ""}
+        </p>
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div className="rounded-2xl bg-black/25 p-4">
+          <p className="text-[11px] font-bold tracking-[0.16em] text-[#9cff5a]">STRENGTHS</p>
+          {review.strengths.length ? (
+            <ul className="mt-1.5 grid gap-1.5 text-sm leading-5 text-white/85">
+              {review.strengths.map((item) => (
+                <li key={item.text}>{item.text}</li>
+              ))}
+            </ul>
           ) : (
-            <span className="font-display rounded-full border-2 border-[#9cff5a] bg-[#12261a]/80 px-3 py-1 text-sm tracking-wide text-[#9cff5a]">
-              LEVEL {formatLevel(level.id)}
-            </span>
+            <p className="mt-1.5 text-sm text-white/60">Nothing singled out this time.</p>
           )}
         </div>
-
-        {phase === "brief" ? (
-          <Brief
-            levelName={level.name}
-            minutes={level.minutes}
-            summary={level.summary}
-            focus={level.focus}
-            locked={locked}
-            sensorsReady={state.sensors.camera && state.sensors.trackpad}
-            onStart={() => {
-              savedRef.current = false
-              setCount(3)
-              setPhase("count")
-            }}
-          />
+        <div className="rounded-2xl bg-black/25 p-4">
+          <p className="text-[11px] font-bold tracking-[0.16em] text-[#ffb21e]">FINDINGS</p>
+          {review.findings.length ? (
+            <ul className="mt-1.5 grid gap-1.5 text-sm leading-5 text-white/85">
+              {review.findings.map((item: Finding) => (
+                <li key={item.text}>
+                  <span className="font-semibold text-[#ffd76a]">
+                    {item.area}
+                    {item.side !== "none" ? `, ${SIDE_NAME[item.side]}` : ""}
+                  </span>{" "}
+                  <span className="text-white/50">({item.confidence})</span> {item.text}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1.5 text-sm text-white/60">No findings: the walk looked steady.</p>
+          )}
+        </div>
+        {review.gameVsGait.length ? (
+          <Block label="THE GAME AND THE WALK" items={review.gameVsGait.map((item) => item.text)} />
         ) : null}
-
-        {phase === "count" ? (
-          <div className="flex flex-1 flex-col items-center justify-center text-center">
-            <p className="text-sm font-bold tracking-[0.2em] text-[#2de2c4]">FIND YOUR CADENCE</p>
-            <motion.p
-              key={count}
-              className="font-display text-outline mt-3 text-[10rem] leading-none text-[#ffd76a] tabular-nums"
-              initial={{ scale: 2.2, opacity: 0, rotate: -12 }}
-              animate={{ scale: 1, opacity: 1, rotate: 0 }}
-              transition={{ type: "spring", stiffness: 420, damping: 14 }}
-            >
-              {count}
-            </motion.p>
-          </div>
-        ) : null}
-
-        {phase === "live" && live ? (
-          <LiveHud
-            live={live}
-            levelName={level.name}
-            paused={paused}
-            earlyNote={earlyNote}
-            onStep={step}
-            onResume={() => {
-              setPaused(false)
-              setEarlyNote("")
-            }}
-            onEnd={endEarly}
-          />
-        ) : null}
-
-        {phase === "results" && result ? (
-          <Results levelName={level.name} result={result} onAgain={() => {
-            setResult(null)
-            setLive(null)
-            setEarlyNote("")
-            setPhase("brief")
-          }} />
-        ) : null}
+        {review.actComparison ? <Block label="WALKING, FLOWERS, SEEDS" text={review.actComparison} /> : null}
+        {review.trend ? <Block label="TREND" text={review.trend} /> : null}
+        <div className="rounded-2xl bg-black/25 p-4">
+          <p className="text-[11px] font-bold tracking-[0.16em] text-[#2de2c4]">CUES FOR NEXT TIME</p>
+          <ul className="mt-1.5 grid gap-1.5">
+            {review.cues.map((cue, index) => (
+              <li key={cue} className="flex items-center gap-2 text-sm text-white/90">
+                <span className="grid size-6 shrink-0 place-items-center rounded-full bg-[#9cff5a] text-xs font-bold text-[#0b1a14]">{index + 1}</span>
+                {cue}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="rounded-2xl bg-black/25 p-4">
+          <p className="text-[11px] font-bold tracking-[0.16em] text-[#c9a8ff]">NEXT SESSION</p>
+          <p className="mt-1.5 text-sm leading-5 text-white/85">
+            {changes.length
+              ? `Suggested: ${changes.map(([key, label, unit]) => `${label} ${next[key as keyof typeof next]} ${unit}`).join(", ")}.`
+              : "No change to the settings."}{" "}
+            {next.why}
+          </p>
+          {changes.length ? (
+            <Link href="/therapist#settings" className="mt-2 inline-block text-sm font-semibold text-[#c9a8ff] hover:underline">
+              Apply in the therapist settings
+            </Link>
+          ) : null}
+        </div>
+        <Block label="FOR THE PARENT" text={review.parentNote} />
+        <Block label="FILMING THE NEXT WALK" text={review.nextRecording} />
       </div>
-    </div>
+      <details className="mt-4 rounded-2xl bg-black/25 p-4">
+        <summary className="cursor-pointer text-[11px] font-bold tracking-[0.16em] text-white/60">FOR THE THERAPIST · NUMBERS AND IDS</summary>
+        <p className="mt-2 font-mono text-xs leading-5 text-white/75">{review.therapistNote}</p>
+        {state.withheld?.length ? (
+          <ul className="mt-2 grid gap-1 text-xs leading-5 text-white/55">
+            {state.withheld.map((item) => (
+              <li key={item.id}>
+                {item.id}: {item.reason}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </details>
+    </section>
   )
 }
 
-function Brief({
-  levelName,
-  minutes,
-  summary,
-  focus,
-  locked,
-  sensorsReady,
-  onStart,
-}: {
-  levelName: string
-  minutes: number
-  summary: string
-  focus: readonly string[]
-  locked: boolean
-  sensorsReady: boolean
-  onStart: () => void
-}) {
+function Block({ label, text, items }: { label: string; text?: string; items?: string[] }) {
   return (
-    <div className="flex flex-1 items-end py-6 sm:items-center">
-      <motion.section
-        initial={{ opacity: 0, y: 30, rotate: -1 }}
-        animate={{ opacity: 1, y: 0, rotate: 0 }}
-        transition={{ type: "spring", stiffness: 220, damping: 22 }}
-        className={sticker("ink", "w-full bg-[#0d171c]/95 p-6 backdrop-blur sm:p-8")}
-      >
-        <p className="text-[11px] font-bold tracking-[0.16em] text-[#2de2c4]">FORM ROUND · ABOUT A MINUTE</p>
-        <h1 className="font-display text-outline mt-2 text-4xl leading-none tracking-wide text-[#ffd76a] sm:text-5xl">{levelName.toUpperCase()}</h1>
-        <p className="mt-3 text-[15px] leading-6 text-white/80">{summary}</p>
-        <p className="mt-3 text-sm leading-6 text-white/65">
-          On the projected floor this goal is {minutes} minutes of the same plant walk. The floor scores pace and symmetry.
-          This round uses that goal&apos;s cues. Two waves, {WAVE_STEPS} steps each.
-        </p>
-        <ol className="mt-4 flex flex-wrap gap-2">
-          {focus.map((item, index) => (
-            <li key={item} className="rounded-full border-2 border-[#9cff5a]/60 bg-[#12261a] px-3 py-1 text-sm font-semibold text-[#9cff5a]">
-              {index + 1}. {item}
-            </li>
+    <div className="rounded-2xl bg-black/25 p-4">
+      <p className="text-[11px] font-bold tracking-[0.16em] text-white/60">{label}</p>
+      {text ? <p className="mt-1.5 text-sm leading-5 text-white/85">{text}</p> : null}
+      {items ? (
+        <ul className="mt-1.5 grid gap-1.5 text-sm leading-5 text-white/85">
+          {items.map((item) => (
+            <li key={item}>{item}</li>
           ))}
-        </ol>
-        <ul className="mt-4 grid gap-1 text-sm text-white/60">
-          <li>Left foot: A or the left arrow. Right foot: D or the right arrow.</li>
-          <li>Keep the same time between steps, and switch feet each time.</li>
-          <li>Stop if anything hurts. A form round is not worth a sore knee.</li>
         </ul>
-        {locked ? (
-          <p className={sticker("amber", "mt-4 rounded-2xl px-4 py-3 text-sm text-white/85 shadow-none")}>
-            This goal is still locked. Score 80 on the current goal of your plan to open it.
-          </p>
-        ) : null}
-        {!sensorsReady ? (
-          <p className={sticker("amber", "mt-4 rounded-2xl px-4 py-3 text-sm text-white/85 shadow-none")}>
-            The camera and trackpad both need to answer before a scored walk. Open the movement kit from the path and run a connection check.
-          </p>
-        ) : null}
-        <button type="button" className={cn(GAME_BUTTON, "mt-6 disabled:opacity-40")} disabled={locked || !sensorsReady} onClick={onStart}>
-          <Play className="size-5 fill-current" /> START FORM ROUND
-        </button>
-      </motion.section>
-    </div>
-  )
-}
-
-function LiveHud({
-  live,
-  levelName,
-  paused,
-  earlyNote,
-  onStep,
-  onResume,
-  onEnd,
-}: {
-  live: LiveState
-  levelName: string
-  paused: boolean
-  earlyNote: string
-  onStep: (foot: Foot) => void
-  onResume: () => void
-  onEnd: () => void
-}) {
-  const lights = chipLights(live)
-  const seconds = Math.max(0, Math.round(live.elapsed / 1000))
-  const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
-  const chips = [
-    { label: "Steady pace", on: lights.pace },
-    { label: "Even stride", on: lights.stride },
-  ]
-
-  return (
-    <div className="flex flex-1 flex-col justify-between pt-6">
-      <div>
-        <p className="text-sm text-white/75">{levelName}</p>
-        <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
-          <h1 className="font-display text-outline text-5xl tracking-wide text-[#ffd76a]">
-            WAVE {live.wave} OF {WAVE_COUNT}
-          </h1>
-          <p className="font-display text-3xl tabular-nums text-white">{clock}</p>
-        </div>
-        <p className="mt-2 text-sm text-white/80" aria-live="polite">
-          {live.lastCue}
-        </p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {chips.map((chip) => (
-            <span
-              key={chip.label}
-              className={cn(
-                "rounded-full px-3 py-1 text-xs font-semibold",
-                chip.on ? "border-2 border-[#0b1a14] bg-[#9cff5a] text-[#0b1a14]" : "border-2 border-white/15 bg-white/10 text-white/80",
-              )}
-            >
-              {chip.label}
-            </span>
-          ))}
-        </div>
-        <div className="mt-4 max-w-sm">
-          <div className="flex justify-between text-xs text-white/75">
-            <span>Wave pressure</span>
-            <span>{Math.round(live.pressure)}</span>
-          </div>
-          <div className="mt-1 h-3 overflow-hidden rounded-full border-2 border-[#0b1a14] bg-[#14242a]">
-            <div className="h-full rounded-full bg-[linear-gradient(90deg,#ffb21e,#ff3d8b)] transition-[width] duration-300" style={{ width: `${live.pressure}%` }} />
-          </div>
-          <p className="mt-2 text-xs text-white/70">
-            Step {Math.min(live.stepsThisWave + 1, WAVE_STEPS)} of {WAVE_STEPS}
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-6 grid gap-3 pb-2">
-        <div className="grid grid-cols-2 gap-3">
-          <FootButton label="Left foot" hint="A" active={live.expected === "L"} onClick={() => onStep("L")} />
-          <FootButton label="Right foot" hint="D" active={live.expected === "R"} onClick={() => onStep("R")} />
-        </div>
-      </div>
-
-      {paused ? (
-        <div className="absolute inset-0 z-20 grid place-items-center bg-[#0c2418]/70 px-4 backdrop-blur-sm">
-          <div className={sticker("amber", "w-full max-w-sm p-6")}>
-            <h2 className="font-display text-outline text-4xl tracking-wide text-[#ffd76a]">PAUSED</h2>
-            <p className="mt-2 text-sm leading-6 text-white/75">
-              The round is stopped. End it once you have at least {MIN_SCORED_STEPS} steps, or leave without a score.
-            </p>
-            {earlyNote ? <p className="mt-3 text-sm text-destructive">{earlyNote}</p> : null}
-            <div className="mt-5 grid gap-2">
-              <button type="button" className={cn(GAME_BUTTON, "justify-center")} onClick={onResume}>
-                <Play className="size-5 fill-current" /> RESUME
-              </button>
-              <Button type="button" variant="outline" className="h-11 rounded-full" onClick={onEnd}>
-                End and score
-              </Button>
-              <Link href="/play" className="py-2 text-center text-sm font-semibold text-white/60 hover:text-white">
-                Leave without scoring
-              </Link>
-            </div>
-          </div>
-        </div>
       ) : null}
     </div>
   )
 }
 
-function FootButton({
-  label,
-  hint,
-  active,
-  onClick,
-}: {
-  label: string
-  hint: string
-  active: boolean
-  onClick: () => void
-}) {
+function Missing({ title, body }: { title: string; body: string }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "h-20 rounded-[24px] border text-left transition",
-        active
-          ? "step-pulse border-[2.5px] border-[#0b1a14] bg-[#ffb21e] text-[#0b1a14] shadow-[0_5px_0_#a8690b]"
-          : "border-[2.5px] border-white/20 bg-white/10 text-white hover:bg-white/20",
-      )}
-    >
-      <span className="block px-4">
-        <span className="font-display block text-2xl tracking-wide">{label}</span>
-        <span className={cn("text-xs", active ? "text-[#0b1a14]/70" : "text-white/70")}>{hint}</span>
-      </span>
-    </button>
-  )
-}
-
-function Results({
-  levelName,
-  result,
-  onAgain,
-}: {
-  levelName: string
-  result: ResultState
-  onAgain: () => void
-}) {
-  const { outcome, metrics, partial } = result
-  const nextName = outcome.openedLevelId ? levelById(outcome.openedLevelId).name : null
-  const reduce = useReducedMotion()
-  const great = !partial && metrics.walkingScore >= 80
-
-  useEffect(() => {
-    if (reduce) return
-    const colors = ["#9cff5a", "#ffb21e", "#ff3d8b", "#a46bff", "#2de2c4", "#ffd76a"]
-    const burst = (x: number, angle: number) =>
-      confetti({ particleCount: great ? 90 : 40, spread: 70, angle, startVelocity: 48, origin: { x, y: 0.75 }, colors, disableForReducedMotion: true })
-    burst(0.15, 60)
-    burst(0.85, 120)
-    const late = window.setTimeout(() => great && confetti({ particleCount: 120, spread: 120, origin: { y: 0.35 }, colors, disableForReducedMotion: true }), 450)
-    return () => window.clearTimeout(late)
-  }, [great, reduce])
-
-  return (
-    <div className="flex flex-1 items-end py-6 sm:items-center">
-      <motion.section
-        initial={{ opacity: 0, y: 40, scale: 0.94 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ type: "spring", stiffness: 220, damping: 20 }}
-        className={sticker(great ? "lime" : "amber", "relative w-full overflow-visible bg-[#0d171c]/95 p-6 backdrop-blur sm:p-8")}
-      >
-        { }
-        <motion.img
-          src={great ? ZOMBIE.cheer : ZOMBIE.idle}
-          alt=""
-          className="absolute -top-28 right-4 w-32 drop-shadow-[0_8px_14px_rgba(0,0,0,0.6)] sm:-top-36 sm:w-40"
-          initial={{ y: 60, opacity: 0, rotate: -10 }}
-          animate={{ y: [60, -18, 0, -10, 0], opacity: 1, rotate: [-10, 6, 0] }}
-          transition={{ duration: 1.1, delay: 0.25 }}
-        />
-        <p className="text-[11px] font-bold tracking-[0.16em] text-[#2de2c4]">
-          {partial ? "FORM ROUND ENDED EARLY" : great ? "HOME BEFORE SUNRISE!" : "FORM ROUND COMPLETE"}
-        </p>
-        <h1 className="font-display text-outline mt-1 text-7xl leading-none tabular-nums text-[#ffd76a]">
-          <NumberTicker value={metrics.walkingScore} delay={0.3} />
-          <span className="ml-2 text-2xl text-white/60">/100</span>
-        </h1>
-        <p className="mt-1 text-sm text-white/65">{levelName}</p>
-        <dl className="mt-5 grid grid-cols-2 gap-2 text-center">
-          <Mini label="Pace" value={metrics.pace} />
-          <Mini label="Symmetry" value={metrics.symmetry} />
-        </dl>
-        <motion.p
-          className="mt-4 rounded-2xl rounded-tl-sm border-[2.5px] border-[#0b1a14] bg-white px-4 py-3 text-[15px] font-medium leading-6 text-[#0b1a14] shadow-[3px_3px_0_#9c2457]"
-          initial={{ opacity: 0, scale: 0.9, originX: 0 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ type: "spring", stiffness: 260, damping: 18, delay: 0.8 }}
-        >
-          {outcome.session.feedback}
-        </motion.p>
-        <ul className="mt-4 grid gap-1.5 text-sm text-white/80">
-          <motion.li initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 1 }}>
-            <span className="font-display text-lg text-[#9cff5a]">+{outcome.xpGain} XP</span> · streak {outcome.streak}{" "}
-            {outcome.streak === 1 ? "night" : "nights"}
-          </motion.li>
-          {outcome.beatStreak ? <li>You beat your best streak.</li> : null}
-          {outcome.playerLevelAfter > outcome.playerLevelBefore ? <li>You reached player level {outcome.playerLevelAfter}.</li> : null}
-          {nextName ? (
-            <li>
-              Level {outcome.openedLevelId} is open. {nextName} is on your path.
-            </li>
-          ) : null}
-          {!nextName && metrics.walkingScore < 80 ? <li>An 80 on the planned garden opens the next one.</li> : null}
-        </ul>
-        <div className="mt-6 flex flex-wrap gap-2">
-          <Link href="/therapist" className={GAME_BUTTON}>
-            READ MAYA&apos;S NOTE
-          </Link>
-          <Link href="/progress" className="inline-flex h-12 items-center rounded-2xl border-[2.5px] border-[#2c4639] px-4 text-sm font-medium text-white transition hover:bg-white/10">
-            Review progress
-          </Link>
-          <Button type="button" variant="outline" className="h-12 rounded-2xl border-[2.5px] border-[#2c4639] bg-transparent px-4 text-white hover:bg-white/10" onClick={onAgain}>
-            Walk it again
-          </Button>
-        </div>
-      </motion.section>
-    </div>
-  )
-}
-
-function Mini({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-2xl bg-black/25 px-2 py-3">
-      <dt className="text-[11px] font-bold tracking-[0.12em] text-[#2de2c4]">{label.toUpperCase()}</dt>
-      <dd className="font-display text-outline mt-1 text-4xl tabular-nums text-[#9cff5a]">
-        <NumberTicker value={value} delay={0.6} />
-      </dd>
-    </div>
-  )
-}
-
-function CenterNote({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="grid min-h-dvh place-items-center bg-[#070b10] px-6 text-white">
-      <div className="max-w-md text-center">
-        <h1 className="font-display text-4xl tracking-wide text-[#ffd76a]">{title}</h1>
-        <p className="mt-2 text-sm text-white/75">{body}</p>
-        <Link href="/play" className={cn(GAME_BUTTON, "mt-6")}>
-          Back to the path
+    <div className="py-10">
+      <EmptyNote title={title.toUpperCase()} body={body} />
+      <div className="mt-4 text-center">
+        <Link href="/activity" className={cn(GAME_BUTTON)}>
+          <ArrowLeft className="size-5" /> SESSIONS
         </Link>
       </div>
     </div>

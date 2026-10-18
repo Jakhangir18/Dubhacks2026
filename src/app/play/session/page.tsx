@@ -3,12 +3,12 @@ import { Suspense } from "react";
 import { SessionView } from "@/components/session-view";
 
 export const metadata: Metadata = {
-  title: "Session · Zombie Walk Home",
+  title: "Walk · Zombie Walk Home",
 };
 
 export default function SessionPage() {
   return (
-    <Suspense fallback={<div className="min-h-dvh bg-[#0e2419]" />}>
+    <Suspense fallback={<div className="px-8 py-10 text-sm text-muted-foreground">Loading the walk…</div>}>
       <SessionView />
     </Suspense>
   );
