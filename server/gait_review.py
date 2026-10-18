@@ -304,11 +304,18 @@ def rules_review(view: dict[str, Any], limits: dict[str, Any]) -> dict[str, Any]
             findings.append({"area": "symmetry", "side": "both", "confidence": "low", "evidence": ["asym_step_length"],
                              "text": f"Left and right steps may differ in length by about {v('asym_step_length'):.0f}% "
                                      "(less certain: one leg is farther from the camera)."})
+    stomp, dodge, shoes = v("flowers_hit"), v("seeds_dodged"), view["context"].get("shoeMode")
+    if stomp is not None and stomp < 50:
+        findings.append({"area": "game targets", "side": "both", "confidence": "high", "evidence": ["flowers_hit"],
+                         "text": f"{stomp:.0f}% of the flowers were stepped on; landing on them is the next step."})
     fl, fr = v("flowers_hit_L"), v("flowers_hit_R")
     if fl is not None and fr is not None and abs(fl - fr) >= 25:
         worse = "L" if fl < fr else "R"
         findings.append({"area": "game targets", "side": worse, "confidence": "high", "evidence": ["flowers_hit_L", "flowers_hit_R"],
                          "text": f"Flowers in the {NAME[worse]} lane were stepped on less often ({min(fl, fr):.0f}% against {max(fl, fr):.0f}%)."})
+    if dodge is not None and dodge < 50:
+        findings.append({"area": "game targets", "side": "both", "confidence": "high", "evidence": ["seeds_dodged"],
+                         "text": f"{dodge:.0f}% of the seeds were avoided."})
     c1, c2 = v("game_cadence_first_half"), v("game_cadence_second_half")
     if c1 and c2 and c2 < 0.9 * c1:
         findings.append({"area": "pace", "side": "none", "confidence": "high", "evidence": ["game_cadence_first_half", "game_cadence_second_half"],
@@ -318,17 +325,20 @@ def rules_review(view: dict[str, Any], limits: dict[str, Any]) -> dict[str, Any]
     if findings:
         f0 = findings[0]
         side = NAME.get(f0["side"], "")
-        text = {"knee": f"Bend the {side} knee a little more each step",
-                "game targets": f"Aim the {side} foot right onto the flower"}.get(f0["area"]) or FOCUS.get(f0["area"], "Keep walking steady and even")
+        seeds = "seeds_dodged" in f0["evidence"]
+        seed_text = ("Keep your feet clear of the seeds", "Feet clear of the seeds") if shoes \
+            else ("Lift the foot the seed is aiming at", "Lift that foot over the seed")
+        target = (f"Aim the {side} foot right onto the flower", f"{side.capitalize()} foot onto the flower") if side \
+            else seed_text if seeds else ("Step right onto each flower as it reaches your foot", "Step onto the flower as it arrives")
+        text, cue = {"knee": (f"Bend the {side} knee a little more each step", f"Bend your {side} knee as you step"),
+                     "game targets": target}.get(f0["area"]) or (FOCUS.get(f0["area"], "Keep walking steady and even"),
+                                                                 CUE.get(f0["area"], "Nice and steady, both feet"))
         focus = {"text": text, "why": f0["text"], "evidence": f0["evidence"]}
-        cue = {"knee": f"Bend your {side} knee as you step", "game targets": f"{side.capitalize()} foot onto the flower"}.get(f0["area"]) \
-            or CUE.get(f0["area"], "Nice and steady, both feet")
     else:
         focus = {"text": "Keep walking steady and even", "why": "Today's numbers look steady; the same rhythm again is the goal.",
                  "evidence": strengths[0]["evidence"] if strengths else []}
         cue = "Nice and steady, both feet"
 
-    stomp, dodge, shoes = v("flowers_hit"), v("seeds_dodged"), view["context"].get("shoeMode")
     spacing, lift = float(limits.get("spacingCm", 140)), float(limits.get("liftCm", 10))
     if stomp is not None and stomp < 60:
         nxt = {"spacingCm": spacing + 30, "why": "The flowers were hard to reach: a little more space between them."}

@@ -305,11 +305,20 @@ window.addEventListener('keydown', (e) => {
     k: () => { const el = document.getElementById('keys'); el.hidden = !el.hidden; },
     v: () => cameraPanel.toggle(),
     o: () => window.open('camera.html', 'zombiewalk-camera'),   // the camera window for the laptop screen
+    p: () => { if (lastReportId) openReport(lastReportId); },     // the last walk review again (a key press is never blocked)
     '[': () => nudgeSpeed(-0.1), ']': () => nudgeSpeed(0.1),
   };
   if (zone.active && ['a', 'd', 'q', 'e', 'w', 'c', 'z'].includes(k)) return;
   if (map[k]) { map[k](); e.preventDefault(); }
 });
+
+// The finished walk review opens in its own tab, always the same one, so walks do not pile up tabs. Opened without a
+// click, the browser may block it (allow pop-ups for this site once); P opens it from a key press, which always works.
+let lastReportId = null;
+function openReport(id) {
+  lastReportId = id;
+  return window.open(`/report.html?id=${encodeURIComponent(id)}`, 'zombiewalk-report') !== null;
+}
 
 // ---------- original local SVG art; procedural art remains the per-file fallback ----------
 const ART = {
@@ -1233,6 +1242,11 @@ class Home extends Phaser.Scene {
       if (review.status === 'done' || review.status === 'failed') {
         const words = review.review?.playerFeedback;
         if (review.status === 'done' && words && !data.gaitSpoken) { data.gaitSpoken = true; say(words); }
+        if (review.status === 'done' && !data.reportOpened) {
+          data.reportOpened = true;
+          data.reportBlocked = !openReport(id);
+          if (this.sys.isActive()) this.showGait();
+        }
         return;
       }
     }
@@ -1244,7 +1258,10 @@ class Home extends Phaser.Scene {
   showGait() {
     const d = this.homeData;
     const r = d.gaitReview?.review;
-    this.gaitText.setText(d.gaitStatus === 'done' && r ? [r.playerFeedback, r.focus?.text && `Next time: ${r.focus.text}`].filter(Boolean).join('\n')
+    const report = d.reportOpened && (d.reportBlocked ? 'Pop-up blocked: press P for the full report' : 'Full report opened in a new tab · P opens it again');
+    const focus = r?.focus?.text, said = (r?.playerFeedback || '').toLowerCase();
+    const next = focus && !said.includes(focus.toLowerCase().replace(/[.!]+$/, '')) && `Next time: ${focus}`;   // once, not twice
+    this.gaitText.setText(d.gaitStatus === 'done' && r ? [r.playerFeedback, next, report].filter(Boolean).join('\n')
       : d.gaitStatus === 'waiting' || d.gaitStatus === 'reviewing' ? 'The coach is reviewing your walk…'
         : d.gaitStatus === 'late' ? 'Your walk review will be in the therapist panel.'
           : d.gaitStatus === 'failed' ? `No walk review this time${d.gaitReview?.reason ? `: ${d.gaitReview.reason}` : ''}` : '');

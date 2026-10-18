@@ -124,6 +124,14 @@ def test_rules_review_of_a_poor_walk_makes_no_gait_findings():
     assert "strides" in r["nextRecording"]
 
 
+def test_rules_flag_a_game_with_few_hits_and_name_a_target_focus():
+    v = gait_review.build_view(game(stompPct=0, dodgePct=20, byLane={}), {"summary": None}, [], {"limits": LIMITS})
+    r = gait_review.rules_review(v, LIMITS)
+    assert [f["evidence"] for f in r["findings"]][:2] == [["flowers_hit"], ["seeds_dodged"]]
+    assert r["focus"]["text"] == "Step right onto each flower as it reaches your foot"
+    assert "steady" not in r["focus"]["why"]
+
+
 def test_rules_suggest_easier_flowers_inside_the_range():
     r = gait_review.rules_review(view(stompPct=40), {**LIMITS, "spacingCm": 210})
     assert r["nextSession"]["spacingCm"] == 220            # 210 + 30, capped by the therapist's range
