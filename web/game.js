@@ -950,7 +950,7 @@ class Home extends Phaser.Scene {
     if (!data.replay) sound.play('home');
     const s = data.summary;
     publishGarden({ act: 'home', cadence: 0, paceOk: true, paused: false, title: 'HOME BEFORE SUNRISE!',
-      score: `${s.score} pts`, progress: 1, pace: `${s.steps} steps · form ${s.formPct}%`, coachColor: '', coach: 'Welcome home, Gus! · R to walk again' });
+      score: `${s.score} pts`, progress: 1, pace: `${s.steps} steps · form ${s.formPct}%`, coachColor: '', coach: 'Welcome home, Gus! · Walk to play again' });
     const { width: W, height: H } = this.scale;
     gardenBackdrop(this, W, H);
     this.house = this.add.image(W * 0.62, H * 0.18, 'house');
