@@ -197,18 +197,21 @@ setInterval(pullShoeCal, 4000);
 const fieldY = (distCm, L) => L.zoneY - (distCm / RULES.aheadCm) * (L.zoneY - L.top);
 const fieldDist = (y, L) => (L.zoneY - y) * RULES.aheadCm / (L.zoneY - L.top);
 
-// Shoe boxes (fractions of feet.py's picture) onto the field: the toe tip is on the floor; the box top is the ankle,
-// above the floor, so the heel is taken at about 60 % down the box.
+// Shoe boxes (fractions of feet.py's picture) onto the field. Both ends of the box go through the calibration and
+// the end nearer the hit line is the toe, whichever way the camera looks along the belt; a shoe is at most
+// SHOE_SPAN_CM long, so a tall bright blob (a lit shin, the lit belt) never becomes a shoe reaching up the field.
+const SHOE_SPAN_CM = 60;
 function mapShoes(boxes, L) {
   const shoes = [];
   for (const [x1, y1, x2, y2] of boxes.slice(0, 2)) {
     const cx = (x1 + x2) / 2;
-    const [fx, fy] = Warp.mapPoint(camH, cx, y2);
-    const [, fyHeel] = Warp.mapPoint(camH, cx, y1 + 0.6 * (y2 - y1));
-    if (![fx, fy, fyHeel].every(Number.isFinite)) continue;
-    const nearCm = fieldDist(fy, L);
+    const [fx, fyA] = Warp.mapPoint(camH, cx, y2);
+    const [, fyB] = Warp.mapPoint(camH, cx, y1);
+    if (![fx, fyA, fyB].every(Number.isFinite)) continue;
+    const a = fieldDist(fyA, L), b = fieldDist(fyB, L);
+    const nearCm = Math.max(a, b);
     if (nearCm > 40) continue;   // feet stay on the belt, below the hit line: anything beyond is a lit console or a wall
-    shoes.push({ xFrac: fx / L.W, nearCm, farCm: fieldDist(fyHeel, L) });
+    shoes.push({ xFrac: fx / L.W, nearCm, farCm: Math.max(Math.min(a, b), nearCm - SHOE_SPAN_CM) });
   }
   return shoes;
 }
