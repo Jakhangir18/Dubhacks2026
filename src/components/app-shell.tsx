@@ -60,7 +60,7 @@ export function PageActions() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
-  const immersive = pathname.startsWith("/play/session") || pathname.startsWith("/lab")
+  const immersive = pathname.startsWith("/play/session")
 
   if (immersive) {
     return (

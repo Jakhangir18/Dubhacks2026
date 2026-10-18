@@ -58,9 +58,9 @@ const SCENES: Record<number, { pieces: Piece[]; alt: string }> = {
     ],
   },
   8: {
-    alt: "Gus standing on the night lawn",
+    alt: "Gus the zombie waving on the night lawn",
     pieces: [
-      { src: "/art/gus-idle.png", width: 289, height: 384, className: "bottom-0 left-1/2 w-[58%] -translate-x-1/2" },
+      { src: "/zombie/idle.webp", width: 478, height: 640, className: "bottom-0 left-1/2 w-[52%] -translate-x-1/2" },
     ],
   },
   9: {
@@ -92,7 +92,7 @@ export function GoalBanner({
 }) {
   const scene = SCENES[levelId] ?? SCENES[1]
   return (
-    <div className={cn("relative overflow-hidden bg-white", className)}>
+    <div className={cn("relative overflow-hidden border-[2.5px] border-[#2c4639] bg-[#0d171c]", className)}>
       <div
         className={cn("absolute inset-y-0 left-0 w-[46%] overflow-hidden bg-[#070b10]", locked && "opacity-50 saturate-[0.65]")}
         aria-hidden="true"
@@ -123,7 +123,7 @@ export function GoalBanner({
           />
         ))}
       </div>
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,transparent_0%,transparent_28%,rgba(255,255,255,0.8)_38%,#ffffff_46%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,transparent_0%,transparent_28%,rgba(13,23,28,0.8)_38%,#0d171c_46%)]" />
       <div className="relative z-10 flex h-full items-center">
         <div className="w-1/2 shrink-0" aria-hidden="true" />
         <div className="flex min-w-0 flex-1 flex-col justify-center pr-5">{children}</div>

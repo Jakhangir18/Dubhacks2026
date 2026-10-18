@@ -143,7 +143,7 @@ export const LEVEL_MARKS: Record<number, string> = {
   5: "/art/house.png",
   6: "/art/seed.png",
   7: "/art/pod.png",
-  8: "/art/gus-portrait.png",
+  8: "/zombie/portrait.webp",
   9: "/art/moon.png",
   10: "/art/flower-rose.png",
 }

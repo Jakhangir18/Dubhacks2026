@@ -1,14 +1,12 @@
-# StrideBloom
+# Zombie Walk Home — family dashboard
 
-StrideBloom is a walking-recovery clinic you can use in the browser. A floor trackpad reads each step, and a projection puts the same plant lawn underfoot. Patients move through recovery goals the way a language app moves through lessons. After every scored walk, Maya, the AI therapist, reviews pace and symmetry.
+The browser dashboard for Zombie Walk Home: tonight's walk, the path of gardens home, progress, past walks, and Maya, the AI therapist. A projector paints a night garden on the floor, a camera scores each step, and Gus the zombie has to shuffle home before sunrise.
 
-This app is the clinic workspace for Jordan Davis: today's goal, the recovery plan, a playable form round, progress, session history, and Maya.
+The dashboard uses the game's night palette and sticker cards, art and a looping hero clip generated with Higgsfield, and motion built on `motion` plus Magic UI / 21st.dev pieces (number ticker, particles, blur fade). Every animation turns off under the system "reduce motion" setting.
 
-The form round stands in for the projected floor. In the clinic that session is 10–20 minutes. Here it is two short waves that score the same three cues.
+The form round stands in for the projected floor: two short waves that score the same cues.
 
-The Next.js app lives in [`src`](src) at the repository root. The Stride Defense game, vision pipeline, and server stay alongside it.
-
-## Run the clinic app
+## Run the dashboard
 
 ```bash
 npm install
