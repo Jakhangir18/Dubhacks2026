@@ -3,6 +3,7 @@ fallback, so no key, no network or a bad reply never stops the game."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Any
@@ -46,10 +47,18 @@ async def generate_json(system: str, user: str, *, schema: dict[str, Any] | None
     }
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.post(GEMINI_URL.format(model=model), params={"key": key}, json=body)
-            if r.status_code == 400 and schema:
+            url = GEMINI_URL.format(model=model)
+            r = await client.post(url, params={"key": key}, json=body)
+            if r.status_code != 200 and schema:
+                # A rejected (400) or overloaded (503) schema call is asked once more without the schema: the
+                # callers check every field anyway, and a big nested schema is what the model trips on.
+                if r.status_code >= 500:
+                    await asyncio.sleep(1.5)
                 body["generationConfig"] = config
-                r = await client.post(GEMINI_URL.format(model=model), params={"key": key}, json=body)
+                r = await client.post(url, params={"key": key}, json=body)
+            if r.status_code >= 500:   # still overloaded: one more try after a pause
+                await asyncio.sleep(2)
+                r = await client.post(url, params={"key": key}, json=body)
             if r.status_code != 200:
                 return None, f"Gemini HTTP {r.status_code}"
             parts = r.json()["candidates"][0]["content"]["parts"]

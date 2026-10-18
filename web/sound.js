@@ -2,10 +2,13 @@
 const MELODY = [523.25, 659.25, 783.99, 659.25, 587.33, 0, 659.25, 523.25];
 const BASS = [130.81, 130.81, 146.83, 98];
 
+// The team wants the pad silent for now: every effect and the music stay off, and N does nothing.
+const MUTE_ALL = true;
+
 export class GardenSound {
   constructor(store) {
     this.store = store;
-    this.enabled = store.get('zombiewalk.sound', true);
+    this.enabled = !MUTE_ALL && store.get('zombiewalk.sound', true);
     this.musicWanted = false;
     this.ducked = false;
     this.beat = 0;
@@ -34,6 +37,7 @@ export class GardenSound {
   }
 
   toggle() {
+    if (MUTE_ALL) return;
     this.enabled = !this.enabled;
     this.store.set('zombiewalk.sound', this.enabled);
     if (this.master) this.master.gain.setTargetAtTime(this.enabled ? 0.5 : 0, this.context.currentTime, 0.02);
