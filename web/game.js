@@ -184,7 +184,9 @@ function mapShoes(boxes, L) {
     const [fx, fy] = Warp.mapPoint(camH, cx, y2);
     const [, fyHeel] = Warp.mapPoint(camH, cx, y1 + 0.6 * (y2 - y1));
     if (![fx, fy, fyHeel].every(Number.isFinite)) continue;
-    shoes.push({ xFrac: fx / L.W, nearCm: fieldDist(fy, L), farCm: fieldDist(fyHeel, L) });
+    const nearCm = fieldDist(fy, L);
+    if (nearCm > 40) continue;   // feet stay on the belt, below the hit line: anything beyond is a lit console or a wall
+    shoes.push({ xFrac: fx / L.W, nearCm, farCm: fieldDist(fyHeel, L) });
   }
   return shoes;
 }

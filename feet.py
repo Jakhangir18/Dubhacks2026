@@ -64,6 +64,27 @@ def filter_feet(dets, frame_area, areas, max_area=0.15, max_boxes=2):
     return kept, rejected
 
 
+FIELD_W, FIELD_H, HIT_LINE = 720, 1280, 0.54   # the game field (web/warp.js FIELD) and its hit line (web/game.js floorLayout)
+
+
+def belt_polygon(h):
+    """Camera-picture fractions of the field's belt part, from the camera-to-field homography h (8 numbers)."""
+    a, b, c, d, e, f, g, k = h
+    m = [[a, b, c], [d, e, f], [g, k, 1.0]]
+    det = (m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+           + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]))
+    if abs(det) < 1e-12:
+        return None
+    inv = [[(m[1][1] * m[2][2] - m[1][2] * m[2][1]) / det, (m[0][2] * m[2][1] - m[0][1] * m[2][2]) / det, (m[0][1] * m[1][2] - m[0][2] * m[1][1]) / det],
+           [(m[1][2] * m[2][0] - m[1][0] * m[2][2]) / det, (m[0][0] * m[2][2] - m[0][2] * m[2][0]) / det, (m[0][2] * m[1][0] - m[0][0] * m[1][2]) / det],
+           [(m[1][0] * m[2][1] - m[1][1] * m[2][0]) / det, (m[0][1] * m[2][0] - m[0][0] * m[2][1]) / det, (m[0][0] * m[1][1] - m[0][1] * m[1][0]) / det]]
+    out = []
+    for u, v in [(0, HIT_LINE * FIELD_H), (FIELD_W, HIT_LINE * FIELD_H), (FIELD_W, FIELD_H), (0, FIELD_H)]:
+        w = inv[2][0] * u + inv[2][1] * v + inv[2][2]
+        out.append([(inv[0][0] * u + inv[0][1] * v + inv[0][2]) / w, (inv[1][0] * u + inv[1][1] * v + inv[1][2]) / w])
+    return out
+
+
 class BlobDetector:
     """Fallback for a dark room: white socks or light shoes on a black belt are the brightest filled blobs.
     Returns Foot boxes like FeetDetector; used when the model finds nothing (or alone with --blobs-only)."""
@@ -141,14 +162,15 @@ class ShoeSender:
         threading.Thread(target=self._run, daemon=True).start()
 
     def zone(self):
-        """The calibrated zone corners from the server (fractions of the camera picture), or None."""
+        """The belt part of the calibrated field (below the hit line) as camera fractions, or None.
+        Feet are only ever there; the far part of the field lies over the console, whose lights are bright."""
         try:
             cls = http.client.HTTPSConnection if self.https else http.client.HTTPConnection
             conn = cls(self.host, self.port, timeout=3)
             conn.request("GET", "/api/shoecal")
-            pts = json.loads(conn.getresponse().read()).get("points") or None
+            h = json.loads(conn.getresponse().read()).get("h") or None
             conn.close()
-            return pts if pts and len(pts) == 4 else None
+            return belt_polygon(h) if h and len(h) == 8 else None
         except Exception:  # noqa: BLE001 - no calibration yet, or offline
             return None
 
