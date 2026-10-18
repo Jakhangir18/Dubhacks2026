@@ -300,7 +300,19 @@ export const api = {
   gameState: () => optional<GameStatus>("/api/game/state"),
   control: (cmd: ControlCmd) => sendJson<ControlAnswer>("/api/game/control", "POST", { cmd }),
   qrUrl: (url: string) => `/api/qr?url=${enc(url)}`,
+  /** Maya's chat answer about one walk (the latest without a sessionId). */
+  maya: (body: MayaAsk) => sendJson<MayaReply>("/api/maya", "POST", body),
+  /** Maya's voice for one line, as a WAV blob; a player name asks for that player's AI consent on the server. */
+  speak: async (text: string, player?: string) => {
+    const response = await fetch("/api/tts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: text.slice(0, 1000), player }) })
+    if (!response.ok) throw new ApiError(response.status, "/api/tts")
+    return response.blob()
+  },
 }
+
+export type MayaTurn = { role: "user" | "maya"; text: string }
+export type MayaAsk = { player: string; sessionId: string | null; message: string; history: MayaTurn[] }
+export type MayaReply = { reply: string; source: "gemini" | "rules"; usedPhotos: number; photos: Moment[]; sessionId: string | null }
 
 // ---------------------------------------------------------------- hooks
 export type Polled<T> = {

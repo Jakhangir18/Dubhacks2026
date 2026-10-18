@@ -13,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
-from server import gait_review, gemini, perceive, therapist, tts
+from server import gait_review, gemini, maya, perceive, therapist, tts
 from server.store import Store
 
 router = APIRouter(prefix="/api")
@@ -55,6 +55,32 @@ async def speak(inp: TtsIn) -> Response:
     if audio is None:
         raise HTTPException(503, reason or "no audio")
     return Response(audio, media_type="audio/wav", headers={"Cache-Control": "private, max-age=86400"})
+
+
+class MayaIn(BaseModel):
+    player: str = "Player"
+    sessionId: str | None = None
+    message: str = Field(min_length=1, max_length=maya.MAX_MESSAGE)
+    history: list[dict[str, str]] = Field(default_factory=list, max_length=maya.MAX_HISTORY)
+
+
+@router.post("/maya")
+async def ask_maya(inp: MayaIn) -> dict[str, Any]:
+    """Maya's chat answer about one walk (the latest without a sessionId), with the side camera's pictures when the
+    player has the AI gait review consent; the rules answer when the model does not."""
+    name = inp.player.strip()[:40] or "Player"
+    player = await run_in_threadpool(store.player, name)
+    if inp.sessionId and SESSION_ID.fullmatch(inp.sessionId):
+        session = await run_in_threadpool(store.session, inp.sessionId)
+    else:
+        rows = await run_in_threadpool(store.sessions, name, 1)
+        session = rows[0] if rows else None
+    if session and session.get("player") != name:
+        raise HTTPException(404, "no such session for this player")
+    history = [{"role": h.get("role", "user"), "text": h.get("text", "")} for h in inp.history if h.get("role") in ("user", "maya")]
+    out = await maya.ask(inp.message, session, bool(player.get("aiReviewConsent")), history, name)
+    return {"reply": out["reply"], "source": out["source"], "usedPhotos": out["usedPhotos"], "photos": out["photos"],
+            "sessionId": (session or {}).get("id")}
 
 
 @router.get("/health")

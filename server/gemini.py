@@ -69,3 +69,26 @@ async def generate_json(system: str, user: str, *, schema: dict[str, Any] | None
         return None, f"Gemini call failed ({type(e).__name__})"
     out = parse_json(text)
     return (out, None) if out is not None else (None, "Gemini reply was not a JSON object")
+
+
+async def generate_text(system: str, parts: list[dict[str, Any]], *, model: str | None = None, timeout: float = 8,
+                        temperature: float = 0.6) -> tuple[str | None, str | None]:
+    """(plain-text reply, None) or (None, reason). `parts` are Gemini content parts: {"text": ...} or
+    {"inlineData": {"mimeType": "image/jpeg", "data": <base64>}}, so a caller can show the model pictures."""
+    key = os.environ.get("GEMINI_API_KEY")
+    if not key:
+        return None, "no GEMINI_API_KEY"
+    body = {"systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {"temperature": temperature}}
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.post(GEMINI_URL.format(model=model or model_name()), params={"key": key}, json=body)
+            if r.status_code != 200:
+                return None, f"Gemini HTTP {r.status_code}"
+            reply = r.json()["candidates"][0]["content"]["parts"]
+            text = "".join(p.get("text", "") for p in reply if not p.get("thought")).strip()
+    except httpx.TimeoutException:
+        return None, "Gemini timed out"
+    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as e:
+        return None, f"Gemini call failed ({type(e).__name__})"
+    return (text, None) if text else (None, "Gemini reply was empty")

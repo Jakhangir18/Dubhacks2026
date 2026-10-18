@@ -8,6 +8,7 @@ import { useCallback } from "react"
 import { useSearchParams } from "next/navigation"
 import { motion } from "motion/react"
 import { ArrowLeft, Play } from "lucide-react"
+import { MayaChat } from "@/components/maya-chat"
 import { PageHeader } from "@/components/page-header"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { TimelineChart } from "@/components/timeline-chart"
@@ -190,12 +191,18 @@ export function SessionView() {
           <ReviewSection walk={walk} />
         </BlurFade>
 
+        {!walk.demo ? (
+          <BlurFade delay={0.44}>
+            <MayaChat player={player} sessionId={walk.id} compact opening={`Ask me about this walk: your knees, the pictures, or what to practise next.`} />
+          </BlurFade>
+        ) : null}
+
         <div className="flex flex-wrap gap-3">
           <Link href="/play" className={GAME_BUTTON}>
             <Play className="size-5 fill-current" /> LIVE WALK
           </Link>
           <Link href="/therapist" className="inline-flex h-12 items-center rounded-2xl border-[2.5px] border-[#2c4639] px-4 text-sm font-medium text-white transition hover:bg-white/10">
-            Ask Maya about this walk
+            Maya and the settings
           </Link>
         </div>
       </div>
@@ -248,7 +255,7 @@ function ReviewSection({ walk }: { walk: Walk }) {
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <div className="rounded-2xl bg-black/25 p-4">
           <p className="text-[11px] font-bold tracking-[0.16em] text-[#9cff5a]">STRENGTHS</p>
-          {review.strengths.length ? (
+          {review.strengths?.length ? (
             <ul className="mt-1.5 grid gap-1.5 text-sm leading-5 text-white/85">
               {review.strengths.map((item) => (
                 <li key={item.text}>{item.text}</li>
@@ -260,7 +267,7 @@ function ReviewSection({ walk }: { walk: Walk }) {
         </div>
         <div className="rounded-2xl bg-black/25 p-4">
           <p className="text-[11px] font-bold tracking-[0.16em] text-[#ffb21e]">FINDINGS</p>
-          {review.findings.length ? (
+          {review.findings?.length ? (
             <ul className="mt-1.5 grid gap-1.5 text-sm leading-5 text-white/85">
               {review.findings.map((item: Finding) => (
                 <li key={item.text}>
@@ -276,7 +283,7 @@ function ReviewSection({ walk }: { walk: Walk }) {
             <p className="mt-1.5 text-sm text-white/60">No findings: the walk looked steady.</p>
           )}
         </div>
-        {review.gameVsGait.length ? (
+        {review.gameVsGait?.length ? (
           <Block label="THE GAME AND THE WALK" items={review.gameVsGait.map((item) => item.text)} />
         ) : null}
         {review.actComparison ? <Block label="WALKING, FLOWERS, SEEDS" text={review.actComparison} /> : null}
@@ -284,7 +291,7 @@ function ReviewSection({ walk }: { walk: Walk }) {
         <div className="rounded-2xl bg-black/25 p-4">
           <p className="text-[11px] font-bold tracking-[0.16em] text-[#2de2c4]">CUES FOR NEXT TIME</p>
           <ul className="mt-1.5 grid gap-1.5">
-            {review.cues.map((cue, index) => (
+            {(review.cues ?? []).map((cue, index) => (
               <li key={cue} className="flex items-center gap-2 text-sm text-white/90">
                 <span className="grid size-6 shrink-0 place-items-center rounded-full bg-[#9cff5a] text-xs font-bold text-[#0b1a14]">{index + 1}</span>
                 {cue}
@@ -306,8 +313,8 @@ function ReviewSection({ walk }: { walk: Walk }) {
             </Link>
           ) : null}
         </div>
-        <Block label="FOR THE PARENT" text={review.parentNote} />
-        <Block label="FILMING THE NEXT WALK" text={review.nextRecording} />
+        {review.parentNote ? <Block label="FOR THE PARENT" text={review.parentNote} /> : null}
+        {review.nextRecording ? <Block label="FILMING THE NEXT WALK" text={review.nextRecording} /> : null}
       </div>
       <details className="mt-4 rounded-2xl bg-black/25 p-4">
         <summary className="cursor-pointer text-[11px] font-bold tracking-[0.16em] text-white/60">FOR THE THERAPIST · NUMBERS AND IDS</summary>
