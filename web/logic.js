@@ -50,6 +50,8 @@ export const RULES = {
   stanceMarginCm: 30,            // a thing is gone only this far behind the standing feet
   markReachCm: 90,               // a camera-seen foot-on-mark touches the nearest thing of that kind within this (the sock's centre is not the flower's)
   markShowCm: 90,                // the coloured mark shows under a thing from this far before the hit line
+  timelineS: 15,                 // the report samples the pace this often (game seconds)
+  timelineMax: 120,              // and keeps at most this many samples, the newest
 };
 
 export function rng(seed = 1) {
@@ -76,7 +78,7 @@ export function newGame(limits = {}, seed = 1) {
     score: 0,
     streak: 0,
     formSum: 0, formN: 0,
-    stats: { stomp: [0, 0], dodge: [0, 0], lifts: { L: [], R: [] }, steps: 0 },
+    stats: { stomp: [0, 0], dodge: [0, 0], lifts: { L: [], R: [] }, steps: 0, stepsByFoot: { L: 0, R: 0 } },
     walkLifts: { L: [], R: [] },   // act 1 lifts: the player's normal step height
     base: null,                    // {L, R} normal step height, set when act 1 ends
     shoeMode: false,               // shoes were seen in this game (for the report); shoesLive() says whether they drive it now
@@ -89,6 +91,9 @@ export function newGame(limits = {}, seed = 1) {
     toeBaseCm: null,               // the game's own toe line from its layout; the stance can only push it further
     log: [],                     // resolved things for the report and the UI
     actResolved: 0,              // things resolved in the current act (progress bar)
+    swings: { L: [], R: [] },    // shoe mode: forward swing of every counted step, field cm (for the report)
+    timeline: [],                // {t, cadence, evenPct, act} every timelineS, for the report
+    nextTimelineT: RULES.timelineS,
   };
 }
 
@@ -102,6 +107,7 @@ export function addEvent(g, ev) {
   if (e.kind === 'strike') {
     g.strikes.push({ t: e.t, foot: e.foot });
     g.stats.steps += 1;
+    g.stats.stepsByFoot[e.foot] += 1;
     if (g.strikes.length > 60) g.strikes.shift();
   }
   if (e.kind === 'lift' && Number.isFinite(e.liftCm)) {
@@ -152,6 +158,8 @@ export function addShoes(g, shoes, t = g.t) {
         tr.min = d;
         if (t - tr.lastStrikeT >= RULES.shoeStepMinS) {
           tr.lastStrikeT = t;
+          g.swings[s.lane].push(Math.round(swing));
+          if (g.swings[s.lane].length > 200) g.swings[s.lane].shift();
           // The swing stands in for the lift height, so act 1 learns a normal step and a seed asks for a bigger one.
           addEvent(g, { foot: s.lane, kind: 'lift', liftCm: Math.round((swing / RULES.swingCmPerLiftCm) * 10) / 10, t });
           addEvent(g, { foot: s.lane, kind: 'strike', t });
@@ -189,6 +197,17 @@ export function markHit(g, lane, kind, distCm) {
 function shoeOn(g, th) {
   return g.shoes.some((s) => s.lane === th.lane && g.t - s.t <= RULES.shoeFreshS &&
     th.distCm <= s.nearCm + RULES.shoeReachCm && th.distCm >= s.farCm - RULES.shoeReachCm);
+}
+
+// For the report only: how far the centre of a fresh shoe in the thing's lane is from it, null when none is seen.
+function shoeGapCm(g, th) {
+  let best = null;
+  for (const s of g.shoes) {
+    if (s.lane !== th.lane || g.t - s.t > RULES.shoeFreshS) continue;
+    const gap = Math.abs((s.nearCm + s.farCm) / 2 - th.distCm);
+    if (best === null || gap < best) best = gap;
+  }
+  return best;
 }
 
 // ---------- pace and form ----------
@@ -280,6 +299,11 @@ export function step(g, dt) {
   const moved = speed * dt;
   g.travelledCm += moved;
   const out = { resolved: [], actChanged: false, pace: p, form: f, speed };
+  if (g.act !== 'home' && g.t >= g.nextTimelineT) {   // a pace sample for the report
+    g.nextTimelineT += RULES.timelineS;
+    g.timeline.push({ t: Math.round(g.t), cadence: p.cadence, evenPct: p.asym === null ? null : Math.max(0, Math.round(100 - p.asym * 100)), act: g.act });
+    if (g.timeline.length > RULES.timelineMax) g.timeline.shift();
+  }
 
   if (g.act === 'walk') {
     if (p.ok) g.walkGoodS += dt;
@@ -301,12 +325,16 @@ export function step(g, dt) {
       // Everything is decided at the hit line: a shoe on the thing while it crosses (the timing window around arrival)
       // smashes a flower and splats on a seed; nothing on it means the flower got away and the seed was dodged.
       if (shoeOn(g, th)) th.touchedT = g.t;
+      // The report: the closest a shoe came to the thing inside its timing window (the window the UI shows).
+      const gap = th.arriveT !== null || th.distCm <= speed * RULES.beforeS ? shoeGapCm(g, th) : null;
+      if (gap !== null && (th.placeCm === undefined || gap < th.placeCm)) th.placeCm = gap;
       if (th.arriveT !== null && g.t - th.arriveT > RULES.afterS) {
         const touched = th.touchedT !== undefined && th.touchedT >= th.arriveT - RULES.beforeS;
         resolve(g, th, (th.kind === 'flower') === touched ? 'hit' : 'miss', f, out);
       }
     } else if (th.arriveT !== null && g.t - th.arriveT > RULES.afterS) {
-      resolve(g, th, judge(g, th) ? 'hit' : 'miss', f, out);
+      const e = judge(g, th);
+      resolve(g, th, e ? 'hit' : 'miss', f, out, e && { offsetS: Math.round((e.t - th.arriveT) * 100) / 100, liftCm: e.liftCm });
     }
   }
   g.things = g.things.filter((th) => !th.result || g.t - th.resolvedT < 1.5);
@@ -315,7 +343,8 @@ export function step(g, dt) {
   return out;
 }
 
-function resolve(g, th, result, f, out) {
+// extra: what the report keeps about the lift that counted (lift rules only).
+function resolve(g, th, result, f, out, extra = null) {
   th.result = result;
   th.resolvedT = g.t;
   const key = th.kind === 'flower' ? 'stomp' : 'dodge';
@@ -327,7 +356,8 @@ function resolve(g, th, result, f, out) {
   } else {
     g.streak = 0;
   }
-  g.log.push({ id: th.id, kind: th.kind, lane: th.lane, result, t: g.t });
+  g.log.push({ id: th.id, kind: th.kind, lane: th.lane, result, t: g.t,
+    ...(th.placeCm !== undefined && { placementCm: Math.round(th.placeCm) }), ...extra });
   g.actResolved += 1;
   out.resolved.push(th);
 }
@@ -370,6 +400,19 @@ export function summary(g) {
   const pct = ([h, n]) => (n ? Math.round((100 * h) / n) : null);
   const avg = (a) => (a.length ? Math.round((a.reduce((x, y) => x + y, 0) / a.length) * 10) / 10 : null);
   const p = pace(g);
+  // {L, R} means of a value the log or the swings hold per lane; null when the game never measured it.
+  const perLane = (rows, digits = 1) => {
+    if (!rows.length) return null;
+    const mean = (lane) => {
+      const v = rows.filter((r) => r.lane === lane).map((r) => r.v);
+      return v.length ? Math.round((v.reduce((x, y) => x + y, 0) / v.length) * 10 ** digits) / 10 ** digits : null;
+    };
+    return { L: mean('L'), R: mean('R') };
+  };
+  const lanes = (kind) => Object.fromEntries(['L', 'R'].map((lane) => {
+    const rows = g.log.filter((r) => r.kind === kind && r.lane === lane);
+    return [lane, [rows.filter((r) => r.result === 'hit').length, rows.length]];
+  }));
   return {
     seconds: Math.round(g.t),
     act: g.act,
@@ -391,5 +434,11 @@ export function summary(g) {
     normalStepCm: g.base,
     shoeMode: g.shoeMode,
     rounds: g.round,
+    stepsByFoot: { ...g.stats.stepsByFoot },
+    byLane: { flower: lanes('flower'), seed: lanes('seed') },
+    placementCm: perLane(g.log.filter((r) => r.kind === 'flower' && r.placementCm !== undefined).map((r) => ({ lane: r.lane, v: r.placementCm }))),
+    timingS: perLane(g.log.filter((r) => r.offsetS !== undefined).map((r) => ({ lane: r.lane, v: r.offsetS })), 2),
+    swingCm: perLane(['L', 'R'].flatMap((lane) => g.swings[lane].map((v) => ({ lane, v })))),
+    timeline: [...g.timeline],
   };
 }

@@ -310,3 +310,79 @@ test('rounds: flowers and seeds repeat before home, and the summary counts them'
   assert.equal(summary(g).rounds, 2);
 });
 
+
+// ---------- the report: what the summary keeps for the gait review ----------
+test('the summary counts steps per foot and samples the pace every 15 s', () => {
+  const g = newGame({ walkSeconds: 100 }, 1);   // stays in act 1
+  walk(g, 31, 0.6);                             // 100 steps per minute, alternating feet
+  const s = summary(g);
+  assert.equal(s.stepsByFoot.L + s.stepsByFoot.R, s.steps);
+  assert.ok(Math.abs(s.stepsByFoot.L - s.stepsByFoot.R) <= 1);
+  assert.deepEqual(s.timeline.map((r) => r.t), [15, 30]);
+  for (const r of s.timeline) {
+    assert.ok(Math.abs(r.cadence - 100) <= 3, `cadence ${r.cadence}`);
+    assert.ok(r.evenPct >= 95, `even ${r.evenPct}`);
+    assert.equal(r.act, 'walk');
+  }
+});
+
+test('the pace timeline keeps the newest 120 samples', () => {
+  const g = newGame({}, 1);
+  for (let i = 0; i < 121 * 15; i++) step(g, 1);   // standing still: samples with cadence 0
+  const s = summary(g);
+  assert.equal(s.timeline.length, 120);
+  assert.equal(s.timeline[0].t, 30);
+  assert.equal(s.timeline[119].t, 121 * 15);
+  assert.equal(s.timeline[0].cadence, 0);
+  assert.equal(s.timeline[0].evenPct, null);
+});
+
+test('lift rules: hits per lane and the timing of the lift that counted (+ = late)', () => {
+  const g = toGarden({ gardenPlants: 2 });
+  g.things = [];
+  g.spawned = g.limits.gardenPlants;   // no more spawns
+  const t0 = g.t;
+  g.things.push({ id: 101, kind: 'flower', lane: 'L', distCm: 0, arriveT: t0, result: null });
+  g.things.push({ id: 102, kind: 'flower', lane: 'R', distCm: 0, arriveT: t0, result: null });
+  addEvent(g, { foot: 'L', kind: 'lift', liftCm: 30, t: t0 + 0.2 });   // late by 0.2 s
+  step(g, 0.4); step(g, 0.4);
+  const s = summary(g);
+  assert.deepEqual(s.byLane.flower, { L: [1, 1], R: [0, 1] });
+  assert.deepEqual(s.byLane.seed, { L: [0, 0], R: [0, 0] });
+  assert.deepEqual(s.timingS, { L: 0.2, R: null });
+  assert.equal(g.log.find((r) => r.id === 101).liftCm, 30);
+  assert.equal(s.placementCm, null);   // no shoes in this game
+  assert.equal(s.swingCm, null);
+});
+
+test('shoe mode: the report keeps how close the shoe came to each flower, and the swings, not the lift timing', () => {
+  const g = toGarden({ gardenPlants: 2 });
+  const xOf = (th) => (th.lane === 'L' ? 0.3 : 0.7);
+  const keep = (th) => addShoes(g, [{ xFrac: th.lane === 'L' ? 0.7 : 0.3, nearCm: 600, farCm: 580 }]);   // shoe mode live, touching nothing
+  walkUntil(g, () => g.things.length > 0);
+  const first = g.things[0];
+  walkUntil(g, () => { keep(first); return first.distCm < 80; });
+  // a shoe planted on the hit line as the flower crosses it
+  walkUntil(g, () => { addShoes(g, [{ xFrac: xOf(first), nearCm: 15, farCm: -15 }]); return first.result !== null; }, 10);
+  assert.equal(first.result, 'hit');
+  walkUntil(g, () => { keep(first); return g.things.some((t) => t !== first && !t.result); });
+  const second = g.things.find((t) => t !== first && !t.result);
+  walkUntil(g, () => { keep(second); return second.distCm < 80; });
+  // a shoe a metre back on the belt: the flower gets away
+  walkUntil(g, () => { addShoes(g, [{ xFrac: xOf(second), nearCm: -85, farCm: -115 }]); return second.result !== null; }, 10);
+  assert.equal(second.result, 'miss');
+  const near = g.log.find((r) => r.id === first.id).placementCm;
+  const far = g.log.find((r) => r.id === second.id).placementCm;
+  assert.ok(near <= 10, `near ${near}`);
+  assert.ok(far >= 70, `far ${far}`);
+  const s = summary(g);
+  for (const lane of ['L', 'R']) {
+    const v = g.log.filter((r) => r.lane === lane && r.placementCm !== undefined).map((r) => r.placementCm);
+    assert.equal(s.placementCm[lane], v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 10) / 10 : null);
+  }
+  assert.equal(s.timingS, null);   // judged by the shoes, not by a lift
+  const w = newGame({ walkSeconds: 2 }, 1);
+  shoeWalk(w, 6, 0.6);
+  const sw = summary(w).swingCm;
+  assert.ok(sw.L > 60 && sw.L < 140 && sw.R > 60 && sw.R < 140, `swings ${JSON.stringify(sw)}`);
+});

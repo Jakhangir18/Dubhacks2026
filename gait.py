@@ -12,12 +12,15 @@
     print(g.summary(start, end))                # timing, joint angles, lengths, curves (None if too little data)
     g.close()
 
-Demo:  python gait.py --video walk.mp4   |   python gait.py --camera-name iphone [--server http://localhost:8000 --player Mia]
+Demo:  python gait.py --video walk.mp4   |   python gait.py --camera-name iphone [--server http://localhost:8000 [--player Mia] [--once]]
+Replay a recorded walk as one game session:  python gait.py --video walk.mp4 --server URL --session-id <id> [--offset S]
 The demo reads the camera on one thread and writes the raw video (no overlay) at the measured frame rate, runs the pose
 model on a second thread, and only previews on the main thread, so a slow window never costs camera frames.
-With --server it stops by itself when the game saves the player's session and keeps only that session's time;
-otherwise press q, and the first and last seconds are dropped (stepping on, walking to the laptop).
-It saves out/gait_<time>.json (the summary, for the AI feedback), .csv (every frame) and .mp4 (raw video).
+With --server it follows the game's sessions (vision/CONTRACT.md): it sees each session start on the server, sends a
+live summary every 15 s, and when the session ends sends the session's gait, cut by act, for the AI review
+(also saved as out/gait_<time>_<session id>.json). It keeps recording for the next game until q (--once: stops after
+the first). Without --server press q, and the first and last seconds are dropped (stepping on, walking to the laptop).
+It saves out/gait_<time>.json (the summary of the whole recording), .csv (every frame) and .mp4 (raw video).
 Use one GaitTracker per video stream. Check:  python test_gait.py
 
 Events follow Zeni et al. 2008: heel strike = ankle furthest in front of the hip, toe-off = toe furthest behind it.
@@ -182,7 +185,8 @@ def analyze(rows):
            "stride": {}, "stride_cv": {}, "flexion": {}, "knee": {}, "hip": {}, "ankle": {}, "stance_pct": {},
            "toe_lift_cm": {}, "pelvis_bounce_cm": {}, "arm_swing_cm": {}, "foot_strike_deg": {},
            "heel_first_pct": {}, "step_time": {}, "step_length_cm": {}, "curves": {},
-           "fps": (len(rows) - 1) / span if span > 0 else None, "glitch_frames": glitches}
+           "fps": (len(rows) - 1) / span if span > 0 else None, "glitch_frames": glitches,
+           "seen_frames": {s: len(side_rows[s]) for s in SIDES}}  # the near leg is seen confidently more often
     stance, n_cycles = {}, {}
     for s, rs in side_rows.items():
         ts = [r["t"] for r in rs]
@@ -312,6 +316,7 @@ def combine(parts):
     for k in ("strikes", "toe_offs"):
         res[k] = {s: sorted(t for p in parts for t in p[k][s]) for s in SIDES}
     res["glitch_frames"] = sum(p["glitch_frames"] for p in parts)
+    res["seen_frames"] = {s: sum((p.get("seen_frames") or {}).get(s, 0) for p in parts) for s in SIDES}
     res["asymmetry"] = asymmetry(res)
     return res
 
@@ -510,6 +515,10 @@ class Recorder:
     def capturing(self):
         return self._threads[0].is_alive()
 
+    def now(self):
+        """Seconds on the recording clock (the t of the rows) right now; live capture only."""
+        return time.monotonic() - self._t0
+
     def finish(self):
         """Stop capturing, let the model catch up on queued frames, close the video."""
         self.stop.set()
@@ -557,22 +566,275 @@ class Recorder:
             self.preview = frame
 
 
-def watch_game(server, player, rec, found):
-    """Poll the game server every 2 s; when the game saves a new session for player, put its (start, end) in wall
-    clock seconds into found["window"] and stop the recording. The server stamps a session after its Gemini note
-    and reward calls, so with keys set the window can sit a few seconds late."""
-    url = f"{server.rstrip('/')}/api/sessions/{urllib.parse.quote(player)}"
-    while not rec.stop.wait(2):
+# ---------------------------------------------------------------- game sessions (vision/CONTRACT.md)
+ACTS = ("walk", "garden", "storm")
+POLL = 1           # s between looks at the server's active session
+LIVE_EVERY = 15    # s between live summaries while a session runs
+LIVE_SPAN = 20     # s of walking in each live summary
+MIN_SEGMENT = 8    # s; a shorter stretch of one act holds too few strides to measure
+KEEP_S = 30 * 60   # s of rows kept in memory while following (about 1.6 KB a frame); longer than any session
+
+
+def finite(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def clock_offset(server_time, sent, received):
+    """Server clock minus local clock, from one reply: serverTime against the midpoint of the request."""
+    return server_time - (sent + received) / 2
+
+
+def to_recording(server_epoch, offset, start_epoch):
+    """A server timestamp on the recording clock (the rows' t)."""
+    return server_epoch - offset - start_epoch
+
+
+def session_span(start, game, detected_end=None):
+    """(start, end) of a session on the recording clock. The game's own length (wallSeconds, else the last segment's
+    end) beats the moment the active session vanished, which comes after the server's note and reward calls."""
+    game = game or {}
+    length = game.get("wallSeconds")
+    if not finite(length):
+        ends = [s.get("endS") for s in game.get("segments") or [] if isinstance(s, dict) and finite(s.get("endS"))]
+        length = max(ends) if ends else None
+    end = start + length if length else detected_end
+    if end is not None and detected_end is not None:
+        end = min(end, detected_end)
+    return start, end
+
+
+def act_windows(segments, pauses=(), start=0.0, end=None, min_len=MIN_SEGMENT):
+    """The game's segments (seconds since the session start) on the recording clock, pauses cut out, grouped by act:
+    {"walk": [(a, b)], "garden": [(a, b), ...], "storm": [...]}. Pieces past end or shorter than min_len are dropped."""
+    pauses = [(a, b) for a, b in (p for p in pauses or [] if isinstance(p, (list, tuple)) and len(p) == 2)
+              if finite(a) and finite(b) and b > a]
+    out = {}
+    for seg in segments or []:
+        if not isinstance(seg, dict) or seg.get("act") not in ACTS or not (finite(seg.get("startS")) and finite(seg.get("endS"))):
+            continue
+        pieces = [(seg["startS"], seg["endS"])]
+        for pa, pb in pauses:   # keep what lies before and after each pause
+            pieces = [q for x, y in pieces for q in ((x, min(y, pa)), (max(x, pb), y)) if q[1] > q[0]]
+        for x, y in pieces:
+            x, y = start + x, start + y if end is None else min(start + y, end)
+            if y - x >= min_len:
+                out.setdefault(seg["act"], []).append((x, y))
+    return out
+
+
+def slim(res):
+    """A summary without its long per-cycle curves and per-window trend."""
+    return None if res is None else {k: v for k, v in res.items() if k not in ("curves", "windows")}
+
+
+def per_act(rows, windows):
+    """summarize() of each act's stretches, merged across rounds (combine); acts with too little data are left out."""
+    out = {}
+    for act, spans in windows.items():
+        res = combine([p for p in (slim(summarize(rows, a, b)) for a, b in spans) if p])
+        if res:
+            out[act] = res
+    return out
+
+
+def json_safe(v):
+    """NaN and infinities become None, so the payload is plain JSON."""
+    if isinstance(v, dict):
+        return {k: json_safe(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [json_safe(x) for x in v]
+    return None if isinstance(v, float) and not math.isfinite(v) else v
+
+
+def final_payload(session_id, rows, start, end, game, captured, skipped, source="side-camera"):
+    """POST /api/gait/final body. game = the saved session's summary, or None when it could not be fetched
+    (then the session window only, and no acts). summary is None when too little was seen."""
+    windows = act_windows(game.get("segments"), game.get("pauses"), start, end) if game else {}
+    paused = [(start + a, start + b) for a, b in (p for p in (game or {}).get("pauses") or []
+                                                  if isinstance(p, (list, tuple)) and len(p) == 2)
+              if start is not None and finite(a) and finite(b) and b > a]
+    rows = [r for r in rows if not any(a <= r["t"] <= b for a, b in paused)]
+    n = sum(1 for r in rows if (start is None or r["t"] >= start) and (end is None or r["t"] <= end))
+    span = (end - start - sum(min(b, end) - max(a, start) for a, b in paused if b > start and a < end)
+            if start is not None and end is not None else None)   # walking time: the pauses' frames are gone
+    quality = {"fps": round(n / span, 1) if span and span > 0 else None, "framesCaptured": captured,
+               "framesAnalysed": n, "framesSkipped": skipped}
+    return json_safe({"sessionId": session_id, "source": source, "quality": quality,
+                      "summary": summarize(rows, start, end), "perAct": per_act(rows, windows)})
+
+
+def get_json(url, timeout=2):
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        return json.load(resp)
+
+
+def post_json(url, body, timeout=5):
+    req = urllib.request.Request(url, data=json.dumps(body, allow_nan=False).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.status, json.load(resp)
+
+
+def fetch_session(server, session_id, tries=40):
+    """The saved session (GET /api/session/{id}), or None. Usually there at once (the server clears the active session
+    after the save), but a player who restarts at Home ends it before the save, which waits for the server's note and
+    reward calls (the game gives it 25 s): so keep asking, once a second."""
+    url = f"{server}/api/session/{urllib.parse.quote(session_id)}"
+    for i in range(tries):
         try:
-            with urllib.request.urlopen(url, timeout=2) as resp:
-                sessions = json.load(resp)
-        except (OSError, ValueError):
-            continue  # server not up yet, or restarting
-        new = [s for s in sessions if s.get("ts", 0) > rec.start_epoch]
-        if new:
-            s = max(new, key=lambda s: s["ts"])
-            found["window"] = (s["ts"] - (s.get("summary") or {}).get("seconds", 0), s["ts"])
-            rec.stop.set()
+            return get_json(url, timeout=3)
+        except (OSError, ValueError) as e:
+            if i == tries - 1:
+                print(f"Session {session_id[:8]}: could not fetch it ({e}); posting the window only")
+            time.sleep(1)
+    return None
+
+
+def post_final(server, payload, path=None, player=None):
+    """POST /api/gait/final (one retry), save the payload next to the recording, print the report."""
+    sid = payload["sessionId"]
+    deadline = time.monotonic() + 40   # a 404 means the game has not saved the session yet (see fetch_session)
+    for i in range(30):
+        try:
+            status, _ = post_json(f"{server}/api/gait/final", payload, timeout=10)
+            print(f"Session {sid[:8]}: gait summary sent ({status}); the server reviews it now")
+            break
+        except (OSError, ValueError) as e:
+            waiting = getattr(e, "code", None) == 404 and time.monotonic() < deadline
+            if not waiting and i >= 1:
+                print(f"Session {sid[:8]}: could not send the gait summary ({e})")
+                break
+            time.sleep(2 if waiting else 1)
+    if path:
+        with open(path, "w") as fh:
+            json.dump({**payload, "player": player}, fh, indent=1)
+        print(f"Saved {path}")
+    report(payload["summary"])
+
+
+class SessionFollower:
+    """Follows the game's sessions on the server (live camera): marks each session's start from its startedAt, posts
+    a live summary every LIVE_EVERY s (also the check-in that makes the saved session wait for the review), and when
+    the session ends posts the final summary from a worker thread, so recording goes on for the next game."""
+
+    def __init__(self, server, rec, base, player=None, once=False):
+        self.server, self.rec, self.base, self.player, self.once = server.rstrip("/"), rec, base, player, once
+        self.offset, self.best_rtt = 0.0, math.inf   # server minus local clock, from the quickest reply so far
+        self.current = None    # {"id", "player", "start", "frames", "dropped"} of the session being played
+        self.seen = set()      # ids already followed, never started twice
+        self.workers = []
+        self.last_window = None   # (start, end, player) of the last finished session, recording clock
+        self.down = False
+
+    def active(self):
+        """The server's active session ({} when none), or None when the server did not answer."""
+        sent = time.time()
+        try:
+            got = get_json(f"{self.server}/api/session/active")
+        except (OSError, ValueError) as e:
+            if not self.down:
+                print(f"Game server not answering ({e}); still recording")
+            self.down = True
+            return None
+        received = time.time()
+        if self.down:
+            print("Game server back")
+        self.down = False
+        if finite(got.get("serverTime")) and received - sent < self.best_rtt:
+            self.best_rtt, self.offset = received - sent, clock_offset(got["serverTime"], sent, received)
+        return got
+
+    def run(self):
+        last_live = -math.inf
+        while not self.rec.stop.wait(POLL):
+            try:
+                last_live = self.step(last_live)
+            except Exception as e:  # noqa: BLE001 - keep following; the next poll tries again
+                print(f"Session follower: {e}")
+
+    def trim(self):
+        """Forget rows older than KEEP_S that no session still needs (the CSV on disk keeps every frame)."""
+        rows, now = self.rec.g.rows, self.rec.now()
+        keep = now - KEEP_S if not self.current else min(now - KEEP_S, self.current["start"] - LIVE_SPAN)
+        if rows and rows[0]["t"] < keep and not any(th.is_alive() for th in self.workers):
+            del rows[:bisect.bisect_left([r["t"] for r in rows], keep)]
+
+    def step(self, last_live):
+        """One poll: start, end or keep up the session being played. Returns when the last live summary went."""
+        self.trim()
+        got = self.active()
+        if got is None:
+            return last_live   # no answer: keep the current session as it is
+        sid = got.get("id") if not self.player or got.get("player") == self.player else None
+        cur = self.current
+        if cur and cur["id"] != sid:
+            self.end(cur)
+        if sid and sid not in self.seen and finite(got.get("startedAt")):
+            self.seen.add(sid)
+            start = to_recording(got["startedAt"], self.offset, self.rec.start_epoch)
+            self.current = {"id": sid, "player": got.get("player"), "start": start,
+                            "frames": self.rec.frames, "dropped": self.rec.dropped}
+            print(f"Session {sid[:8]} for {got.get('player')}: recording its gait")
+            last_live = -math.inf
+        if self.current and self.rec.now() - last_live >= LIVE_EVERY:
+            last_live = self.rec.now()
+            self.live(self.current)
+        return last_live
+
+    def live(self, cur):
+        rows = list(self.rec.g.rows)
+        if not rows:
+            return
+        res = slim(summarize(rows, rows[-1]["t"] - LIVE_SPAN, rows[-1]["t"]))
+        if res is None:
+            return
+        try:
+            post_json(f"{self.server}/api/gait", json_safe({"player": cur["player"], "source": "side-camera",
+                                                             "sessionId": cur["id"], "summary": res}))
+        except (OSError, ValueError) as e:
+            print(f"Live gait summary not sent ({e})")
+
+    def end(self, cur):
+        self.current = None
+        snap = dict(cur, end=self.rec.now(), frames=self.rec.frames - cur["frames"], dropped=self.rec.dropped - cur["dropped"])
+        th = threading.Thread(target=self.finish, args=(snap,), daemon=True)
+        self.workers.append(th)
+        th.start()
+
+    def finish(self, cur):
+        try:
+            session = fetch_session(self.server, cur["id"])
+            game = (session or {}).get("summary") or None
+            start, end = session_span(cur["start"], game, cur["end"])
+            deadline = time.monotonic() + 5   # the model can sit a few seconds behind the camera
+            while self.rec.capturing() and time.monotonic() < deadline and \
+                    (not self.rec.g.rows or self.rec.g.rows[-1]["t"] < end):
+                time.sleep(0.2)
+            payload = final_payload(cur["id"], list(self.rec.g.rows), start, end, game, cur["frames"], cur["dropped"])
+            self.last_window = (start, end, cur["player"])
+            post_final(self.server, payload, f"{self.base}_{cur['id'][:8]}.json", cur["player"])
+        except Exception as e:  # noqa: BLE001 - one bad session must not take the recording down
+            print(f"Session {cur['id'][:8]}: gait summary failed ({e})")
+        if self.once:
+            self.rec.stop.set()
+
+    def wait(self, timeout=60):
+        """Let finals still being sent finish (the main thread exits after this)."""
+        for th in self.workers:
+            th.join(timeout)
+        if self.current:
+            print(f"Session {self.current['id'][:8]} was still running; its gait summary was not sent")
+
+
+def replay_final(server, session_id, rows, offset, base):
+    """--video with --session-id: the video stands in for the camera of that session, which started at video t = offset."""
+    server = server.rstrip("/")
+    session = fetch_session(server, session_id, tries=2)
+    game = (session or {}).get("summary") or None
+    start, end = session_span(offset, game, rows[-1]["t"] if rows else None)
+    n = sum(1 for r in rows if start <= r["t"] <= (end if end is not None else math.inf))
+    payload = final_payload(session_id, rows, start, end, game, n, 0)   # a video is never ahead of the model
+    post_final(server, payload, f"{base}_{session_id[:8]}.json", (session or {}).get("player"))
 
 
 def session_window(rows, game, epoch0, trim_start, trim_end):
@@ -595,12 +857,18 @@ def main():
     p.add_argument("--camera-name", help="substring of camera name, e.g. iphone")
     p.add_argument("--model", default="full", choices=("lite", "full", "heavy"),
                    help="heavy is most accurate but slow live; fine for recorded video")
-    p.add_argument("--server", help="game server, e.g. http://localhost:8000: stop when the game saves the "
-                                    "player's session and keep only that session's time (live camera only)")
-    p.add_argument("--player", default="Player", help="player name in the game, for --server")
+    p.add_argument("--server", help="game server, e.g. http://localhost:8000: follow its game sessions and send each "
+                                    "one's gait summary for the AI review (with --video: needs --session-id)")
+    p.add_argument("--player", help="with --server: follow only this player's sessions (default: every player)")
+    p.add_argument("--once", action="store_true", help="with --server: stop after the first finished session")
+    p.add_argument("--session-id", help="with --video and --server: the game session this recording belongs to")
+    p.add_argument("--offset", type=float, default=0.0,
+                   help="with --session-id: video seconds at which that session started")
     p.add_argument("--trim-start", type=float, default=1.0, help="seconds dropped at the start without --server")
     p.add_argument("--trim-end", type=float, default=2.0, help="seconds dropped at the end without --server")
     args = p.parse_args()
+    if args.video and args.server and not args.session_id:
+        raise SystemExit("--video with --server replays one game session: add --session-id <id> (and --offset)")
 
     if args.video:
         cap = cv2.VideoCapture(args.video)
@@ -614,10 +882,13 @@ def main():
     os.makedirs("out", exist_ok=True)
     stamp = time.strftime("%Y%m%d_%H%M%S")
     g = GaitTracker(args.model, csv_path=f"out/gait_{stamp}.csv")
-    rec, game = Recorder(cap, g, f"out/gait_{stamp}.mp4", live=not args.video), {}
+    base = f"out/gait_{stamp}"
+    rec = Recorder(cap, g, f"{base}.mp4", live=not args.video)
     rec.start()
+    follower = None
     if args.server and not args.video:
-        threading.Thread(target=watch_game, args=(args.server, args.player, rec, game), daemon=True).start()
+        follower = SessionFollower(args.server, rec, base, args.player, args.once)
+        threading.Thread(target=follower.run, daemon=True).start()
     try:
         while not rec.stop.is_set() and rec.capturing():
             frame = rec.preview
@@ -634,12 +905,18 @@ def main():
     cap.release()
     cv2.destroyAllWindows()
     g.close()
+    if follower:
+        follower.wait()
+    if args.video and args.server:
+        replay_final(args.server, args.session_id, g.rows, args.offset, base)
 
-    start, end, source = session_window(g.rows, game.get("window"), rec.start_epoch, args.trim_start, args.trim_end)
+    # the whole recording, kept locally: the last followed session's window (as --once had it), else trimmed
+    last = follower and follower.last_window
+    game = (last[0] + rec.start_epoch, last[1] + rec.start_epoch) if last and last[1] is not None else None
+    start, end, source = session_window(g.rows, game, rec.start_epoch, args.trim_start, args.trim_end)
     res = g.summary(start, end)
-    base = f"out/gait_{stamp}"
-    with open(f"{base}.json", "w") as fh:  # what the AI feedback reads: the summary, not the per-frame CSV
-        json.dump({"player": args.player if args.server else None, "recorded_at": rec.start_epoch,
+    with open(f"{base}.json", "w") as fh:  # the summary, not the per-frame CSV
+        json.dump({"player": last[2] if last else args.player, "recorded_at": rec.start_epoch,
                    "analysed": {"start_s": start, "end_s": end, "source": source},
                    "files": {"video": f"{base}.mp4", "csv": f"{base}.csv"}, "video_fps": rec.fps,
                    "frames": {"captured": rec.frames, "analysed": len(g.rows), "skipped": rec.dropped},

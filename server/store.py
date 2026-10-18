@@ -8,6 +8,7 @@ import math
 import os
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -87,7 +88,9 @@ class Store:
 
     def _save(self, db: dict[str, Any]) -> None:
         DATA.mkdir(exist_ok=True)
-        self.file.write_text(json.dumps(db, indent=1))
+        tmp = self.file.with_suffix(".tmp")   # write then rename: a crash mid-write never leaves half a file
+        tmp.write_text(json.dumps(db, indent=1))
+        os.replace(tmp, self.file)
 
     # ---------- settings (one document per key, for the shoe calibration and the like) ----------
     def setting(self, key: str) -> dict[str, Any] | None:
@@ -118,6 +121,7 @@ class Store:
         return {"name": name, "limits": clean_limits(doc.get("limits", {})), "rewards": doc.get("rewards", []),
                 "assistantId": doc.get("assistantId"), "notes": doc.get("notes", ""),
                 "perceptronConsent": bool(doc.get("perceptronConsent", False)),
+                "aiReviewConsent": bool(doc.get("aiReviewConsent", False)),
                 "perceptronReports": doc.get("perceptronReports", []), "gait": doc.get("gait")}
 
     def update_player(self, name: str, **fields: Any) -> dict[str, Any]:
@@ -145,9 +149,9 @@ class Store:
 
     # ---------- sessions ----------
     def add_session(self, name: str, summary: dict[str, Any], verified: bool, note: str = "",
-                    rewarded: bool = False) -> dict[str, Any]:
-        doc = {"player": name, "summary": summary, "verified": verified, "note": note, "rewarded": rewarded,
-               "ts": time.time()}
+                    rewarded: bool = False, session_id: str | None = None, **extra: Any) -> dict[str, Any]:
+        doc = {"id": session_id or uuid.uuid4().hex, "player": name, "summary": summary, "verified": verified,
+               "note": note, "rewarded": rewarded, "ts": time.time(), **extra}
         if self.mongo is not None:
             self.mongo.sessions.insert_one(dict(doc))
         else:
@@ -156,6 +160,26 @@ class Store:
                 db["sessions"].append(doc)
                 self._save(db)
         return doc
+
+    def session(self, session_id: str) -> dict[str, Any] | None:
+        if self.mongo is not None:
+            return self.mongo.sessions.find_one({"id": session_id}, {"_id": 0})
+        with self.lock:
+            return next((r for r in self._load()["sessions"] if r.get("id") == session_id), None)
+
+    def update_session(self, session_id: str, **fields: Any) -> dict[str, Any] | None:
+        """Set only the given fields on one session (the gait summary and its review arrive after the save)."""
+        if self.mongo is not None:
+            self.mongo.sessions.update_one({"id": session_id}, {"$set": fields})
+            return self.session(session_id)
+        with self.lock:
+            db = self._load()
+            doc = next((r for r in db["sessions"] if r.get("id") == session_id), None)
+            if doc is None:
+                return None
+            doc.update(fields)
+            self._save(db)
+            return doc
 
     def sessions(self, name: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         if self.mongo is not None:

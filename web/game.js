@@ -266,15 +266,20 @@ function openZone() {
   const homeResult = home?.homeData.result;
   const homeShare = home?.homeData.share;
   for (const scene of scenes) { scene.scene.pause(); scene.scene.setVisible(false); }
+  play?.markPause(true);   // the side camera's timeline counts the setup as a pause
   sound.setMusic(false); clip.setPaused(true);
   game.scene.start('zone');
   zone.open(() => {
     game.scene.stop('zone');
     for (const scene of scenes) { scene.scene.resume(); scene.scene.setVisible(true); }
-    if (play) { play.frameWall = performance.now(); resetShoes(play.g); }   // sightings from before the setup are stale
+    if (play) {
+      play.frameWall = performance.now(); resetShoes(play.g);   // sightings from before the setup are stale
+      if (!play.paused) play.markPause(false);                  // a Space pause goes on until Space
+    }
     // A session response or clip upload may have completed while Home was paused.
     if (home) {
       home.showLab();
+      home.showGait();
       if (home.homeData.result && home.homeData.result !== homeResult) home.showResult(home.homeData.result);
       if (home.homeData.share && home.homeData.share !== homeShare) home.showShare(home.homeData.share);
       else if (!home.homeData.share && home.homeData.shareStatus) { home.shareText.setText(home.homeData.shareStatus); home.layoutCard(); }
@@ -632,6 +637,16 @@ class Play extends Phaser.Scene {
     this.footFlash = { L: 0, R: 0 };
     this.lastCue = 0;
     this.frameWall = performance.now();
+    // One session id ties this game, the side camera's recording and the gait review; the game never waits for it.
+    this.sessionId = null;
+    this.startWall = performance.now();
+    this.segments = [];                    // {act, round, startS, endS}, wall-clock seconds since the start below
+    this.pauses = [];                      // [startS, endS]
+    this.pauseAt = null;
+    const game = this.g;
+    withTimeout(api('/api/session/start', { player: settings.player }), 5000)
+      .then((r) => { if (this.g === game && typeof r?.id === 'string') this.sessionId = r.id; })
+      .catch(() => {});                    // offline: the session is saved without an id, as before
 
     makeFloor(this, this.layout());
     this.pods = { L: this.add.image(0, 0, 'pod').setVisible(false).setScale(POD_SCALE).setDepth(3),
@@ -678,6 +693,7 @@ class Play extends Phaser.Scene {
       if (zone.active) return;
       this.paused = !this.paused;
       publishGarden({ paused: this.paused, coachColor: '', coach: this.paused ? 'Paused · Space to keep walking' : this.coachLine });
+      this.markPause(this.paused);
       sound.setMusic(!this.paused);
       clip.setPaused(this.paused);
       if (!this.paused) resetShoes(this.g);   // sightings and half swings from before the pause are stale
@@ -685,7 +701,25 @@ class Play extends Phaser.Scene {
     if (settings.greeting) { this.coachLine = settings.greeting; setTimeout(() => say(settings.greeting), 2600); }
     const jump = params.get('act');
     if (jump) { startAt(this.g, jump); params.delete('act'); }   // development shortcut, first game only
+    this.nextSegment();
     this.showAct();
+  }
+
+  // Wall-clock seconds since the game asked for its session, pauses included: the side camera cuts its recording by them.
+  wallS() { return Math.round((performance.now() - this.startWall) / 100) / 10; }
+
+  // Ends the current act's segment and opens one for the act now playing (none for home).
+  nextSegment() {
+    const now = this.wallS();
+    const last = this.segments[this.segments.length - 1];
+    if (last) last.endS = now;
+    if (this.g.act !== 'home') this.segments.push({ act: this.g.act, round: this.g.round, startS: now, endS: null });
+  }
+
+  // A pause (Space or the zone setup) for the same timeline: on starts one, off ends it.
+  markPause(on) {
+    if (on && this.pauseAt === null) this.pauseAt = this.wallS();
+    else if (!on && this.pauseAt !== null) { this.pauses.push([this.pauseAt, this.wallS()]); this.pauseAt = null; }
   }
 
   // Shoe boxes from feet.py while this game runs: onto the field, into the rules, with the usual step feedback.
@@ -848,13 +882,15 @@ class Play extends Phaser.Scene {
     const L = this.layout();
 
     if (out.actChanged) {
+      this.nextSegment();
       if (this.g.act === 'home') {
         // The scene is about to close: play the sounds, skip visuals that would be torn down at once.
         for (const th of out.resolved) {
           sound.play(th.result !== 'hit' ? 'miss' : th.kind === 'flower' ? 'stomp' : 'dodge');
           if (th.result === 'hit') reaction(th.kind === 'flower' ? 'stomp' : 'dodge');
         }
-        this.scene.start('home', { summary: { ...summary(this.g), perceptron: perceiver.summary() } }); return;
+        const timing = { segments: this.segments, pauses: this.pauses, wallSeconds: this.wallS() };
+        this.scene.start('home', { summary: { ...summary(this.g), perceptron: perceiver.summary(), ...timing }, sessionId: this.sessionId }); return;
       }
       this.sprites.forEach((s) => s.destroy());
       this.sprites.clear();
@@ -1034,6 +1070,10 @@ class Home extends Phaser.Scene {
     this.rewardText = text('Ag\nAg', bodySize, C.magenta);
     this.rewardHeight = this.rewardText.height;
     this.rewardText.setText('');
+    // The side camera's gait review: room for four lines once one is on its way, so the card does not jump.
+    this.gaitText = text('Ag\nAg\nAg\nAg', small ? 18 : 22, C.green);
+    this.gaitHeight = this.gaitText.height;
+    this.gaitText.setText('');
     this.footer = text('Walk to play again · R', small ? 22 : 24, C.yellow);
     this.shareText = text(SHARE ? data.shareStatus || 'Preparing your walk clip…' : '', small ? 20 : 24, C.yellow);
     this.qrImage = null;
@@ -1043,6 +1083,7 @@ class Home extends Phaser.Scene {
       data.clipTask = this.prepareClip(data);
     }
     if (data.result) this.showResult(data.result);
+    if (data.gaitStatus) this.showGait();
     say(`${ENDING} ${s.stompPct ?? 0} percent of flowers stomped. Great walking.`);
     const playAgain = () => {
       if (this.restarting || zone.active) return;   // once, and not under the zone setup
@@ -1081,8 +1122,14 @@ class Home extends Phaser.Scene {
       });
     }
     const verified = (s.formPct ?? 0) >= 40;        // walking was verified for most of the session
-    withTimeout(api('/api/session', { player: settings.player, summary: s, verified }), 25000)
-      .then((result) => { data.result = result; if (this.sys.isActive()) this.showResult(result); })
+    withTimeout(api('/api/session', { player: settings.player, summary: s, verified, ...(data.sessionId && { id: data.sessionId }) }), 25000)
+      .then((result) => {
+        data.result = result;
+        if (this.sys.isActive()) this.showResult(result);
+        // gaitReview null: no side camera recorded this game, so no review will come. (An older server leaves it out.)
+        const id = result?.id || data.sessionId;
+        if (id && !data.cancelled && result?.gaitReview !== null) this.followGait(data, id, result?.gaitReview);
+      })
       .catch(() => {
         data.result = { note: 'Not saved: the game server did not answer.' };
         if (this.sys.isActive()) this.showResult(data.result);
@@ -1096,10 +1143,11 @@ class Home extends Phaser.Scene {
     const textWidth = W * 0.84 - 56 - qrWidth;
     const textX = W * 0.08 + 16 + textWidth / 2;
     const qrX = W * 0.92 - 16 - qrWidth / 2;
-    const items = [this.heading, this.ending, ...this.stats, this.labText, this.noteText, this.rewardText, this.footer];
+    const items = [this.heading, this.ending, ...this.stats, this.labText, this.noteText, this.gaitText, this.rewardText, this.footer];
     for (const item of items) item.setScale(1).setWordWrapWidth(textWidth);
     const reservedHeight = (item) => Math.max(item.height,
-      item === this.noteText ? this.noteHeight : item === this.rewardText ? this.rewardHeight : 0);
+      item === this.noteText ? this.noteHeight : item === this.rewardText ? this.rewardHeight
+        : item === this.gaitText && this.homeData.gaitStatus ? this.gaitHeight : 0);
     const naturalHeight = items.reduce((sum, item) => sum + reservedHeight(item) + gap, 28);
     const fit = Math.min(1, (H - 84) / naturalHeight);
     let cursor = 14;
@@ -1163,6 +1211,43 @@ class Home extends Phaser.Scene {
   showLab() {
     // The caption goes with the lab line; the line under the QR keeps telling the player to scan.
     this.labText.setText([this.homeData.labStatus, this.homeData.caption && `“${this.homeData.caption}”`].filter(Boolean).join('\n'));
+    this.layoutCard();
+  }
+
+  // After the save: when a side camera recorded this walk, its review is on the way. Poll every 3 s for up to
+  // 2 minutes; a newer game (R, walking again) or a newer Home stops it. Nothing shows without a side camera.
+  async followGait(data, id, saved) {
+    if (saved) { data.gaitReview = saved; data.gaitStatus = saved.status; if (this.sys.isActive()) this.showGait(); }
+    const url = `/api/session/${encodeURIComponent(id)}`;
+    const until = performance.now() + 120000;
+    for (let first = true; performance.now() < until; first = false) {
+      if (!first || saved) await new Promise((resolve) => setTimeout(resolve, 3000));
+      if (data.cancelled || this.homeData !== data) return;
+      let review;
+      try { review = (await withTimeout(api(url), 5000)).gaitReview; } catch { if (first && !saved) return; continue; }
+      if (data.cancelled || this.homeData !== data) return;
+      if (!review) return;   // no side camera checked in for this game
+      data.gaitReview = review;
+      data.gaitStatus = review.status;
+      if (this.sys.isActive()) this.showGait();
+      if (review.status === 'done' || review.status === 'failed') {
+        const words = review.review?.playerFeedback;
+        if (review.status === 'done' && words && !data.gaitSpoken) { data.gaitSpoken = true; say(words); }
+        return;
+      }
+    }
+    if (data.cancelled || this.homeData !== data) return;
+    data.gaitStatus = 'late';
+    if (this.sys.isActive()) this.showGait();
+  }
+
+  showGait() {
+    const d = this.homeData;
+    const r = d.gaitReview?.review;
+    this.gaitText.setText(d.gaitStatus === 'done' && r ? [r.playerFeedback, r.focus?.text && `Next time: ${r.focus.text}`].filter(Boolean).join('\n')
+      : d.gaitStatus === 'waiting' || d.gaitStatus === 'reviewing' ? 'The coach is reviewing your walk…'
+        : d.gaitStatus === 'late' ? 'Your walk review will be in the therapist panel.'
+          : d.gaitStatus === 'failed' ? `No walk review this time${d.gaitReview?.reason ? `: ${d.gaitReview.reason}` : ''}` : '');
     this.layoutCard();
   }
 

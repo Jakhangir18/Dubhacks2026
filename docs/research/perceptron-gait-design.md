@@ -18,7 +18,7 @@ gait.py measures; Perceptron looks without seeing the numbers; code compares the
   - PF (deepest knee bend): the minimum knee angle in (TO, next IC), with its angle.
   - MSw (mid-swing): first forward zero crossing of the signal after PF (fallback: midpoint of PF and next IC).
   - Property test: IC < TO < PF < MSw < next IC for every stride, and PF's angle is the minimum in [TO, next IC].
-- Near side = "L" when walking towards the right of the image, else "R" (unmirrored camera). Cross-check with landmark visibility; flag "camera mirrored or L/R swapped" when they disagree.
+- Near side = "R" when walking towards the right of the image, else "L" (unmirrored camera; checked on the recordings in `out/`, where the near leg has the higher visibility and the smaller world z). `server/gait_review.near_side()` prefers the leg MediaPipe saw confidently more often (`seen_frames` in the gait.py summary), which also holds for a mirrored camera.
 - Steady window: at least 4 near strides with stride-time CV under 15 % (a pad has no turns, so no model call is needed to find it).
 - Strides: A near-leg median knee bend, B near-leg least bend, C far-leg median, D far-leg least bend.
 - Frames: a pair of adjacent frames (about 33 ms apart) at each event: 4 strides x 4 events x 2 = 32 frames. Sort by time, drop duplicates.

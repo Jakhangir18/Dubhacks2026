@@ -12,7 +12,8 @@ from typing import Any
 
 import httpx
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+from server import gemini
+
 BACKBOARD_URL = "https://app.backboard.io/api/threads/messages"
 
 COACH_SYSTEM = (
@@ -49,24 +50,8 @@ def clamp(v: Any, lo: float, hi: float, default: float) -> float:
 
 # ---------------------------------------------------------------- Gemini
 async def gemini_json(system: str, user: str, timeout: float = 4) -> dict[str, Any] | None:
-    key = os.environ.get("GEMINI_API_KEY")
-    if not key:
-        return None
-    model = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
-    body = {
-        "systemInstruction": {"parts": [{"text": system}]},
-        "contents": [{"role": "user", "parts": [{"text": user}]}],
-        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.5},
-    }
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.post(GEMINI_URL.format(model=model), params={"key": key}, json=body)
-            r.raise_for_status()
-            text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-            out = json.loads(text)
-            return out if isinstance(out, dict) else None
-    except (httpx.HTTPError, KeyError, IndexError, json.JSONDecodeError, ValueError):
-        return None
+    out, _ = await gemini.generate_json(system, user, timeout=timeout)
+    return out
 
 
 # ---------------------------------------------------------------- Backboard memory
@@ -94,7 +79,8 @@ async def backboard(content: str, assistant_id: str | None, memory: str, timeout
 
 
 # ---------------------------------------------------------------- live coach
-def rule_cue(summary: dict[str, Any], limits: dict[str, Any]) -> dict[str, Any]:
+def rule_cue(summary: dict[str, Any], limits: dict[str, Any], side: dict[str, Any] | None = None) -> dict[str, Any]:
+    """side: the side camera's live numbers (gait_review.live_view), when it is recording this walk."""
     act = summary.get("act")
     cadence = summary.get("cadence") or 0
     asym = summary.get("asymmetryPct")
@@ -122,6 +108,14 @@ def rule_cue(summary: dict[str, Any], limits: dict[str, Any]) -> dict[str, Any]:
             return {"say": "Lift the foot higher over the seed", "params": {"liftCm": lift - 1}}
         if pct is not None and pct > 85:
             return {"say": "Super lifts! Let us go a bit higher", "params": {"liftCm": lift + 1}}
+    if side:
+        # Only the leg nearer the side camera is measured well enough to name it.
+        name = {"L": "left", "R": "right"}.get(side.get("nearSide"), "")
+        knee, toe = side.get("kneeBendDeg"), side.get("toeLiftCm")
+        if knee is not None and knee < 40:
+            return {"say": f"Bend your {name} knee a little more each step", "params": {}}
+        if toe is not None and toe < 4:
+            return {"say": f"Lift your {name} toes a little higher each step", "params": {}}
     return {"say": "Great walking, keep it up", "params": {}}
 
 
@@ -137,11 +131,16 @@ def clamp_params(params: Any, limits: dict[str, Any]) -> dict[str, float]:
     return out
 
 
-async def coach(summary: dict[str, Any], limits: dict[str, Any]) -> dict[str, Any]:
-    out = await gemini_json(COACH_SYSTEM, json.dumps({"summary": summary, "limits": limits}))
+async def coach(summary: dict[str, Any], limits: dict[str, Any], side: dict[str, Any] | None = None,
+                share_side: bool = False) -> dict[str, Any]:
+    """side: live side-camera numbers; they go to the model only with share_side (the player's AI review consent)."""
+    body: dict[str, Any] = {"summary": summary, "limits": limits}
+    if side and share_side:
+        body["sideCamera"] = side
+    out = await gemini_json(COACH_SYSTEM, json.dumps(body))
     source = "gemini"
     if not out or not isinstance(out.get("say"), str):
-        out, source = rule_cue(summary, limits), "rules"
+        out, source = rule_cue(summary, limits, side), "rules"
     say = " ".join(str(out["say"]).split()[:14])
     return {"say": say, "params": clamp_params(out.get("params"), limits), "source": source}
 
@@ -170,7 +169,10 @@ async def plan(player: dict[str, Any], recent: list[dict[str, Any]]) -> dict[str
         dodge = last.get("dodgePct")
         stomp = last.get("stompPct")
         weak = "the seeds" if dodge is not None and (stomp is None or dodge < stomp) else "the flowers"
-        return {"say": f"Welcome back {name}! Last time you walked {last.get('steps', 0)} steps. Today, focus on {weak}.",
+        review = recent[0].get("gaitReview") or {}
+        focus = ((review.get("review") or {}).get("focus") or {}).get("text") if review.get("status") == "done" else None
+        today = focus.rstrip(".") if focus else f"focus on {weak}"   # the last gait review's focus beats the game's guess
+        return {"say": f"Welcome back {name}! Last time you walked {last.get('steps', 0)} steps. Today: {today}.",
                 "source": "history"}
     return {"say": f"Hi {name}! Let us walk home together.", "source": "rules"}
 

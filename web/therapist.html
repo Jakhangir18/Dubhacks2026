@@ -34,6 +34,9 @@
     #lab-frame { width: 320px; max-width: 100%; background: #0b0d0b; border-radius: 8px; }
     #lab-timeline { position: relative; height: 24px; background: #2a302a; border-radius: 6px; overflow: hidden; }
     .lab-moment { position: absolute; top: 3px; height: 18px; min-width: 3px; background: var(--yellow); }
+    tr.detail > td { background: #101410; padding: 10px 14px; }
+    .detail p { margin: 4px 0; } .detail ul { margin: 4px 0; padding-left: 18px; }
+    a { color: var(--cyan); }
   </style>
 </head>
 <body>
@@ -52,7 +55,8 @@
       <div class="row"><button class="primary" id="play">Play as this player</button><span class="hint" id="current"></span></div>
       <p class="hint">The game uses the current player's limits, their memory and their reward list.</p>
       <label>Perceptron double-check: send leg-only frames (knees down, no face) <input type="checkbox" id="perceptronConsent"></label>
-      <p class="hint">Off by default. Saved with the button under Rewards.</p>
+      <label>AI gait review: send the side camera's numbers (no video) to Gemini <input type="checkbox" id="aiReviewConsent"></label>
+      <p class="hint">Off by default. Saved with the button under Rewards. Without consent the gait review uses fixed rules on this computer.</p>
       <div id="msg"></div>
     </section>
 
@@ -108,8 +112,8 @@
 
     <section class="wide">
       <h2>Sessions</h2>
-      <table><thead><tr><th>When</th><th>Steps</th><th>Pace</th><th>Flowers</th><th>Seeds</th><th>Form</th><th>High-step lift L / R</th><th>Verified</th><th>Perceptron</th><th>Coach note</th></tr></thead>
-        <tbody id="sessions"><tr><td colspan="10" class="hint">no sessions yet</td></tr></tbody></table>
+      <table><thead><tr><th>When</th><th>Steps</th><th>Pace</th><th>Flowers</th><th>Seeds</th><th>Form</th><th>High-step lift L / R</th><th>Verified</th><th>Perceptron</th><th>Coach note</th><th>Gait review</th></tr></thead>
+        <tbody id="sessions"><tr><td colspan="11" class="hint">no sessions yet</td></tr></tbody></table>
     </section>
   </main>
   <script>
@@ -155,6 +159,7 @@
       rewards = p.rewards || [];
       $('notes').value = p.notes || '';
       $('perceptronConsent').checked = !!p.perceptronConsent;
+      $('aiReviewConsent').checked = !!p.aiReviewConsent;
       drawLab(p.perceptronReports?.[0]);
       drawRewards();
       $('current').textContent = `current: ${store.get('zombiewalk.player', 'none')}`;
@@ -229,18 +234,85 @@
       }));
     }
 
+    // ---------- sessions and the side camera's gait review ----------
+    const opened = new Set();   // session ids whose review details are open; kept across refreshes
+    let sessionsTimer = null;
+    const el = (tag, text, cls) => { const e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; };
+    function reviewState(r) {
+      const g = r.gaitReview;
+      if (!g) return '-';
+      if (g.status === 'failed') return `failed${g.reason ? `: ${g.reason}` : ''}`;
+      return { waiting: 'waiting for the side camera', reviewing: 'reviewing…' }[g.status]
+        || (g.status === 'done' ? `done · ${g.source === 'gemini' ? 'Gemini' : 'rules'}` : g.status);
+    }
+
+    // The short version of a review under its session row; the full one is report.html.
+    function reviewDetail(r) {
+      const g = r.gaitReview, v = g.review || {};
+      const cell = el('td'); cell.colSpan = 11;
+      const box = el('div', null, 'detail');
+      const source = g.source === 'gemini' ? `Gemini${g.model ? ` (${g.model})` : ''}` : `rules${g.reason ? `: ${g.reason}` : ''}`;
+      const quality = g.dataQuality ? `data ${g.dataQuality.level}${g.dataQuality.issues?.length ? `: ${g.dataQuality.issues.join('; ')}` : ''}` : '';
+      const rules = g.source === 'gemini' && g.filledByRules?.length ? `some parts written by the rules: ${g.filledByRules.join(', ')}` : '';
+      box.append(el('p', [source, quality, rules].filter(Boolean).join(' · '), 'hint'));
+      if (v.overview) box.append(el('p', v.overview));
+      if (v.focus?.text) {
+        const p = el('p'); p.append(el('b', 'Focus: '), document.createTextNode(`${v.focus.text}${v.focus.why ? ` (${v.focus.why})` : ''}`)); box.append(p);
+      }
+      if (v.findings?.length) {
+        const ul = el('ul');
+        for (const f of v.findings) ul.append(el('li', `${f.area}${f.side && f.side !== 'none' ? `, ${f.side}` : ''} (${f.confidence}): ${f.text}`));
+        box.append(ul);
+      }
+      const next = v.nextSession || {};
+      const keys = [['liftCm', 'lift target', 'cm'], ['spacingCm', 'flower spacing', 'cm'], ['minCadence', 'minimum pace', 'steps/min']]
+        .filter(([k]) => Number.isFinite(next[k]));
+      if (keys.length) {
+        const row = el('div', null, 'row');
+        row.append(el('span', `Suggested next time: ${keys.map(([k, label, unit]) => `${label} ${next[k]} ${unit}`).join(', ')}${next.why ? ` (${next.why})` : ''}`));
+        const b = el('button', 'Apply suggested settings');
+        b.onclick = () => applySuggestion(next);
+        row.append(b); box.append(row);
+      }
+      if (r.id) { const a = el('a', 'Full report'); a.href = `/report.html?id=${encodeURIComponent(r.id)}`; a.target = '_blank'; box.append(a); }
+      cell.append(box);
+      const tr = el('tr', null, 'detail'); tr.append(cell);
+      return tr;
+    }
+
     async function sessions(name) {
+      clearTimeout(sessionsTimer);
       const rows = await api(`/api/sessions/${encodeURIComponent(name)}`);
-      if (!rows.length) { $('sessions').innerHTML = '<tr><td colspan="10" class="hint">no sessions yet</td></tr>'; return; }
-      $('sessions').replaceChildren(...rows.map((r) => {
+      if (player?.name !== name) return;   // another player was loaded meanwhile
+      if (!rows.length) { $('sessions').innerHTML = '<tr><td colspan="11" class="hint">no sessions yet</td></tr>'; return; }
+      $('sessions').replaceChildren(...rows.flatMap((r) => {
         const s = r.summary || {};
         const tr = document.createElement('tr');
         tr.append(td(new Date(r.ts * 1000).toLocaleString()), td(s.steps), td(s.cadence), td(s.stompPct == null ? '-' : `${s.stompPct}%`),
           td(s.dodgePct == null ? '-' : `${s.dodgePct}%`), td(s.formPct == null ? '-' : `${s.formPct}%`),
           td(`${s.highLiftAvgCm?.L ?? '-'} / ${s.highLiftAvgCm?.R ?? '-'} cm`), td(r.verified ? 'yes' : 'no'),
           td(s.perceptron?.checked ? `${s.perceptron.agree}/${s.perceptron.checked} agree` : '-'), td(r.note || ''));
-        return tr;
+        const cell = td(reviewState(r));
+        const key = r.id || String(r.ts);
+        if (r.gaitReview?.status === 'done') {
+          const b = el('button', opened.has(key) ? 'hide' : 'details');
+          b.style.marginLeft = '6px';
+          b.onclick = () => { if (opened.has(key)) opened.delete(key); else opened.add(key); sessions(name); };
+          cell.append(b);
+        }
+        tr.append(cell);
+        return r.gaitReview?.status === 'done' && opened.has(key) ? [tr, reviewDetail(r)] : [tr];
       }));
+      // A review on its way: look again in a few seconds.
+      if (rows.some((r) => ['waiting', 'reviewing'].includes(r.gaitReview?.status))) sessionsTimer = setTimeout(() => sessions(name).catch(() => {}), 5000);
+    }
+
+    // The review's suggestion goes through the normal save, so the server clamps it to the ranges above.
+    async function applySuggestion(next) {
+      if (!player) return say('load a player first');
+      for (const k of ['liftCm', 'spacingCm', 'minCadence']) if (Number.isFinite(next[k])) $(k).value = next[k];
+      await save();
+      say(`applied the suggested settings to ${player.name}`);
     }
 
     async function load(name) {
@@ -259,7 +331,7 @@
       if (!name) return;
       rewards.push({ name, usd }); $('rname').value = ''; $('rusd').value = ''; drawRewards();
     };
-    $('save').onclick = async () => {
+    async function save() {
       if (!player) return say('load a player first');
       const n = (id) => Number($(id).value);
       const limits = { minCadence: n('minCadence'), walkSeconds: n('walkSeconds'), gardenPlants: n('gardenPlants'),
@@ -268,11 +340,12 @@
         speedScale: $('speedScale').value === '' ? undefined : n('speedScale') };   // empty: the server's default
       try { localStorage.removeItem('zombiewalk.speedScale'); } catch { /* blocked */ }   // the therapist's speed wins over the operator's [ ] keys
       player = await api(`/api/player/${encodeURIComponent(player.name)}`, { method: 'PUT', body: JSON.stringify({ limits, rewards, notes: $('notes').value,
-        perceptronConsent: $('perceptronConsent').checked }) });
+        perceptronConsent: $('perceptronConsent').checked, aiReviewConsent: $('aiReviewConsent').checked }) });
       fill(player);
       await listPlayers(player.name);
       say(`saved ${player.name}`);
-    };
+    }
+    $('save').onclick = save;
     $('play').onclick = () => {
       if (!player) return say('load a player first');
       store.set('zombiewalk.player', player.name);

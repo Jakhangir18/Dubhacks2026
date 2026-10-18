@@ -123,7 +123,7 @@ def test_memory_task_does_not_overwrite_panel_edits(offline):
 
 
 def test_side_camera_gait_reaches_the_saved_session():
-    client.put("/api/player/Mia", json={"notes": ""})
+    client.put("/api/player/Mia", json={"notes": "", "aiReviewConsent": True})   # the note is written by an outside model
     r = client.post("/api/gait", json={"player": "Mia", "summary": {"cadence": 98.5, "kneeBend": {"L": 52, "R": 47},
                                                                      "note": "x" * 500}})
     assert r.json() == {"ok": True}
@@ -132,8 +132,15 @@ def test_side_camera_gait_reaches_the_saved_session():
     assert saved["cadence"] == 98.5 and saved["kneeBend"] == {"L": 52, "R": 47} and len(saved["note"]) == 200
 
 
+def test_side_camera_gait_stays_out_of_the_note_without_consent():
+    client.put("/api/player/Mia", json={"notes": ""})
+    client.post("/api/gait", json={"player": "Mia", "summary": {"cadence": 98.5}})
+    client.post("/api/session", json={"player": "Mia", "summary": summary(), "verified": True})
+    assert "sideCamera" not in client.get("/api/sessions/Mia").json()[0]["summary"]
+
+
 def test_stale_or_used_gait_is_not_attached(offline):
-    offline.update_player("Mia", gait={"ts": 0, "source": "side-camera", "summary": {"cadence": 90}})
+    offline.update_player("Mia", gait={"ts": 0, "source": "side-camera", "summary": {"cadence": 90}}, aiReviewConsent=True)
     client.post("/api/session", json={"player": "Mia", "summary": summary(sideCamera={"forged": 1}), "verified": True})
     assert "sideCamera" not in client.get("/api/sessions/Mia").json()[0]["summary"]
     client.post("/api/gait", json={"player": "Mia", "summary": {"cadence": 90}})

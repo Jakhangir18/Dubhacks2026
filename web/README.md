@@ -28,6 +28,7 @@ Open http://localhost:8000/therapist.html (with the server running).
 - Pick or create a player, set the limits the coach must stay inside (minimum pace, act lengths, lift target and range, flower spacing, session length), add the parent's reward list, write notes for the coach.
 - **Play as this player** makes that player current for the game (limits, greeting, memory, rewards).
 - The session table shows every finished game with the coach's note.
+- **AI gait review** (off by default): with a side camera running `gait.py --server`, each game's walk is reviewed after Home. The session row shows the review's state; **details** opens a short version with **Apply suggested settings** (the server keeps them inside the ranges), and **Full report** opens `report.html?id=<session>` (printable). Without the consent tick the review uses fixed rules and no numbers leave the laptop. Shapes: `vision/CONTRACT.md`.
 - Chips at the top show which sponsor integrations are live.
 
 ## Keys and sponsor features
