@@ -249,8 +249,8 @@ export function summary(g) {
     liftAvgCm: { L: avg(g.stats.lifts.L), R: avg(g.stats.lifts.R) },
     liftMaxCm: { L: g.stats.lifts.L.length ? Math.max(...g.stats.lifts.L) : null, R: g.stats.lifts.R.length ? Math.max(...g.stats.lifts.R) : null },
     highLiftAvgCm: {   // only deliberate high steps (stomps and dodges), the number a therapist cares about
-      L: avg(g.stats.lifts.L.filter((x) => x >= (g.base ? g.base.L : RULES.defaultBaseCm) + RULES.stompExtraCm)),
-      R: avg(g.stats.lifts.R.filter((x) => x >= (g.base ? g.base.R : RULES.defaultBaseCm) + RULES.stompExtraCm)),
+      L: avg(g.stats.lifts.L.filter((x) => x >= needCm(g, 'flower', 'L'))),   // same (capped) height the game asks for
+      R: avg(g.stats.lifts.R.filter((x) => x >= needCm(g, 'flower', 'R'))),
     },
     formPct: g.formN ? Math.round((100 * g.formSum) / g.formN) : 0,
     score: g.score,
