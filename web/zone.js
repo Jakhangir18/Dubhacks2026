@@ -27,8 +27,9 @@ export class WalkingZone {
     const saved = Warp.store.get(Warp.CORNERS_KEY, null);
     this.saved = valid(saved);
     this.corners = this.saved ? saved : [
-      [innerWidth * .32, innerHeight * .46], [innerWidth * .68, innerHeight * .46],
-      [innerWidth * .79, innerHeight * .91], [innerWidth * .21, innerHeight * .91],
+      // A long, narrow trapezoid like a walking pad seen from the projector; the game field is portrait.
+      [innerWidth * .43, innerHeight * .42], [innerWidth * .57, innerHeight * .42],   // below the setup instructions
+      [innerWidth * .66, innerHeight * .94], [innerWidth * .34, innerHeight * .94],
     ];
     const size = Warp.store.get(SIZE_KEY, null);
     if (this.saved && size?.width > 0 && size?.height > 0 && JSON.stringify(size.corners) === JSON.stringify(saved)) {

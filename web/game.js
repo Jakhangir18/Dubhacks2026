@@ -108,6 +108,9 @@ if (params.has('scene')) window.zombiewalk = { perceiver, tracker: cameraPanel.t
 connectBridge((status) => { document.getElementById('bridge').textContent = status; });   // Pi events via the server
 
 // ---------- projector corner warp ----------
+// Portrait like the pad, and a 9:16 walk clip. The one place the field size is set: Warp reads it from #stage.
+const FIELD = { width: 720, height: 1280 };
+Object.assign(document.getElementById('stage').style, { width: `${FIELD.width}px`, height: `${FIELD.height}px` });
 const zone = new WalkingZone();
 new AmbientGarden(zone);
 // Reuse the event and payload. The ambient canvas never allocates objects in its frame loop.
@@ -241,11 +244,12 @@ class Preload extends Phaser.Scene {
 // Shared storybook scenery: no external fonts, filters, shaders, or per-frame allocations.
 function gardenBackdrop(scene, W, H) {
   const b = scene.add.graphics();
+  const S = Math.min(W, H);   // art scales with the short side, so a portrait field is not crowded
   b.fillStyle(0x245b67); b.fillRect(0, 0, W, H);
   b.fillStyle(0x438d62); b.fillEllipse(W * 0.78, H * 0.43, W * 1.2, H * 0.68);
   b.fillStyle(0x73bc62); b.fillEllipse(W * 0.15, H * 0.66, W * 1.5, H * 0.7);
   b.fillStyle(0x96d364); b.fillRect(0, H * 0.66, W, H * 0.34);
-  scene.add.image(W * 0.15, H * 0.16, 'moon').setDisplaySize(H * 0.18, H * 0.18);
+  scene.add.image(W * 0.15, H * 0.16, 'moon').setDisplaySize(S * 0.18, S * 0.18);
   scene.add.image(W * 0.36, H * 0.13, 'cloud-long').setScale(0.9);
   scene.add.image(W * 0.91, H * 0.09, 'cloud-puff').setScale(0.8);
   for (let i = 0; i < 6; i++) {
@@ -254,11 +258,11 @@ function gardenBackdrop(scene, W, H) {
   }
   for (let i = 0; i < 4; i++) {
     const x = i < 2 ? W * (0.04 + i * 0.08) : W * (0.88 + (i - 2) * 0.08);
-    scene.add.image(x, H * (0.4 + (i % 2) * 0.12), i % 2 ? 'tree-teal' : 'tree').setScale(H / 660);
+    scene.add.image(x, H * (0.4 + (i % 2) * 0.12), i % 2 ? 'tree-teal' : 'tree').setScale(S / 660);
   }
   for (let i = 0; i < 6; i++) {
     const x = W * (i < 3 ? 0.06 + i * 0.08 : 0.78 + (i - 3) * 0.08);
-    scene.add.image(x, H * (0.88 + (i % 2) * 0.03), ['flower', 'flower-bell', 'flower-rose'][i % 3]).setScale(H / 1100);
+    scene.add.image(x, H * (0.88 + (i % 2) * 0.03), ['flower', 'flower-bell', 'flower-rose'][i % 3]).setScale(S / 1100);
   }
 }
 
@@ -291,8 +295,8 @@ class ZonePreview extends Phaser.Scene {
         (row + lane) % 2 ? 'tile-grass-dark' : 'tile-grass-light').setDisplaySize(W * .33, H * .125);
     }
     bg.lineStyle(8, C.yellow); bg.lineBetween(W * .16, H * .78, W * .84, H * .78);
-    this.add.image(W * .33, H * .88, 'foot-l').setDisplaySize(W * .08, H * .18);
-    this.add.image(W * .67, H * .88, 'foot-r').setDisplaySize(W * .08, H * .18);
+    this.add.image(W * .33, H * .88, 'foot-l').setDisplaySize(W * .14, W * .14 * 124 / 80);   // the art's own proportions
+    this.add.image(W * .67, H * .88, 'foot-r').setDisplaySize(W * .14, W * .14 * 124 / 80);
     for (let i = 0; i < 3; i++) {
       const flower = this.add.image(W * (i % 2 ? .67 : .33), H * .1, ['flower', 'flower-bell', 'flower-rose'][i]).setScale(1.1);
       this.tweens.add({ targets: flower, y: H * .73, duration: 4000, delay: i * 1200, repeat: -1 });
@@ -312,7 +316,7 @@ class Title extends Phaser.Scene {
       title: 'ZOMBIE WALK HOME', score: '', coach: 'Walk in place or press Enter · Z to mark your zone', pace: '', progress: 0 });
     const { width: W, height: H } = this.scale;
     gardenBackdrop(this, W, H);
-    this.add.image(W * 0.73, H * 0.22, 'house').setScale(Math.min(1.2, H / 660));
+    this.add.image(W * 0.73, H * 0.14, 'house').setScale(Math.min(1.2, W / 900));
     const titleSize = Math.round(Math.max(22, Math.min(W / 11, H * 0.115, 96)));
     const title = this.add.text(W / 2, H * 0.27, 'ZOMBIE', txt(titleSize, C.yellow)).setOrigin(0.5, 0)
       .setShadow(0, 7, '#19352f', 0, true, true);
@@ -658,7 +662,7 @@ class Play extends Phaser.Scene {
         h.strokeRoundedRect(pad.x, pad.y, pad.w, pad.h, 24);
       }
       // lift bar beside each footprint: current lift against the target line
-      const bx = lane === 'L' ? L.lanes.L - W * 0.12 : L.lanes.R + W * 0.12;
+      const bx = lane === 'L' ? L.lanes.L - W * 0.105 - 34 : L.lanes.R + W * 0.105 + 34;   // clear of the pad and its rim
       const barH = (H - L.zoneY) * 0.8;
       const by = H - 14;
       const scale = barH / 30;                       // 30 cm full bar
@@ -858,6 +862,6 @@ window.zombieGame = new Phaser.Game({
   backgroundColor: '#000000',
   // RESIZE measures the parent's transformed bounds and would shrink the board twice.
   // Size the source canvas explicitly; Warp alone maps it to the walking zone.
-  scale: { mode: Phaser.Scale.NONE, width: 720, height: 1280 },   // portrait like the pad; also a 9:16 clip
+  scale: { mode: Phaser.Scale.NONE, ...FIELD },
   scene: [Preload, Boot, ZonePreview, Title, Play, Home],
 });
