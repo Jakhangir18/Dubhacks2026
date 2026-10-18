@@ -4,23 +4,13 @@ export function feedbackFor(
   metrics: RoundMetrics,
   levelName: string,
 ) {
-  const ranked = (
-    [
-      ["pace", metrics.pace],
-      ["symmetry", metrics.symmetry],
-      ["posture", metrics.posture],
-    ] as const
-  ).slice().sort((a, b) => a[1] - b[1])
-  const weakest = ranked[0][0]
+  const weakest = metrics.pace <= metrics.symmetry ? "pace" : "symmetry"
 
   if (metrics.walkingScore >= 88) {
-    return `That was a controlled round on ${levelName}. Pace, symmetry, and posture all sat in range. Next time, keep this rhythm and add a little more distance.`
-  }
-  if (weakest === "posture") {
-    return `Pace and stride did the work on ${levelName}. Posture was the leak, at ${metrics.posture}. Imagine a string at the crown of your head and let the ribs stack over the pelvis. Correct a beat earlier next round.`
+    return `That was a controlled round on ${levelName}. Pace and symmetry both sat in range. Next time, keep this rhythm and add a little more distance.`
   }
   if (weakest === "pace") {
-    return `The steps were fairly even on ${levelName}. The score moved when the cadence rushed or dragged — pace landed at ${metrics.pace}. Let the wave come to you instead of chasing it.`
+    return `The steps were fairly even on ${levelName}. The score moved when the cadence rushed or dragged — pace landed at ${metrics.pace}. Let the plants come to you instead of chasing them.`
   }
   return `You favored one side on ${levelName}. Symmetry was ${metrics.symmetry}. Shorten the longer step just slightly so the left and right share the work. The trackpad is listening for that balance.`
 }
@@ -46,11 +36,6 @@ export function mayaReply(text: string, snapshot: MayaContext) {
     if (!latest) return "I need one scored walk before I can talk about symmetry."
     return `Your latest symmetry is ${latest.symmetry} on ${latest.levelName}. Across the last five walks, the walking score sits at ${snapshot.walkingScore}. Even stride means the left and right step take the same time and the same length. If one side reaches, shorten that step. Don't push the other one longer to compensate.`
   }
-  if (/posture|upright|lean|shoulder|trunk|stand/.test(question)) {
-    return latest
-      ? `Posture on ${latest.levelName} was ${latest.posture}. The cue for today is plain: ribs stacked over the pelvis, eyes on the far end of the path, not on your feet. Correct as soon as you feel the lean, not after the wave arrives.`
-      : "Stand as if a string lifts the crown of your head, and let the shoulders stay heavy. That is the posture the camera scores."
-  }
   if (/pace|cadence|rhythm|fast|slow|rush|beat/.test(question)) {
     return latest
       ? `Pace was ${latest.pace} on ${latest.levelName}. The walks that score well do not speed up when the projection changes. Pick the interval you can hold while talking, and keep it through the last third.`
@@ -62,7 +47,7 @@ export function mayaReply(text: string, snapshot: MayaContext) {
       : "There is no active streak. One scored walk today starts it."
   }
   if (/level|stage|unlock|zombie|path|next/.test(question)) {
-    return `${snapshot.prescribedName} is the stage on your plan. Score 80 or better and the next stage opens. Replaying an earlier stage is useful. It will not skip the plan.`
+    return `${snapshot.prescribedName} is the goal on your plan. The walk is always the same plant lawn. Score 80 or better and the next goal opens. Replaying an earlier goal is useful. It will not skip the plan.`
   }
   if (/score|progress|week|how am i|how'm i|doing/.test(question)) {
     const direction = snapshot.delta > 0 ? "up" : snapshot.delta < 0 ? "down" : "flat"
@@ -70,10 +55,10 @@ export function mayaReply(text: string, snapshot: MayaContext) {
     return `Your walking score, averaged over the last five sessions, is ${snapshot.walkingScore}. That is ${direction}${amount} against the five before it. This week you have ${snapshot.weekMinutes} of ${snapshot.goal} minutes.`
   }
   if (/today|focus|should i|session|distance|plan/.test(question)) {
-    return `Today is ${snapshot.prescribedName}. Keep the rhythm you already have, and add a little distance without stretching one side. The three cues stay the same: steady pace, even stride, upright posture.`
+    return `Today is ${snapshot.prescribedName}. Keep the rhythm you already have, and add a little distance without stretching one side. The two cues stay the same: steady pace and an even stride.`
   }
   if (latest) {
-    return `On ${latest.levelName} you scored ${latest.walkingScore}, with pace ${latest.pace}, symmetry ${latest.symmetry}, and posture ${latest.posture}. Ask me about any one of those, or about what to hold onto today.`
+    return `On ${latest.levelName} you scored ${latest.walkingScore}, with pace ${latest.pace} and symmetry ${latest.symmetry}. Ask me about either of those, or about what to hold onto today.`
   }
-  return "Finish a scored walk and I will have something specific to say. Until then, the three cues are steady pace, even stride, and upright posture."
+  return "Finish a scored walk and I will have something specific to say. Until then, the two cues are steady pace and an even stride."
 }

@@ -1,9 +1,10 @@
 "use client"
 
-import type { ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Bell, House, Play, Sparkles, TrendingUp } from "lucide-react"
+import { Bell, House, Moon, Play, Sparkles, Sun, TrendingUp } from "lucide-react"
+import { useTheme } from "next-themes"
 import { Logo } from "@/components/logo"
 import { ContactDialog } from "@/components/contact-dialog"
 import { KitSheet } from "@/components/kit-sheet"
@@ -21,25 +22,47 @@ const NAV = [
   { href: "/therapist", label: "AI therapist", icon: Sparkles },
 ]
 
+function ThemeToggle() {
+  const { resolvedTheme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  const dark = mounted && resolvedTheme === "dark"
+  return (
+    <button
+      type="button"
+      onClick={() => setTheme(document.documentElement.classList.contains("dark") ? "light" : "dark")}
+      className="grid size-10 place-items-center rounded-full border border-border bg-card text-foreground shadow-sm transition hover:bg-muted"
+      aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
+    >
+      <Sun className="hidden size-4 dark:block" />
+      <Moon className="size-4 dark:hidden" />
+    </button>
+  )
+}
+
 export function PageActions() {
   const { setContactOpen, setNotesOpen, derived } = useStride()
+  const [ready, setReady] = useState(false)
+  useEffect(() => setReady(true), [])
+  const unread = ready ? derived.unreadCount : 0
   return (
     <div className="flex items-center gap-2">
       <button
         type="button"
         onClick={() => setNotesOpen(true)}
-        className="relative grid size-10 place-items-center rounded-full border border-border bg-white text-ink shadow-sm transition hover:bg-white"
-        aria-label={derived.unreadCount ? `Updates, ${derived.unreadCount} unread` : "Updates"}
+        className="relative grid size-10 place-items-center rounded-full border border-border bg-card text-foreground shadow-sm transition hover:bg-muted"
+        aria-label={unread ? `Updates, ${unread} unread` : "Updates"}
       >
         <Bell className="size-4" />
-        {derived.unreadCount > 0 ? (
-          <span className="absolute right-2.5 top-2.5 size-2 rounded-full bg-orange ring-2 ring-white" />
+        {unread > 0 ? (
+          <span className="absolute right-2.5 top-2.5 size-2 rounded-full bg-orange ring-2 ring-card" />
         ) : null}
       </button>
+      <ThemeToggle />
       <Button
         type="button"
         variant="outline"
-        className="h-10 rounded-full bg-white px-4 text-sm font-semibold shadow-sm"
+        className="h-10 rounded-full bg-card px-4 text-sm font-semibold text-foreground shadow-sm hover:bg-muted dark:bg-card dark:hover:bg-muted"
         onClick={() => setContactOpen(true)}
       >
         <span className="hidden sm:inline">Contact care team</span>
@@ -109,8 +132,8 @@ function Sidebar() {
               href={item.href}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-[#41564a] transition hover:bg-white",
-                active && "bg-[#e5f3e8] text-forest",
+                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-[#41564a] transition hover:bg-white dark:text-[#c9ddd0] dark:hover:bg-white/8",
+                active && "bg-[#e5f3e8] text-forest hover:bg-[#e5f3e8] dark:bg-[#234233] dark:text-[#d8f3e4] dark:hover:bg-[#234233]",
               )}
             >
               <Icon className="size-4" />
@@ -123,9 +146,9 @@ function Sidebar() {
         <button
           type="button"
           onClick={() => setKitOpen(true)}
-          className="rounded-2xl border border-border/80 bg-white p-3 text-left shadow-sm transition hover:border-forest/20"
+          className="rounded-2xl border border-border/80 bg-card p-3 text-left shadow-sm transition hover:border-forest/20"
         >
-          <span className="flex items-center gap-2 text-sm font-semibold text-ink">
+          <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <span className={cn("size-2 rounded-full", kitReady ? "bg-[#3c9d62]" : "bg-orange")} />
             Movement kit
           </span>
@@ -138,13 +161,13 @@ function Sidebar() {
         <button
           type="button"
           onClick={() => setProfileOpen(true)}
-          className="flex items-center gap-3 rounded-2xl px-1 py-1 text-left transition hover:bg-white"
+          className="flex items-center gap-3 rounded-2xl px-1 py-1 text-left transition hover:bg-white dark:hover:bg-white/8"
         >
           <span className="grid size-9 place-items-center rounded-full bg-orange text-xs font-bold text-white">
             {PATIENT.initials}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold text-ink">{PATIENT.name}</span>
+            <span className="block truncate text-sm font-semibold text-foreground">{PATIENT.name}</span>
             <span className="block text-xs text-muted-foreground">
               Level {derived.playerLevel} · {state.xp.toLocaleString("en-US")} XP
             </span>
@@ -163,7 +186,7 @@ function KitPill({ label, on }: { label: string; on: boolean }) {
     <span
       className={cn(
         "rounded-full px-2 py-0.5 text-[11px] font-medium",
-        on ? "bg-[#f3f6f2] text-[#41564a]" : "bg-peach text-orange",
+        on ? "bg-[#f3f6f2] text-[#41564a] dark:bg-white/10 dark:text-[#d5e6da]" : "bg-peach text-orange dark:bg-[#3a2c22] dark:text-[#f0a15a]",
       )}
     >
       {label}
@@ -175,7 +198,7 @@ function MobileNav() {
   const pathname = usePathname()
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-white/95 px-2 py-2 backdrop-blur lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card/95 px-2 py-2 backdrop-blur lg:hidden"
       aria-label="Workspace"
     >
       <ul className="grid grid-cols-4">
@@ -189,7 +212,7 @@ function MobileNav() {
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   "flex flex-col items-center gap-1 rounded-xl px-1 py-1.5 text-[11px] font-medium text-muted-foreground",
-                  active && "text-forest",
+                  active && "text-forest dark:text-[#8ed4b0]",
                 )}
               >
                 <Icon className="size-4" />

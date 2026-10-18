@@ -94,7 +94,7 @@ export function ContactDialog() {
                 id="care-message"
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
-                placeholder="The left step shortened on River Crossing, and the knee felt unstable after."
+                placeholder="The left step shortened during Even stride, and the knee felt unstable after."
                 className="min-h-28 bg-white"
                 aria-invalid={Boolean(errors.message)}
               />

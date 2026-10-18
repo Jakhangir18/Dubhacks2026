@@ -33,14 +33,14 @@ export function KitSheet() {
         <SheetHeader className="pr-8">
           <SheetTitle>Movement kit</SheetTitle>
           <SheetDescription>
-            Three pieces make a scored walk. The camera reads posture, the trackpad reads the steps, and the projection puts the stage on the floor.
+            The trackpad scores the walk. It times each step and feels the left-right shift. The camera keeps you in frame. The projection puts the lawn on the floor.
           </SheetDescription>
         </SheetHeader>
         <div className="grid gap-3 px-4 pb-4">
           <SensorRow
             icon={<Camera className="size-4" />}
             name="Camera"
-            body="Mounted ahead of the path. It watches trunk lean, shoulder height, and whether the stride stays long enough on both sides."
+            body="Mounted ahead of the walk. It keeps you in frame so the session can start."
             online={state.sensors.camera}
             onToggle={() => setSensor("camera", !state.sensors.camera)}
           />
@@ -62,7 +62,7 @@ export function KitSheet() {
               <span className="text-xs font-semibold text-forest">Ready</span>
             </div>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Casts the stage onto the trackpad. You walk the path you see. Plants vs. Zombies only closes in when pace, stride, or posture slips.
+              Casts the lawn onto the trackpad. You stomp the plants you see. They close in when pace or stride slips.
             </p>
           </div>
           <Button type="button" className="h-10 rounded-full" onClick={runCheck} disabled={checking}>

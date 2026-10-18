@@ -1,9 +1,9 @@
 "use client"
 
-import Image from "next/image"
 import Link from "next/link"
 import { useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
+import { GoalBanner } from "@/components/goal-banner"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,7 +15,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { formatLevel, formatMinutes, formatWhen } from "@/lib/format"
-import { LEVELS, LEVEL_IMAGE_ALT, LEVEL_IMAGES, levelById } from "@/lib/levels"
+import { LEVELS, levelById } from "@/lib/levels"
 import { useStride } from "@/lib/store"
 
 export function ActivityView() {
@@ -51,17 +51,17 @@ export function ActivityView() {
         <Input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search by stage"
+          placeholder="Search by goal"
           aria-label="Search sessions"
           className="h-10 bg-white sm:max-w-xs"
         />
         <select
           value={stage}
           onChange={(event) => setStage(event.target.value)}
-          aria-label="Filter by stage"
+          aria-label="Filter by goal"
           className="h-10 rounded-lg border border-input bg-white px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
         >
-          <option value="all">All stages</option>
+          <option value="all">All goals</option>
           {LEVELS.map((level) => (
             <option key={level.id} value={level.id}>
               {formatLevel(level.id)} · {level.name}
@@ -98,7 +98,6 @@ export function ActivityView() {
                 <span className="hidden text-right text-xs text-muted-foreground sm:block">
                   <span className="block">Pace {session.pace}</span>
                   <span className="block">Symmetry {session.symmetry}</span>
-                  <span className="block">Posture {session.posture}</span>
                 </span>
               </button>
             </li>
@@ -117,15 +116,12 @@ export function ActivityView() {
         <SheetContent side="right" className="w-full overflow-y-auto data-[side=right]:sm:max-w-md">
           {open && openLevel ? (
             <>
-              <div className="relative mx-4 mt-4 h-44 overflow-hidden rounded-2xl">
-                <Image
-                  src={LEVEL_IMAGES[openLevel.image]}
-                  alt={LEVEL_IMAGE_ALT[openLevel.image]}
-                  fill
-                  sizes="400px"
-                  className="object-cover"
-                />
-              </div>
+              <GoalBanner levelId={openLevel.id} className="mx-4 mt-4 h-40 rounded-[22px]">
+                <p className="text-[11px] font-semibold tracking-[0.14em] text-[#5c6f63]">
+                  LEVEL {formatLevel(openLevel.id)}
+                </p>
+                <p className="mt-1 text-lg font-semibold leading-tight text-[#173026]">{open.levelName}</p>
+              </GoalBanner>
               <SheetHeader className="pr-8">
                 <SheetTitle>
                   {open.walkingScore}
@@ -137,10 +133,9 @@ export function ActivityView() {
                 </SheetDescription>
               </SheetHeader>
               <div className="grid gap-4 px-4 pb-6">
-                <dl className="grid grid-cols-3 gap-2 text-center">
+                <dl className="grid grid-cols-2 gap-2 text-center">
                   <Mini label="Pace" value={open.pace} />
                   <Mini label="Symmetry" value={open.symmetry} />
-                  <Mini label="Posture" value={open.posture} />
                 </dl>
                 <p className="text-sm text-muted-foreground">{open.steps.toLocaleString("en-US")} steps scored</p>
                 <p className="rounded-2xl bg-mint px-4 py-3 text-sm leading-6 text-ink">{open.feedback}</p>

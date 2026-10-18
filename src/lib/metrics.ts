@@ -129,7 +129,7 @@ export function derive(state: AppState, now = new Date()): Derived {
     {
       id: `level-${state.prescribedLevelId}`,
       title: `Level ${String(state.prescribedLevelId).padStart(2, "0")} is ready`,
-      body: `${prescribed.name} is the session on your plan.`,
+      body: `${prescribed.name} is the recovery goal on your plan. The plant walk stays the same.`,
       href: `/play/session?level=${state.prescribedLevelId}`,
       kind: "link",
     },
@@ -171,7 +171,6 @@ export function planCompletion(state: AppState, input: CompletionInput, now = ne
   const metrics = {
     pace: input.pace,
     symmetry: input.symmetry,
-    posture: input.posture,
     walkingScore: input.walkingScore,
     steps: input.steps,
   }
@@ -185,7 +184,6 @@ export function planCompletion(state: AppState, input: CompletionInput, now = ne
     walkingScore: input.walkingScore,
     pace: input.pace,
     symmetry: input.symmetry,
-    posture: input.posture,
     steps: input.steps,
     feedback,
     source: input.source,

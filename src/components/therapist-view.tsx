@@ -157,7 +157,7 @@ export function TherapistView() {
                     else send(draft)
                   }
                 }}
-                placeholder="Ask about pace, symmetry, posture, or today's stage."
+                placeholder="Ask about pace, symmetry, or today's goal."
                 className="min-h-12 flex-1 bg-white"
                 aria-invalid={Boolean(error)}
               />
@@ -178,10 +178,9 @@ export function TherapistView() {
           <article className="rounded-[24px] border border-black/5 bg-white p-5 shadow-[0_8px_24px_rgba(23,48,38,0.04)]">
             <h2 className="font-semibold text-ink">Latest scored walk</h2>
             {derived.latest ? (
-              <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
+              <dl className="mt-3 grid grid-cols-2 gap-2 text-center">
                 <Score label="Pace" value={derived.latest.pace} />
                 <Score label="Symmetry" value={derived.latest.symmetry} />
-                <Score label="Posture" value={derived.latest.posture} />
               </dl>
             ) : (
               <p className="mt-2 text-sm text-muted-foreground">No scored walk yet.</p>

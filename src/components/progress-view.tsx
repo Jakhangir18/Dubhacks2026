@@ -31,7 +31,6 @@ export function ProgressView() {
   const latest = derived.latest
   const bestPace = Math.max(...state.sessions.map((session) => session.pace), 0)
   const bestSymmetry = Math.max(...state.sessions.map((session) => session.symmetry), 0)
-  const bestPosture = Math.max(...state.sessions.map((session) => session.posture), 0)
   const goalPct = Math.min(100, Math.round((derived.weekMinutes / state.weeklyGoalMin) * 100))
 
   return (
@@ -39,7 +38,7 @@ export function ProgressView() {
       <PageHeader
         eyebrow="SCORES"
         title="My progress"
-        subtitle="Walking score is pace, symmetry, and posture together. The camera owns posture. The trackpad owns the steps."
+        subtitle="Walking score is pace and symmetry together. Both come from the trackpad."
       />
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -91,7 +90,7 @@ export function ProgressView() {
         )}
       </section>
 
-      <section className="mt-4 grid gap-4 lg:grid-cols-3">
+      <section className="mt-4 grid gap-4 lg:grid-cols-2">
         <MetricCard
           label="Pace"
           value={latest?.pace ?? 0}
@@ -103,12 +102,6 @@ export function ProgressView() {
           value={latest?.symmetry ?? 0}
           best={bestSymmetry}
           note="Left and right sharing the work. A longer step on one side shows up here."
-        />
-        <MetricCard
-          label="Posture"
-          value={latest?.posture ?? 0}
-          best={bestPosture}
-          note="Trunk stack from the camera. Eyes up, ribs over the pelvis."
         />
       </section>
 
@@ -221,9 +214,7 @@ function ScoreChart({
               onMouseEnter={() => onActive(index)}
               onClick={() => onActive(index)}
             >
-              <title>
-                {point.name}, {point.score}
-              </title>
+              <title>{`${point.name}, ${point.score}`}</title>
             </circle>
           </g>
         ))}

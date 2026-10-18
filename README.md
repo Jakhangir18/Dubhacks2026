@@ -1,8 +1,8 @@
 # StrideBloom
 
-StrideBloom is a walking-recovery clinic you can use in the browser. A camera reads posture, a floor trackpad reads each step, and a projection puts the stage underfoot. Patients move through stages the way a language app moves through lessons. After every scored walk, Maya, the AI therapist, reviews pace, symmetry, and posture.
+StrideBloom is a walking-recovery clinic you can use in the browser. A floor trackpad reads each step, and a projection puts the same plant lawn underfoot. Patients move through recovery goals the way a language app moves through lessons. After every scored walk, Maya, the AI therapist, reviews pace and symmetry.
 
-This app is the clinic workspace for Jordan Davis: today's session, the stage path, a playable form round, progress, session history, and Maya.
+This app is the clinic workspace for Jordan Davis: today's goal, the recovery plan, a playable form round, progress, session history, and Maya.
 
 The form round stands in for the projected floor. In the clinic that session is 10–20 minutes. Here it is two short waves that score the same three cues.
 
@@ -19,11 +19,11 @@ Open [http://127.0.0.1:4317](http://127.0.0.1:4317).
 
 ## What you can do
 
-- Start today's session from the overview, or pick any open stage on Play & practice.
+- Start today's goal from the overview, or pick any open goal on Play & practice. The walk is always stomping plants.
 - Walk the form round with the buttons or the keyboard: `A` / `←` left foot, `D` / `→` right foot, space to stand tall. Turn on the metronome if you want the beat.
-- Score 80 on the planned stage to open the next one. XP, the streak, and the walking score update from the round.
+- Score 80 on the planned goal to open the next one. XP, the streak, and the walking score update from the round.
 - Review scores and the weekly minute goal on My progress. Open any past walk from Sessions.
-- Ask Maya about pace, symmetry, posture, or the plan. Pain and injury go to Contact care team, not to her.
+- Ask Maya about pace, symmetry, or the plan. Pain and injury go to Contact care team, not to her.
 - Open the movement kit to see the camera, trackpad, and projection, or mark a sensor offline and run a connection check.
 
 Practice data stays in this browser. Reset it from Jordan's profile.

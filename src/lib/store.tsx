@@ -23,7 +23,7 @@ import type {
   SessionSource,
 } from "@/lib/types"
 
-const STORAGE_KEY = "stridebloom-state-v1"
+const STORAGE_KEY = "stridebloom-state-v3"
 
 type StoreValue = {
   state: AppState
@@ -63,7 +63,6 @@ function seedSession(
     walkingScore: number
     pace: number
     symmetry: number
-    posture: number
     steps: number
     source?: SessionSource
   },
@@ -72,7 +71,6 @@ function seedSession(
   const metrics = {
     pace: input.pace,
     symmetry: input.symmetry,
-    posture: input.posture,
     walkingScore: input.walkingScore,
     steps: input.steps,
   }
@@ -90,18 +88,18 @@ function seedSession(
 
 export function createSeed(now = new Date()): AppState {
   const sessions = [
-    seedSession(now, { id: "s1", levelId: 8, daysAgo: 1, durationMin: 16, walkingScore: 88, pace: 90, symmetry: 86, posture: 88, steps: 1680 }),
-    seedSession(now, { id: "s2", levelId: 6, daysAgo: 2, durationMin: 12, walkingScore: 80, pace: 84, symmetry: 78, posture: 76, steps: 1120 }),
-    seedSession(now, { id: "s3", levelId: 7, daysAgo: 3, durationMin: 18, walkingScore: 82, pace: 80, symmetry: 84, posture: 83, steps: 1764 }),
-    seedSession(now, { id: "s4", levelId: 5, daysAgo: 4, durationMin: 14, walkingScore: 78, pace: 76, symmetry: 80, posture: 79, steps: 1344 }),
-    seedSession(now, { id: "s5", levelId: 4, daysAgo: 5, durationMin: 14, walkingScore: 84, pace: 86, symmetry: 83, posture: 82, steps: 1302 }),
-    seedSession(now, { id: "s6", levelId: 3, daysAgo: 8, durationMin: 15, walkingScore: 79, pace: 78, symmetry: 80, posture: 79, steps: 1400 }),
-    seedSession(now, { id: "s7", levelId: 3, daysAgo: 9, durationMin: 12, walkingScore: 76, pace: 75, symmetry: 77, posture: 76, steps: 1188 }),
-    seedSession(now, { id: "s8", levelId: 2, daysAgo: 10, durationMin: 12, walkingScore: 80, pace: 82, symmetry: 79, posture: 78, steps: 1210 }),
-    seedSession(now, { id: "s9", levelId: 2, daysAgo: 11, durationMin: 11, walkingScore: 78, pace: 77, symmetry: 80, posture: 77, steps: 1090 }),
-    seedSession(now, { id: "s10", levelId: 1, daysAgo: 15, durationMin: 10, walkingScore: 76, pace: 80, symmetry: 74, posture: 73, steps: 980 }),
-    seedSession(now, { id: "s11", levelId: 1, daysAgo: 16, durationMin: 10, walkingScore: 91, pace: 90, symmetry: 92, posture: 91, steps: 1020 }),
-    seedSession(now, { id: "s12", levelId: 6, daysAgo: 18, durationMin: 12, walkingScore: 72, pace: 70, symmetry: 74, posture: 73, steps: 1104 }),
+    seedSession(now, { id: "s1", levelId: 8, daysAgo: 1, durationMin: 16, walkingScore: 88, pace: 90, symmetry: 86, steps: 1680 }),
+    seedSession(now, { id: "s2", levelId: 6, daysAgo: 2, durationMin: 12, walkingScore: 81, pace: 84, symmetry: 78, steps: 1120 }),
+    seedSession(now, { id: "s3", levelId: 7, daysAgo: 3, durationMin: 18, walkingScore: 82, pace: 80, symmetry: 84, steps: 1764 }),
+    seedSession(now, { id: "s4", levelId: 5, daysAgo: 4, durationMin: 14, walkingScore: 78, pace: 76, symmetry: 80, steps: 1344 }),
+    seedSession(now, { id: "s5", levelId: 4, daysAgo: 5, durationMin: 14, walkingScore: 85, pace: 86, symmetry: 83, steps: 1302 }),
+    seedSession(now, { id: "s6", levelId: 3, daysAgo: 8, durationMin: 15, walkingScore: 79, pace: 78, symmetry: 80, steps: 1400 }),
+    seedSession(now, { id: "s7", levelId: 3, daysAgo: 9, durationMin: 12, walkingScore: 76, pace: 75, symmetry: 77, steps: 1188 }),
+    seedSession(now, { id: "s8", levelId: 2, daysAgo: 10, durationMin: 12, walkingScore: 81, pace: 82, symmetry: 79, steps: 1210 }),
+    seedSession(now, { id: "s9", levelId: 2, daysAgo: 11, durationMin: 11, walkingScore: 79, pace: 77, symmetry: 80, steps: 1090 }),
+    seedSession(now, { id: "s10", levelId: 1, daysAgo: 15, durationMin: 10, walkingScore: 77, pace: 80, symmetry: 74, steps: 980 }),
+    seedSession(now, { id: "s11", levelId: 1, daysAgo: 16, durationMin: 10, walkingScore: 91, pace: 90, symmetry: 92, steps: 1020 }),
+    seedSession(now, { id: "s12", levelId: 6, daysAgo: 18, durationMin: 12, walkingScore: 72, pace: 70, symmetry: 74, steps: 1104 }),
   ]
   return {
     xp: 2840,
@@ -115,13 +113,13 @@ export function createSeed(now = new Date()): AppState {
       {
         id: "m1",
         from: "jordan",
-        text: "The river stones felt uneven. Was I rushing?",
+        text: "My steps got short and quick. Was I rushing?",
         at: isoDaysAgo(now, 2, 16),
       },
       {
         id: "m2",
         from: "maya",
-        text: "On River Crossing you scored 80, with symmetry at 78. The misses clustered when the steps got short and quick. Hold the meadow cadence, and let the stones arrive under you.",
+        text: "On Narrow stance you scored 80, with symmetry at 78. The misses clustered when the steps got short and quick. Hold the cadence from Steady pace, and let the plants arrive under you.",
         at: isoDaysAgo(now, 2, 16),
       },
       {

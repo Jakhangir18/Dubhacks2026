@@ -1,13 +1,13 @@
 "use client"
 
-import Image from "next/image"
 import Link from "next/link"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { ArrowLeft, Pause, Volume2, VolumeX } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { formatLevel } from "@/lib/format"
-import { LEVEL_IMAGE_ALT, LEVEL_IMAGES, levelById } from "@/lib/levels"
+import { GardenStage } from "@/components/garden-stage"
+import { levelById } from "@/lib/levels"
 import {
   MIN_SCORED_STEPS,
   STEP_MS,
@@ -15,7 +15,6 @@ import {
   WAVE_STEPS,
   chipLights,
   createLive,
-  standTall,
   summarize,
   takeStep,
   tick,
@@ -106,7 +105,7 @@ export function SessionView() {
     if (phase !== "live") return
     function onKey(event: KeyboardEvent) {
       if (event.repeat) return
-      if (["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "KeyA", "KeyD", "KeyW"].includes(event.code)) {
+      if (["ArrowLeft", "ArrowRight", "KeyA", "KeyD"].includes(event.code)) {
         event.preventDefault()
       }
       if (pausedRef.current) return
@@ -117,9 +116,6 @@ export function SessionView() {
       if (event.code === "ArrowRight" || event.code === "KeyD") {
         setLive((current) => (current && !current.finished ? takeStep(current, "R", now) : current))
       }
-      if (event.code === "Space" || event.code === "ArrowUp" || event.code === "KeyW") {
-        setLive((current) => (current && !current.finished ? standTall(current) : current))
-      }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -127,10 +123,6 @@ export function SessionView() {
 
   function step(foot: Foot) {
     setLive((current) => (current && !current.finished ? takeStep(current, foot, performance.now()) : current))
-  }
-
-  function correctPosture() {
-    setLive((current) => (current && !current.finished ? standTall(current) : current))
   }
 
   const finish = useCallback((source: LiveState, partial: boolean) => {
@@ -143,7 +135,6 @@ export function SessionView() {
       walkingScore: metrics.walkingScore,
       pace: metrics.pace,
       symmetry: metrics.symmetry,
-      posture: metrics.posture,
       steps: metrics.steps,
       source: "form-round",
     })
@@ -182,14 +173,11 @@ export function SessionView() {
     )
   }
 
-  const image = LEVEL_IMAGES[level.image]
-  const alt = LEVEL_IMAGE_ALT[level.image]
-
   return (
-    <div className="relative min-h-dvh overflow-hidden bg-[#0e2419] text-white">
-      <Image src={image} alt={alt} fill priority sizes="100vw" className="object-cover" />
-      <div className="absolute inset-0 bg-[#0c2418]/55" />
-      <div className="relative z-10 mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-4 py-5 sm:px-6">
+    <div className="relative min-h-dvh overflow-hidden bg-[#070b10] text-white">
+      <GardenStage />
+      <div className="absolute inset-0 bg-[#070b10]/40" />
+      <div className="relative z-30 mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-4 py-5 sm:px-6">
         <div className="flex items-center justify-between gap-3">
           <Link href="/play" className="inline-flex items-center gap-2 text-sm font-semibold text-white/90 hover:text-white">
             <ArrowLeft className="size-4" />
@@ -240,7 +228,7 @@ export function SessionView() {
 
         {phase === "count" ? (
           <div className="flex flex-1 flex-col items-center justify-center text-center">
-            <p className="text-sm font-semibold tracking-[0.16em] text-white/75">FIND YOUR POSTURE</p>
+            <p className="text-sm font-semibold tracking-[0.16em] text-white/75">FIND YOUR CADENCE</p>
             <p className="mt-3 text-8xl font-semibold tabular-nums">{count}</p>
           </div>
         ) : null}
@@ -252,7 +240,6 @@ export function SessionView() {
             paused={paused}
             earlyNote={earlyNote}
             onStep={step}
-            onStand={correctPosture}
             onResume={() => {
               setPaused(false)
               setEarlyNote("")
@@ -298,8 +285,8 @@ function Brief({
         <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">{levelName}</h1>
         <p className="mt-3 text-sm leading-6 text-muted-foreground">{summary}</p>
         <p className="mt-3 text-sm leading-6 text-[#2c4036]">
-          In the clinic this stage is {minutes} minutes, projected onto the trackpad, with the camera scoring your trunk.
-          This round uses the same three cues. Two waves, {WAVE_STEPS} steps each.
+          In the clinic this goal is {minutes} minutes of the same plant walk, projected onto the trackpad. The floor scores pace and symmetry.
+          This round uses that goal&apos;s cues. Two waves, {WAVE_STEPS} steps each.
         </p>
         <ol className="mt-4 flex flex-wrap gap-2">
           {focus.map((item, index) => (
@@ -310,12 +297,12 @@ function Brief({
         </ol>
         <ul className="mt-4 grid gap-1 text-sm text-muted-foreground">
           <li>Left foot: A or the left arrow. Right foot: D or the right arrow.</li>
-          <li>Stand tall with the space bar when the posture bar leaves the green.</li>
+          <li>Keep the same time between steps, and switch feet each time.</li>
           <li>Stop if anything hurts. A form round is not worth a sore knee.</li>
         </ul>
         {locked ? (
           <p className="mt-4 rounded-2xl bg-peach px-4 py-3 text-sm text-[#6d533c]">
-            This stage is still locked. Score 80 on the current stage of your plan to open it.
+            This goal is still locked. Score 80 on the current goal of your plan to open it.
           </p>
         ) : null}
         {!sensorsReady ? (
@@ -342,7 +329,6 @@ function LiveHud({
   paused,
   earlyNote,
   onStep,
-  onStand,
   onResume,
   onEnd,
 }: {
@@ -351,7 +337,6 @@ function LiveHud({
   paused: boolean
   earlyNote: string
   onStep: (foot: Foot) => void
-  onStand: () => void
   onResume: () => void
   onEnd: () => void
 }) {
@@ -361,7 +346,6 @@ function LiveHud({
   const chips = [
     { label: "Steady pace", on: lights.pace },
     { label: "Even stride", on: lights.stride },
-    { label: "Upright posture", on: lights.posture },
   ]
 
   return (
@@ -405,29 +389,6 @@ function LiveHud({
       </div>
 
       <div className="mt-6 grid gap-3 pb-2">
-        <div className="rounded-[24px] bg-white/95 p-3 text-ink shadow-xl backdrop-blur">
-          <div className="flex items-center gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="flex justify-between text-xs font-medium text-muted-foreground">
-                <span>Posture</span>
-                <span className="tabular-nums">{Math.round(live.posture)}</span>
-              </div>
-              <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-sage">
-                <div
-                  className={cn("h-full rounded-full", live.posture >= 70 ? "bg-forest" : "bg-orange")}
-                  style={{ width: `${live.posture}%` }}
-                />
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onStand}
-              className="h-12 shrink-0 rounded-2xl bg-forest px-4 text-sm font-semibold text-white"
-            >
-              Stand tall
-            </button>
-          </div>
-        </div>
         <div className="grid grid-cols-2 gap-3">
           <FootButton label="Left foot" hint="A" active={live.expected === "L"} onClick={() => onStep("L")} />
           <FootButton label="Right foot" hint="D" active={live.expected === "R"} onClick={() => onStep("R")} />
@@ -439,7 +400,7 @@ function LiveHud({
           <div className="w-full max-w-sm rounded-[28px] bg-white p-6 text-ink shadow-2xl">
             <h2 className="text-2xl font-semibold">Paused</h2>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              The posture clock is stopped. End the round once you have at least {MIN_SCORED_STEPS} steps, or leave without a score.
+              The round is stopped. End it once you have at least {MIN_SCORED_STEPS} steps, or leave without a score.
             </p>
             {earlyNote ? <p className="mt-3 text-sm text-destructive">{earlyNote}</p> : null}
             <div className="mt-5 grid gap-2">
@@ -512,10 +473,9 @@ function Results({
           <span className="ml-1 text-xl font-medium text-muted-foreground">/100</span>
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">{levelName}</p>
-        <dl className="mt-5 grid grid-cols-3 gap-2 text-center">
+        <dl className="mt-5 grid grid-cols-2 gap-2 text-center">
           <Mini label="Pace" value={metrics.pace} />
           <Mini label="Symmetry" value={metrics.symmetry} />
-          <Mini label="Posture" value={metrics.posture} />
         </dl>
         <p className="mt-4 rounded-2xl bg-mint px-4 py-3 text-sm leading-6">{outcome.session.feedback}</p>
         <ul className="mt-4 grid gap-1 text-sm text-[#2c4036]">

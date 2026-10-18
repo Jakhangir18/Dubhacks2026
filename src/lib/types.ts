@@ -27,7 +27,6 @@ export type SessionRecord = {
   walkingScore: number
   pace: number
   symmetry: number
-  posture: number
   steps: number
   feedback: string
   source: SessionSource
@@ -78,11 +77,9 @@ export type LiveState = {
   startedAt: number
   lastStepAt: number
   expected: Foot
-  posture: number
   pressure: number
   wave: number
   stepsThisWave: number
-  samples: number[]
   events: StepEvent[]
   lastCue: string
   finished: boolean
@@ -92,7 +89,6 @@ export type LiveState = {
 export type RoundMetrics = {
   pace: number
   symmetry: number
-  posture: number
   walkingScore: number
   steps: number
 }
@@ -104,7 +100,6 @@ export type CompletionInput = {
   walkingScore: number
   pace: number
   symmetry: number
-  posture: number
   steps: number
   source: SessionSource
 }

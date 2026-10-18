@@ -20,7 +20,7 @@ export function PageHeader({
         {eyebrow ? (
           <p className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground">{eyebrow}</p>
         ) : null}
-        <h1 className="mt-1 text-[1.85rem] font-semibold tracking-tight text-ink sm:text-4xl">{title}</h1>
+        <h1 className="mt-1 text-[1.85rem] font-semibold tracking-tight text-foreground sm:text-4xl">{title}</h1>
         {subtitle ? <p className="mt-1.5 max-w-xl text-sm leading-6 text-muted-foreground">{subtitle}</p> : null}
         {extra}
       </div>
