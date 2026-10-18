@@ -56,8 +56,8 @@ def test_garbled_websocket_frame_does_not_close_the_sender():
 def test_load_env_drops_inline_comments(tmp_path, monkeypatch):
     from server.app import load_env
     f = tmp_path / "keys"
-    f.write_text('A_KEY=abc\t# the README style\nB_KEY="x # y"\n# C_KEY=no\n')
-    for k in ("A_KEY", "B_KEY", "C_KEY"):
+    f.write_text('A_KEY=abc\t# the README style\nD_KEY=   # optional\nB_KEY="x # y"\n# C_KEY=no\n')
+    for k in ("A_KEY", "B_KEY", "C_KEY", "D_KEY"):
         monkeypatch.setenv(k, "")   # recorded as absent, so the values load_env sets are removed afterwards
         monkeypatch.delenv(k)
     load_env(f)
@@ -65,3 +65,4 @@ def test_load_env_drops_inline_comments(tmp_path, monkeypatch):
     assert os.environ["A_KEY"] == "abc"
     assert os.environ["B_KEY"] == "x # y"
     assert "C_KEY" not in os.environ
+    assert os.environ["D_KEY"] == ""

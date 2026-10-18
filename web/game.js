@@ -361,13 +361,8 @@ class Play extends Phaser.Scene {
     this.paused = false;
     this.highSound = { L: false, R: false };
     this.g = newGame(settings.limits, Date.now() % 100000);
-    perceiver.reset(settings.perceptron, settings.player);
-    // No frames leave on the Home or Title screens, or while the game is paused or the zone is being set up.
-    const hold = () => { perceiver.paused = true; };
-    const go = () => { perceiver.paused = this.paused; perceiver.lastForm = performance.now(); };
-    this.events.on('pause', hold);
-    this.events.on('resume', go);
-    this.events.once('shutdown', () => { perceiver.stop(); this.events.off('pause', hold); this.events.off('resume', go); });
+    perceiver.reset(settings.perceptron, settings.player, () => this.paused || this.sys.isPaused());
+    this.events.once('shutdown', () => perceiver.stop());   // no frames leave on the Home or Title screens
     this.sprites = new Map();
     this.nextGardenUpdate = 0;
     this.coachLine = '';
@@ -426,7 +421,6 @@ class Play extends Phaser.Scene {
       publishGarden({ paused: this.paused, coach: this.paused ? 'Paused · Space to keep walking' : this.coachLine });
       sound.setMusic(!this.paused);
       clip.setPaused(this.paused);
-      perceiver.paused = this.paused;
     });
     if (settings.greeting) { this.coachLine = settings.greeting; setTimeout(() => say(settings.greeting), 2600); }
     const jump = params.get('act');

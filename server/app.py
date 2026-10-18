@@ -48,12 +48,23 @@ def load_env(path: Path = ROOT / ".env") -> None:
         if value[:1] in {'"', "'"}:
             value = value[1:].split(value[0], 1)[0]
         else:
-            value = re.split(r"\s+#", value, maxsplit=1)[0].strip()   # README examples carry inline comments
+            value = re.split(r"(?:^|\s+)#", value, maxsplit=1)[0].strip()   # README examples carry inline comments
         os.environ.setdefault(key.strip(), value)
 
 
 load_env()
 app = FastAPI(title="Zombie Walk Home")
+MAX_PERCEIVE_BYTES = 8_000_000   # 32 frames of a 320 x 240 JPEG are far below this
+
+
+@app.middleware("http")
+async def cap_perceive_body(request: Request, call_next):
+    """/api/perceive has no login and relays to a paid API: refuse a huge body before it is read."""
+    if request.url.path == "/api/perceive":
+        size = request.headers.get("content-length")
+        if size is None or not size.isdigit() or int(size) > MAX_PERCEIVE_BYTES:
+            return Response(status_code=413)
+    return await call_next(request)
 
 # ---------------------------------------------------------------- event relay (Raspberry Pi -> game)
 game_clients: set[WebSocket] = set()

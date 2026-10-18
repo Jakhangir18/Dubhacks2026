@@ -65,6 +65,8 @@ def clean_frames(frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for f in frames[: MAX_FRAMES * 4]:   # look a little further than the cap so bad frames do not eat it
         if len(out) == MAX_FRAMES:
             break
+        if not isinstance(f, dict):
+            continue
         url = str(f.get("url", ""))
         try:
             ts = int(f.get("tsMs", -1))
@@ -99,7 +101,7 @@ async def ask(frames: list[dict[str, Any]], question: str, schema: dict[str, Any
     key = os.environ.get("PERCEPTRON_API_KEY")
     if not key or len(frames) < 2:   # the API needs at least two frames of the same size
         return None
-    if not allow_call():   # counted here, so only paid calls use the budget
+    if not allow_call():   # counted here, so only requests that go out use the budget
         return None
     body = {
         "model": MODEL,

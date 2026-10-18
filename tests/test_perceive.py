@@ -109,3 +109,31 @@ def test_requests_that_never_reach_the_api_spend_no_budget():
     for _ in range(perceive.CALLS_PER_MINUTE + 5):
         client.post("/api/perceive", json={"player": "Mia", "kind": "form", "frames": frames()})   # no key set
     assert perceive.allow_call()
+
+
+async def test_spent_budget_stops_the_paid_call(monkeypatch):
+    monkeypatch.setenv("PERCEPTRON_API_KEY", "k")
+    posts = []
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return None
+
+        async def post(self, *a, **k):
+            posts.append(1)
+            raise AssertionError("the paid API must not be called")
+    monkeypatch.setattr(perceive.httpx, "AsyncClient", FakeClient)
+    for _ in range(perceive.CALLS_PER_MINUTE):
+        assert perceive.allow_call()
+    assert await perceive.check_form(perceive.clean_frames(frames())) == {"source": "off"}
+    assert posts == []
+
+
+def test_huge_or_unsized_body_is_refused():
+    assert client.post("/api/perceive", content=b"{}", headers={"content-length": "999999999"}).status_code == 413

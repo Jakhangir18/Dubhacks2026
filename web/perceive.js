@@ -25,11 +25,12 @@ export class Perceiver {
   }
 
   // Called at the start of every game.
-  reset(enabled, player) {
+  // isPaused: the game is paused or the zone is being set up; nothing is captured then.
+  reset(enabled, player, isPaused = () => false) {
     this.gen++;
     this.enabled = enabled;
     this.used = enabled;
-    this.paused = false;
+    this.isPaused = isPaused;
     this.player = player;
     this.frames = [];
     this.checked = 0;
@@ -49,7 +50,7 @@ export class Perceiver {
   capture() {
     const v = this.tracker.video;
     const lm = this.tracker.lastLm;
-    if (!this.enabled || this.paused || !this.tracker.running || !lm || v.readyState < 2 || !v.videoWidth) return;
+    if (!this.enabled || this.isPaused() || !this.tracker.running || !lm || v.readyState < 2 || !v.videoWidth) return;
     const seen = (i) => lm[i] && (lm[i].visibility ?? 1) > 0.5;
     const pts = LEG.filter(seen).map((i) => lm[i]);
     if (pts.length < 4 || !KNEES.some(seen)) return;

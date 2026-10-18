@@ -163,17 +163,12 @@ def limits(name: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- Perceptron second opinion
-class FrameIn(BaseModel):
-    url: str = Field(max_length=perceive.MAX_FRAME_CHARS)   # bounds the body before it is held in memory
-    tsMs: float
-
-
 class PerceiveIn(BaseModel):
     player: str = "Player"
     kind: str                 # "step" or "form"
     foot: str | None = None   # for step: "L" or "R"
     thing: str | None = None  # for step: "flower" or "seed"
-    frames: list[FrameIn] = Field(max_length=perceive.MAX_FRAMES * 4)
+    frames: list[dict[str, Any]] = Field(max_length=perceive.MAX_FRAMES * 4)   # bad frames are skipped one by one
 
 
 @router.post("/perceive")
@@ -181,7 +176,7 @@ async def perceive_frames(inp: PerceiveIn) -> dict[str, Any]:
     player = await run_in_threadpool(store.player, inp.player)
     if not player.get("perceptronConsent"):
         return {"source": "no-consent"}   # nothing leaves the laptop without consent
-    frames = perceive.clean_frames([f.model_dump() for f in inp.frames])
+    frames = perceive.clean_frames(inp.frames)
     if inp.kind == "step" and inp.foot in {"L", "R"} and inp.thing in {"flower", "seed"}:
         return await perceive.check_step(frames, inp.foot, inp.thing)
     if inp.kind == "form":
