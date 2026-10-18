@@ -694,7 +694,7 @@ class Play extends Phaser.Scene {
     sound.play('act');
     if (this.g.act === 'storm') clip.start(this.game.canvas, sound.capture?.stream);
     this.actIntroUntil = this.g.t + 4.4;
-    this.coachLine = a.hint;
+    this.coachLine = shoesLive(this.g) ? a.how : a.hint;   // shoe mode: say what to do with the foot, plainly
     this.nextGardenUpdate = 0;
     say(a.intro.join(' '));
   }
@@ -928,9 +928,9 @@ class Play extends Phaser.Scene {
       const act = ACTS[g.act];
       publishGarden({ cadence: out.pace.cadence, act: g.act, paceOk: out.pace.ok || g.t <= 3,
         paused: this.paused, title: act?.title || '', score: `${g.score} pts${g.streak >= 5 ? '  x2' : ''}`,
-        progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · speed x${speedScale(g).toFixed(1)}${shoesLive(g) ? ' · shoes' : ''} · form ${Math.round(out.form * 100)}%${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
+        progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · speed x${speedScale(g).toFixed(1)}${shoesLive(g) ? ' · shoes' : ''} · form ${Math.round(out.form * 100)}%${out.pace.asym !== null ? ` · even L/R ${Math.max(0, Math.round(100 - out.pace.asym * 100))}%` : ''}${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
         coachColor: g.t < this.feedbackUntil ? this.feedbackColor : '',
-        coach: g.t < this.feedbackUntil ? this.feedback : g.t < this.actIntroUntil ? act.intro.join(' ') : this.coachLine });
+        coach: g.t < this.feedbackUntil ? this.feedback : g.t < this.actIntroUntil ? (shoesLive(g) ? `${act.title.split(' · ')[1]}: ${act.how}` : act.intro.join(' ')) : this.coachLine });
     }
   }
 }
