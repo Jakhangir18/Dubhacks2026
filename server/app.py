@@ -73,6 +73,7 @@ async def cap_perceive_body(request: Request, call_next):
 game_clients: set[WebSocket] = set()
 VALID_KINDS = {"strike", "lift"}
 MAX_SHOES = 4   # boxes per "shoes" sighting from feet.py
+MAX_FRAME_CHARS = 200_000   # a 480 px JPEG data URL from feet.py is about 40 KB
 
 
 def clean_shoes(ev: dict[str, Any]) -> dict[str, Any] | None:
@@ -103,6 +104,11 @@ def clean_event(ev: Any) -> dict[str, Any] | None:
         return None
     if ev.get("kind") == "shoes":
         return clean_shoes(ev)
+    if ev.get("kind") == "frame":
+        jpeg = ev.get("jpeg")
+        if not isinstance(jpeg, str) or not jpeg.startswith("data:image/jpeg;base64,") or len(jpeg) > MAX_FRAME_CHARS:
+            return None
+        return {"kind": "frame", "jpeg": jpeg, "source": str(ev.get("source", "feet"))[:20]}
     if ev.get("foot") not in {"L", "R"} or ev.get("kind") not in VALID_KINDS:
         return None
     out: dict[str, Any] = {"foot": ev["foot"], "kind": ev["kind"], "source": str(ev.get("source", "pi"))[:20]}

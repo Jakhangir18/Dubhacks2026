@@ -82,3 +82,10 @@ def test_shoe_sightings_are_relayed_and_cleaned():
         assert got["boxes"] == [[0.1, 0.5, 0.3, 0.9, 0.8], [0, 0, 0.1, 0.1, 0.1], [0, 0, 0.2, 0.2, 0.2], [0, 0, 0.3, 0.3, 0.3]]
     assert clean_event({"kind": "shoes", "boxes": "none"}) is None
     assert clean_event({"kind": "shoes", "boxes": [[True, 0, 1, 1, 1], [0, 0, 1, 1, float("nan")]]})["boxes"] == []
+
+
+def test_camera_frames_are_relayed_within_a_size_cap():
+    jpeg = "data:image/jpeg;base64,/9j/4AAQ"
+    assert clean_event({"kind": "frame", "jpeg": jpeg}) == {"kind": "frame", "jpeg": jpeg, "source": "feet"}
+    assert clean_event({"kind": "frame", "jpeg": "data:image/png;base64,AAAA"}) is None
+    assert clean_event({"kind": "frame", "jpeg": "data:image/jpeg;base64," + "A" * 300_000}) is None

@@ -42,6 +42,7 @@ const tracker = new FootTracker({
 
 // Shoe boxes from feet.py (forwarded by the game window) and the calibration corners, drawn over the picture.
 let shoes = { boxes: [], at: 0 };
+let camFeed = { at: 0, w: 0, h: 0 };   // feet.py's picture, when it is running
 let calib = { points: [], active: false };
 function drawShoes(w, h) {
   if (performance.now() - shoes.at < 500) {
@@ -62,7 +63,9 @@ function drawShoes(w, h) {
 }
 
 function drawSkeleton(lm, state) {
-  const w = video.videoWidth || 1280, h = video.videoHeight || 720;
+  const live = performance.now() - camFeed.at < 2000;
+  $('feed').hidden = !live; $('feed-note').hidden = !live;
+  const w = live ? camFeed.w : (video.videoWidth || 1280), h = live ? camFeed.h : (video.videoHeight || 720);
   if (overlay.width !== w || overlay.height !== h) { overlay.width = w; overlay.height = h; }
   octx.clearRect(0, 0, w, h);
   drawShoes(w, h);
@@ -184,6 +187,11 @@ listen((m) => {
   else if (m.type === 'perceiver-report-request') perceiver.sessionReport().then((report) => send('perceiver-report', { id: m.id, report }));
   else if (m.type === 'foot-seen' && m.ev) logEvent(m.ev);
   else if (m.type === 'shoes-seen' && Array.isArray(m.boxes)) { shoes = { boxes: m.boxes, at: performance.now() }; }
+  else if (m.type === 'frame-seen' && typeof m.jpeg === 'string') {
+    const img = $('feed');
+    img.onload = () => { camFeed = { at: performance.now(), w: img.naturalWidth, h: img.naturalHeight }; if (!tracker.running) drawSkeleton(null, tracker.state); };
+    img.src = m.jpeg;
+  }
   else if (m.type === 'mirror') { $('mirror').src = m.url; gameSeen = performance.now(); }
   else if (m.type === 'game') {
     gameSeen = performance.now();

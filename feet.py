@@ -12,6 +12,7 @@ Detector keeps a little state (recent foot sizes), so use one instance per camer
 """
 import argparse
 import atexit
+import base64
 import collections
 import http.client
 import json
@@ -98,12 +99,19 @@ class ShoeSender:
         self.listeners = None
         threading.Thread(target=self._run, daemon=True).start()
 
-    def send(self, boxes, w, h):
+    def send(self, boxes, w, h, frame=None):
         event = {"kind": "shoes", "source": self.source,
                  "boxes": [[round(f.x1 / w, 4), round(f.y1 / h, 4), round(f.x2 / w, 4), round(f.y2 / h, 4), round(f.conf, 3)]
                            for f in boxes]}
+        events = [event]
+        if frame is not None:   # a small JPEG of what the camera sees, for the calibration clicks in the browser
+            small = cv2.resize(frame, (480, int(480 * h / w)))
+            ok, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 60])
+            if ok:
+                events.append({"kind": "frame", "source": self.source,
+                               "jpeg": "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()})
         with self.lock:
-            self.pending = {"events": [event]}
+            self.pending = {"events": events}
             self.lock.notify()
 
     def _run(self):
@@ -171,6 +179,8 @@ def main():
     p.add_argument("--record", action="store_true", help="save preview to clip_<time>.mp4 (saved even on q or Ctrl-C)")
     p.add_argument("--server", help="game server, e.g. https://host:8443: send each frame's shoe boxes to /api/events")
     p.add_argument("--no-preview", action="store_true", help="no window (headless)")
+    p.add_argument("--rotate", type=int, default=0, choices=(0, 90, 180, 270),
+                   help="rotate the camera picture clockwise before detection (a camera mounted on its side)")
     args = p.parse_args()
 
     det = FeetDetector(args.classes.split(","), args.conf, args.max_area)
@@ -184,16 +194,24 @@ def main():
         atexit.register(writer.release)
         print("Recording to", path)
 
+    rotation = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}.get(args.rotate)
     times = []
+    last_frame_sent = 0.0
     while True:
         ok, frame = cap.read()
         if not ok:
             break
+        if rotation is not None:
+            frame = cv2.rotate(frame, rotation)
         t0 = time.perf_counter()
         feet = det(frame)
         times.append(time.perf_counter() - t0)
         if sender:
-            sender.send(feet, frame.shape[1], frame.shape[0])
+            now = time.time()
+            with_frame = now - last_frame_sent > 0.5   # two pictures a second are enough to click corners on
+            if with_frame:
+                last_frame_sent = now
+            sender.send(feet, frame.shape[1], frame.shape[0], frame if with_frame else None)
         for f in det.rejected:
             cv2.rectangle(frame, (f.x1, f.y1), (f.x2, f.y2), (0, 0, 255), 1)
         for f in feet:

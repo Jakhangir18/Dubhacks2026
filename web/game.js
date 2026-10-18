@@ -3,7 +3,7 @@
 import { newGame, step, addEvent, addShoes, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
-import { connectBridge, SHOES_EVENT } from './bridge.js';
+import { connectBridge, SHOES_EVENT, FRAME_EVENT } from './bridge.js';
 import { ACTS, ENDING } from './lore.js';
 import { GardenSound } from './sound.js';
 import { WalkClip, uploadClip } from './clip.js';
@@ -123,6 +123,9 @@ const localPerceiver = new Perceiver(cameraPanel.tracker);
 const remotePerceiver = new RemotePerceiver();
 let perceiver = localPerceiver;
 if (params.has('scene')) window.zombiewalk = { perceiver: localPerceiver, tracker: cameraPanel.tracker };   // development and end-to-end tests
+
+// feet.py's camera picture goes on to the camera window, where the shoe calibration is clicked.
+window.addEventListener(FRAME_EVENT, (e) => { if (cameraWindowAlive()) send('frame-seen', { jpeg: e.detail.jpeg }); });
 
 // Foot events from the camera window on the laptop screen; the game stamps them on arrival like any source.
 // While the camera window runs, this window's own camera (V) would count every step twice: ignore it.

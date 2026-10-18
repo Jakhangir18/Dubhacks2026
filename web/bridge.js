@@ -4,6 +4,7 @@
 import { emitFoot } from './bus.js';
 
 export const SHOES_EVENT = 'zombiewalk:shoes';   // {boxes: [[x1, y1, x2, y2, conf], ...], source}
+export const FRAME_EVENT = 'zombiewalk:frame';   // {jpeg: data URL} what feet.py's camera sees
 
 export function connectBridge(onStatus = () => {}) {
   if (location.protocol === 'file:') return;
@@ -31,6 +32,8 @@ export function connectBridge(onStatus = () => {}) {
             emitFoot({ foot: ev.foot, kind: ev.kind, liftCm: ev.liftCm, source: ev.source || 'bridge' });
           } else if (ev.kind === 'shoes' && Array.isArray(ev.boxes)) {
             window.dispatchEvent(new CustomEvent(SHOES_EVENT, { detail: { boxes: ev.boxes, source: ev.source || 'bridge' } }));
+          } else if (ev.kind === 'frame' && typeof ev.jpeg === 'string' && ev.jpeg.startsWith('data:image/jpeg;base64,')) {
+            window.dispatchEvent(new CustomEvent(FRAME_EVENT, { detail: { jpeg: ev.jpeg } }));
           }
         }
       } catch { /* ignore malformed messages */ }
