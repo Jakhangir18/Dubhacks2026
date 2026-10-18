@@ -1,24 +1,13 @@
 """Therapist API tests. Keys and MongoDB are switched off, so everything runs on the rule-based fallbacks
 and a temporary JSON store; the model calls are replaced where a test needs them."""
 
-import pytest
 from fastapi.testclient import TestClient
 
-from server import api, therapist
+from server import therapist
 from server.app import app
-from server.store import Store, clean_limits
+from server.store import clean_limits
 
 client = TestClient(app)
-
-
-@pytest.fixture(autouse=True)
-def offline(monkeypatch, tmp_path):
-    for key in ("GEMINI_API_KEY", "BACKBOARD_API_KEY", "MONGODB_URI"):
-        monkeypatch.delenv(key, raising=False)
-    fresh = Store()
-    fresh.file = tmp_path / "store.json"
-    monkeypatch.setattr(api, "store", fresh)
-    return fresh
 
 
 def summary(**over):
@@ -29,7 +18,7 @@ def summary(**over):
 
 
 def test_status_reports_fallbacks():
-    assert client.get("/api/status").json() == {"gemini": False, "backboard": False, "storage": "file", "visa": "mock"}
+    assert client.get("/api/status").json() == {"gemini": False, "backboard": False, "storage": "file", "visa": "mock", "perceptron": False}
 
 
 def test_limits_are_cleaned_and_kept_inside_their_ranges():

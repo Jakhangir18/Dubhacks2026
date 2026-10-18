@@ -9,9 +9,9 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from server import therapist
+from server import perceive, therapist
 from server.store import Store
 
 router = APIRouter(prefix="/api")
@@ -26,6 +26,7 @@ def status() -> dict[str, Any]:
         "backboard": bool(os.environ.get("BACKBOARD_API_KEY")),
         "storage": store.backend,
         "visa": os.environ.get("VISA_MODE", "mock"),
+        "perceptron": bool(os.environ.get("PERCEPTRON_API_KEY")),
     }
 
 
@@ -44,6 +45,7 @@ class PlayerIn(BaseModel):
     limits: dict[str, Any] | None = None
     rewards: list[dict[str, Any]] | None = None
     notes: str | None = None
+    perceptronConsent: bool | None = None   # the parent or therapist allows leg-only frames to go to Perceptron
 
 
 def clean_rewards(rewards: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -66,6 +68,7 @@ def put_player(name: str, inp: PlayerIn) -> dict[str, Any]:
         limits=inp.limits,
         rewards=clean_rewards(inp.rewards) if inp.rewards is not None else None,
         notes=inp.notes[:500] if inp.notes is not None else None,
+        perceptronConsent=inp.perceptronConsent,
     )
 
 
@@ -157,3 +160,25 @@ def sessions(name: str) -> list[dict[str, Any]]:
 @router.get("/limits/{name}")
 def limits(name: str) -> dict[str, Any]:
     return store.player(name)["limits"]
+
+
+# ---------------------------------------------------------------- Perceptron second opinion
+class PerceiveIn(BaseModel):
+    player: str = "Player"
+    kind: str                 # "step" or "form"
+    foot: str | None = None   # for step: "L" or "R"
+    thing: str | None = None  # for step: "flower" or "seed"
+    frames: list[Any] = Field(max_length=perceive.MAX_FRAMES * 4)   # bad frames are skipped one by one
+
+
+@router.post("/perceive")
+async def perceive_frames(inp: PerceiveIn) -> dict[str, Any]:
+    player = await run_in_threadpool(store.player, inp.player)
+    if not player.get("perceptronConsent"):
+        return {"source": "no-consent"}   # nothing leaves the laptop without consent
+    frames = perceive.clean_frames(inp.frames)
+    if inp.kind == "step" and inp.foot in {"L", "R"} and inp.thing in {"flower", "seed"}:
+        return await perceive.check_step(frames, inp.foot, inp.thing)
+    if inp.kind == "form":
+        return await perceive.check_form(frames)
+    return {"source": "bad-request"}

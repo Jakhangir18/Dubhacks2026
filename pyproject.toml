@@ -1,0 +1,4 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]   # test_feet.py at the root needs OpenCV, which the server venv does not install
+pythonpath = ["."]

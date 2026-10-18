@@ -44,11 +44,26 @@ def load_env(path: Path = ROOT / ".env") -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        value = re.split(r"\s+#", value, maxsplit=1)[0] if value.lstrip()[:1] not in {'"', "'"} else value
+        value = value.strip()   # README examples carry inline comments; KEY=#abc stays a value
+        if value[:1] in {'"', "'"}:
+            value = value[1:].split(value[0], 1)[0]
+        os.environ.setdefault(key.strip(), value)
 
 
 load_env()
 app = FastAPI(title="Zombie Walk Home")
+MAX_PERCEIVE_BYTES = 8 * 400_000 + 100_000   # perceive.MAX_FRAMES frames of MAX_FRAME_CHARS, plus the rest of the body
+
+
+@app.middleware("http")
+async def cap_perceive_body(request: Request, call_next):
+    """/api/perceive has no login and relays to a paid API: refuse a huge body before it is read."""
+    if request.method == "POST" and request.url.path == "/api/perceive":
+        size = request.headers.get("content-length")
+        if size is None or not size.isdigit() or int(size) > MAX_PERCEIVE_BYTES:
+            return Response(status_code=413)
+    return await call_next(request)
 
 # ---------------------------------------------------------------- event relay (Raspberry Pi -> game)
 game_clients: set[WebSocket] = set()

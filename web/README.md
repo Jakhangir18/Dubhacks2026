@@ -12,6 +12,15 @@ python3 -m venv .venv && .venv/bin/pip install -r server/requirements.txt     # 
 
 Without the server (keyboard and camera still work): `cd web && python3 -m http.server 8000`.
 
+## Set up on the pad
+
+Put the projector and camera **in front of the player**. The player faces them while walking. Use the floor in front and beside the pad for the garden; nothing should project behind the player. Connect the speaker and press **F** for fullscreen.
+
+1. On a new laptop, **Mark your walking zone** opens first. **Z** (or **C**) reopens it later. The bright outer outline is the whole projector frame.
+2. Drag **FRONT-LEFT**, then **FRONT-RIGHT** to the end closest to the projector and camera. Then place **BACK-RIGHT** and **BACK-LEFT**. Left/right are the player's while facing the front. Preview plants travel from the front toward the footprints.
+3. Use **Rotate 90°** for a projector mounted at the side. Arrow keys adjust a focused handle; Shift makes larger adjustments. Leave generous space in front of the zone for the large game text.
+4. **Enter** or **Done** saves and continues to the title; explicit `?scene` previews still open their requested scene. Saved corners skip setup and stay compatible with `calibrate.html`. During a game, setup pauses play and the clip, then resumes them on Done. **K** shows the normally hidden keys bar.
+
 ## Therapist and parent panel
 
 Open http://localhost:8000/therapist.html (with the server running).
@@ -29,7 +38,10 @@ Create a file named `.env` in the repo root (it is gitignored; never commit keys
 GEMINI_API_KEY=...        # MLH Best Use of Gemini API: live coach cues, session notes, reward host
 BACKBOARD_API_KEY=...     # MLH Best Use of Backboard: the coach remembers each player across sessions
 MONGODB_URI=mongodb+srv://...   # MLH Best Use of MongoDB Atlas: players and sessions
+PERCEPTRON_API_KEY=...    # Perceptron track: Mk1.5 double-checks stomps, dodges and form from leg-only frames
 ```
+
+Perceptron also needs consent: tick "Perceptron double-check" for the player in the therapist panel and save. Without it no frame leaves the laptop.
 
 Restart the server after editing it. Without keys everything still works on rule-based fallbacks and a local file; the Visa checkout stays a labelled mock until Visa sandbox credentials exist.
 
@@ -46,19 +58,19 @@ The camera sends the same foot events as the keyboard, so you can mix them while
 
 See [../vision/CONTRACT.md](../vision/CONTRACT.md): POST foot events to `http://<laptop-ip>:8000/api/events` (or the `/ws/events` WebSocket). `python3 vision/pi_sender.py --server http://<laptop-ip>:8000 --demo` simulates a walk. The key bar shows "bridge connected" when the game is listening.
 
-Keyboard play (no camera needed): **A / D** normal step, **Q / E** high step (stomp a flower, dodge a seed), **W** auto-walk, **Space** pause, **C** drag the corners onto the mat (same calibration as the check page), **M** coach voice on or off, **N** sound effects and music on or off (saved locally).
+Keyboard play (no camera needed): **A / D** normal step, **Q / E** high step (stomp a flower, dodge a seed), **W** auto-walk, **Space** pause, **Z / C** mark the walking zone (same saved corners as the check page), **K** show/hide keys, **M** coach voice on or off, **N** sound effects and music on or off (saved locally).
 
 Useful URLs: `?demo=1` short game for judges, `?scene=play&act=garden&auto=1` jump to act 2 with auto-walk, `?scene=home` preview the end screen.
 
 How it plays: act 1 walk home (keep at least 80 steps per minute; your normal step height is measured here), act 2 high-step onto the flowers in your foot's lane, act 3 lift the foot the seed is aiming at. Heights are relative to your own normal step, and the lift bars beside the footprints show your lift against the line you need.
 
-Files: `logic.js` rules (tested), `game.js` Phaser scenes and art, `bus.js` foot events, `vision.js` camera step detector (tested), `camera-panel.js` the V panel, `bridge.js` events from the server, `warp.js` projector corners.
+Files: `logic.js` rules (tested), `game.js` Phaser scenes and art, `bus.js` foot events, `vision.js` camera step detector (tested), `camera-panel.js` the V panel, `bridge.js` events from the server, `warp.js` projector corners, `zone.js` guided zone setup, `ambient.js` garden and outside HUD, `projection.css` projector layout.
 
 ## Walk clips and local sound (CloudForce Most Viral)
 
 Install `server/requirements.txt` before the event; it includes the pure-Python Segno QR generator. Clips, QR codes, effects and music use no CDN or downloaded runtime assets. The existing camera pose loader in `vision.js` still uses remote MediaPipe/model URLs; this feature does not change that loader. Keyboard and Pi-bridge play do not need those downloads.
 
-Act 3 starts recording **only the Phaser game canvas**, including two seconds of the Home celebration. Neither the camera panel nor camera/microphone tracks are recorded. The synthesized game audio is included when its WebAudio recording tap was available at the start of act 3; speechSynthesis is not recorded. Press a key or start the game to unlock browser audio. The quiet melody and bass play during the walk, duck under coach speech, and stop on pause and arrival.
+Act 3 starts recording **only the Phaser game canvas**, including two seconds of the Home celebration. The ambient garden and outside HUD are not recorded. Neither the camera panel nor camera/microphone tracks are recorded. The synthesized game audio is included when its WebAudio recording tap was available at the start of act 3; speechSynthesis is not recorded. Press a key or start the game to unlock browser audio. The quiet melody and bass play during the walk, duck under coach speech, and stop on pause and arrival.
 
 The recorder uses 15 fps, approximately 1 Mbps VP8 (VP9/WebM fallback), and at most two staggered encoders. Complete rolling windows retain about **10–20 seconds**, or less for a short act, without losing WebM headers or re-encoding. Each upload is capped at 30 MiB. Unsupported recording or a missing server shows a message on Home; the game and session saving still work. The Home preview (`?scene=home`) has no recorded clip.
 

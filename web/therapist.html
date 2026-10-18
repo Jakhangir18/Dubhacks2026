@@ -38,6 +38,7 @@
     <span id="st-backboard" class="chip">Backboard memory</span>
     <span id="st-storage" class="chip">storage</span>
     <span id="st-visa" class="chip">Visa</span>
+    <span id="st-perceptron" class="chip">Perceptron</span>
   </header>
   <main>
     <section>
@@ -45,6 +46,8 @@
       <div class="row"><select id="players"></select><input id="newname" placeholder="new player name"><button id="load">Load</button></div>
       <div class="row"><button class="primary" id="play">Play as this player</button><span class="hint" id="current"></span></div>
       <p class="hint">The game uses the current player's limits, their memory and their reward list.</p>
+      <label>Perceptron double-check: send leg-only frames (knees down, no face) <input type="checkbox" id="perceptronConsent"></label>
+      <p class="hint">Off by default. Saved with the button under Rewards.</p>
       <div id="msg"></div>
     </section>
 
@@ -74,8 +77,8 @@
 
     <section class="wide">
       <h2>Sessions</h2>
-      <table><thead><tr><th>When</th><th>Steps</th><th>Pace</th><th>Flowers</th><th>Seeds</th><th>Form</th><th>High-step lift L / R</th><th>Verified</th><th>Coach note</th></tr></thead>
-        <tbody id="sessions"><tr><td colspan="9" class="hint">no sessions yet</td></tr></tbody></table>
+      <table><thead><tr><th>When</th><th>Steps</th><th>Pace</th><th>Flowers</th><th>Seeds</th><th>Form</th><th>High-step lift L / R</th><th>Verified</th><th>Perceptron</th><th>Coach note</th></tr></thead>
+        <tbody id="sessions"><tr><td colspan="10" class="hint">no sessions yet</td></tr></tbody></table>
     </section>
   </main>
   <script>
@@ -103,6 +106,7 @@
         $('st-storage').textContent = `storage: ${s.storage}`;
         $('st-storage').classList.toggle('on', s.storage === 'mongodb');
         $('st-visa').textContent = `Visa: ${s.visa}`;
+        $('st-perceptron').classList.toggle('on', s.perceptron);
       } catch { say('server not reachable: run the game server (see web/README.md)'); }
     }
 
@@ -119,6 +123,7 @@
       $('spacingMin').value = L.spacingRange[0]; $('spacingMax').value = L.spacingRange[1];
       rewards = p.rewards || [];
       $('notes').value = p.notes || '';
+      $('perceptronConsent').checked = !!p.perceptronConsent;
       drawRewards();
       $('current').textContent = `current: ${store.get('zombiewalk.player', 'none')}`;
     }
@@ -136,13 +141,14 @@
 
     async function sessions(name) {
       const rows = await api(`/api/sessions/${encodeURIComponent(name)}`);
-      if (!rows.length) { $('sessions').innerHTML = '<tr><td colspan="9" class="hint">no sessions yet</td></tr>'; return; }
+      if (!rows.length) { $('sessions').innerHTML = '<tr><td colspan="10" class="hint">no sessions yet</td></tr>'; return; }
       $('sessions').replaceChildren(...rows.map((r) => {
         const s = r.summary || {};
         const tr = document.createElement('tr');
         tr.append(td(new Date(r.ts * 1000).toLocaleString()), td(s.steps), td(s.cadence), td(s.stompPct == null ? '-' : `${s.stompPct}%`),
           td(s.dodgePct == null ? '-' : `${s.dodgePct}%`), td(s.formPct == null ? '-' : `${s.formPct}%`),
-          td(`${s.highLiftAvgCm?.L ?? '-'} / ${s.highLiftAvgCm?.R ?? '-'} cm`), td(r.verified ? 'yes' : 'no'), td(r.note || ''));
+          td(`${s.highLiftAvgCm?.L ?? '-'} / ${s.highLiftAvgCm?.R ?? '-'} cm`), td(r.verified ? 'yes' : 'no'),
+          td(s.perceptron?.checked ? `${s.perceptron.agree}/${s.perceptron.checked} agree` : '-'), td(r.note || ''));
         return tr;
       }));
     }
@@ -169,7 +175,8 @@
       const limits = { minCadence: n('minCadence'), walkSeconds: n('walkSeconds'), gardenPlants: n('gardenPlants'),
         stormSeeds: n('stormSeeds'), liftCm: n('liftCm'), liftRange: [n('liftMin'), n('liftMax')], spacingCm: n('spacingCm'),
         spacingRange: [n('spacingMin'), n('spacingMax')], sessionMinutes: n('sessionMinutes') };
-      player = await api(`/api/player/${encodeURIComponent(player.name)}`, { method: 'PUT', body: JSON.stringify({ limits, rewards, notes: $('notes').value }) });
+      player = await api(`/api/player/${encodeURIComponent(player.name)}`, { method: 'PUT', body: JSON.stringify({ limits, rewards, notes: $('notes').value,
+        perceptronConsent: $('perceptronConsent').checked }) });
       fill(player);
       await listPlayers(player.name);
       say(`saved ${player.name}`);

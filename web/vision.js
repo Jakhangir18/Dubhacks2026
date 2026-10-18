@@ -79,6 +79,7 @@ export class FootTracker {
       this.lastTs = now;
       const res = this.landmarker.detectForVideo(this.video, now);
       const lm = res.landmarks && res.landmarks[0];
+      this.lastLm = lm || null;        // read by the Perceptron frame cropper
       if (lm) this.process(lm, now / 1000);
       if (this.onFrame) this.onFrame(lm || null, this.state);
     }
