@@ -143,6 +143,7 @@ function openZone() {
     if (play) play.frameWall = performance.now();
     // A session response or clip upload may have completed while Home was paused.
     if (home) {
+      home.showLab();
       if (home.homeData.result && home.homeData.result !== homeResult) home.showResult(home.homeData.result);
       if (home.homeData.share && home.homeData.share !== homeShare) home.showShare(home.homeData.share);
       else if (!home.homeData.share && home.homeData.shareStatus) { home.shareText.setText(home.homeData.shareStatus); home.layoutCard(); }
@@ -713,6 +714,7 @@ class Home extends Phaser.Scene {
     ];
     if (s.perceptron?.checked) lines.push(`Perceptron double-check agreed on ${s.perceptron.agree} of ${s.perceptron.checked} steps`);
     this.stats = lines.map((line) => text(line, bodySize));
+    this.labText = text(data.labStatus || (s.perceptron ? 'Perceptron lab is reviewing your walk…' : ''), small ? 18 : 22, C.cyan);
     // Measure a three-line slot before replacing the sample with the asynchronous note.
     this.noteText = text('Ag\nAg\nAg', small ? 18 : 22, C.cyan);
     this.noteHeight = this.noteText.height;
@@ -741,6 +743,17 @@ class Home extends Phaser.Scene {
     data.replay = true;
     window.dispatchEvent(new CustomEvent('zombiewalk:session', { detail: s }));
     if (params.get('scene') === 'home') return;   // preview only, nothing to save
+    if (s.perceptron) {
+      data.labStatus = 'Perceptron lab is reviewing your walk…';   // kept across a zone-setup pause
+      data.labTask = perceiver.sessionReport().then((report) => {
+        data.labReport = report;
+        data.caption = report?.caption || null;
+        data.labStatus = report?.source === 'perceptron'
+          ? `${report.clips ? `Perceptron saw ${report.clips.length} high steps` : 'Perceptron lab ready'}${data.caption ? ' · caption ready' : ''}`
+          : 'Perceptron lab unavailable for this walk';
+        if (!data.cancelled && this.homeData === data && this.sys.isActive()) this.showLab();
+      });
+    }
     const verified = (s.formPct ?? 0) >= 40;        // walking was verified for most of the session
     withTimeout(api('/api/session', { player: settings.player, summary: s, verified }), 25000)
       .then((result) => { data.result = result; if (this.sys.isActive()) this.showResult(result); })
@@ -757,7 +770,7 @@ class Home extends Phaser.Scene {
     const textWidth = W * 0.84 - 56 - qrWidth;
     const textX = W * 0.08 + 16 + textWidth / 2;
     const qrX = W * 0.92 - 16 - qrWidth / 2;
-    const items = [this.heading, this.ending, ...this.stats, this.noteText, this.rewardText, this.footer];
+    const items = [this.heading, this.ending, ...this.stats, this.labText, this.noteText, this.rewardText, this.footer];
     for (const item of items) item.setScale(1).setWordWrapWidth(textWidth);
     const reservedHeight = (item) => Math.max(item.height,
       item === this.noteText ? this.noteHeight : item === this.rewardText ? this.rewardHeight : 0);
@@ -771,7 +784,9 @@ class Home extends Phaser.Scene {
     const cardH = Math.max(cursor - gap + 14, qrWidth + 12 + 64 + 48);   // QR, gap, two caption lines, margins
     const top = Math.max(12, Math.min(H * 0.30, H - cardH - 60));
     for (const item of items) item.y += top;
-    this.shareText.setWordWrapWidth(qrWidth).setPosition(qrX, top + cardH / 2 + (this.qrImage ? qrWidth / 2 + 12 : -30));
+    this.shareText.setScale(1).setWordWrapWidth(qrWidth);
+    if (this.qrImage) this.shareText.setScale(Math.min(1, 64 / Math.max(1, this.shareText.height)));
+    this.shareText.setPosition(qrX, top + cardH / 2 + (this.qrImage ? qrWidth / 2 + 12 : -30));
     if (this.qrImage) this.qrImage.setPosition(qrX, top + cardH / 2).setDisplaySize(qrWidth, qrWidth);
     this.card.clear();
     this.card.fillStyle(C.path); this.card.fillRoundedRect(W * 0.08, top, W * 0.84, cardH, 26);
@@ -816,6 +831,12 @@ class Home extends Phaser.Scene {
     this.qrImage = this.add.image(0, 0, 'walk-qr').setInteractive({ useHandCursor: true });
     this.qrImage.on('pointerdown', () => window.open(share.url, '_blank', 'noopener'));
     this.shareText.setText('Scan to get your walk clip');
+    this.layoutCard();
+  }
+
+  showLab() {
+    // The caption goes with the lab line; the line under the QR keeps telling the player to scan.
+    this.labText.setText([this.homeData.labStatus, this.homeData.caption && `“${this.homeData.caption}”`].filter(Boolean).join('\n'));
     this.layoutCard();
   }
 

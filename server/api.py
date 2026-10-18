@@ -37,8 +37,11 @@ def players() -> list[str]:
 
 
 @router.get("/player/{name}")
-def get_player(name: str) -> dict[str, Any]:
-    return store.player(name)
+def get_player(name: str, reports: bool = False) -> dict[str, Any]:
+    player = store.player(name)
+    if not reports:
+        player.pop("perceptronReports", None)   # key frames are heavy; only the therapist panel asks for them
+    return player
 
 
 class PlayerIn(BaseModel):
@@ -182,3 +185,22 @@ async def perceive_frames(inp: PerceiveIn) -> dict[str, Any]:
     if inp.kind == "form":
         return await perceive.check_form(frames)
     return {"source": "bad-request"}
+
+
+class PerceiveSessionIn(BaseModel):
+    player: str = "Player"
+    frames: list[Any] = Field(max_length=perceive.MAX_SESSION_FRAMES * 4)
+
+
+@router.post("/perceive/session")
+async def perceive_session(inp: PerceiveSessionIn) -> dict[str, Any]:
+    player = await run_in_threadpool(store.player, inp.player)
+    if not player.get("perceptronConsent"):
+        return {"source": "no-consent"}
+    frames = perceive.clean_frames(inp.frames, cap=perceive.MAX_SESSION_FRAMES)
+    report = await perceive.session_report(frames)
+    if report["source"] == "perceptron":
+        latest = await run_in_threadpool(store.player, inp.player)
+        await run_in_threadpool(store.update_player, inp.player,
+                                perceptronReports=[report, *latest.get("perceptronReports", [])][:5])
+    return report

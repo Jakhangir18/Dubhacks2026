@@ -8,6 +8,7 @@ const EVERY_MS = 200;
 const KEEP_MS = 2400;
 const STEP_WINDOW_MS = 1600;
 const MAX_FRAMES = 8;           // server/perceive.py MAX_FRAMES
+const MAX_SESSION_FRAMES = 32;  // server/perceive.py MAX_SESSION_FRAMES
 const FORM_EVERY_MS = 10000;
 const LEG = [25, 26, 27, 28, 29, 30, 31, 32];   // knees, ankles, heels, toes
 const KNEES = [25, 26];
@@ -33,6 +34,11 @@ export class Perceiver {
     this.isPaused = isPaused;
     this.player = player;
     this.frames = [];
+    this.sessionAllowed = enabled;
+    this.sessionFrames = [];
+    this.sessionStart = performance.now();
+    this.sampleEvery = 1500;
+    this.lastSample = -Infinity;
     this.checked = 0;
     this.agree = 0;
     this.form = null;
@@ -73,7 +79,16 @@ export class Perceiver {
     this.ctx.fillRect(0, 0, W, H);
     this.ctx.drawImage(v, x0, y0, x1 - x0, y1 - y0, (W - dw) / 2, (H - dh) / 2, dw, dh);
     const now = Math.round(performance.now());
-    this.frames.push({ url: this.canvas.toDataURL('image/jpeg', 0.7), tsMs: now });
+    const url = this.canvas.toDataURL('image/jpeg', 0.7);
+    this.frames.push({ url, tsMs: now });
+    if (now - this.lastSample >= this.sampleEvery) {
+      if (this.sessionFrames.length === MAX_SESSION_FRAMES) {
+        this.sessionFrames = this.sessionFrames.filter((_, i) => i % 2 === 0);
+        this.sampleEvery *= 2;
+      }
+      this.sessionFrames.push({ url, tsMs: Math.max(0, Math.round(now - this.sessionStart)) });
+      this.lastSample = now;
+    }
     while (this.frames.length && now - this.frames[0].tsMs > KEEP_MS) this.frames.shift();
     if (now - this.lastForm > FORM_EVERY_MS && this.frames.length >= MAX_FRAMES) {
       this.lastForm = now;
@@ -103,10 +118,23 @@ export class Perceiver {
         body: JSON.stringify({ player: this.player, ...body }), signal: AbortSignal.timeout(15000) });
       const out = r.ok ? await r.json() : null;
       if (gen !== this.gen || !out) return;
-      if (out.source === 'no-consent') this.enabled = false;
+      if (out.source === 'no-consent') {
+        this.enabled = false; this.sessionAllowed = false; this.sessionFrames = [];
+      }
       else if (out.source === 'perceptron') done(out);
     } catch { /* offline or slow: the game never waits for Perceptron */ }
     finally { if (gen === this.gen) this.busy[body.kind] = false; }
+  }
+
+  async sessionReport() {
+    if (!this.used || !this.sessionAllowed || this.sessionFrames.length < 2) return null;
+    const frames = this.sessionFrames;
+    this.sessionFrames = [];
+    try {
+      const r = await fetch('/api/perceive/session', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ player: this.player, frames }), signal: AbortSignal.timeout(90000) });
+      return r.ok ? await r.json() : null;
+    } catch { return null; }
   }
 
   badge() {

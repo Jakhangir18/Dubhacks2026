@@ -52,16 +52,20 @@ def load_env(path: Path = ROOT / ".env") -> None:
 
 
 load_env()
+from server.perceive import MAX_FRAME_CHARS, MAX_FRAMES, MAX_SESSION_FRAMES
+
 app = FastAPI(title="Zombie Walk Home")
-MAX_PERCEIVE_BYTES = 8 * 400_000 + 100_000   # perceive.MAX_FRAMES frames of MAX_FRAME_CHARS, plus the rest of the body
+MAX_PERCEIVE_BYTES = MAX_FRAMES * MAX_FRAME_CHARS + 100_000
+MAX_SESSION_BYTES = MAX_SESSION_FRAMES * MAX_FRAME_CHARS + 100_000
 
 
 @app.middleware("http")
 async def cap_perceive_body(request: Request, call_next):
-    """/api/perceive has no login and relays to a paid API: refuse a huge body before it is read."""
-    if request.method == "POST" and request.url.path == "/api/perceive":
+    """Perception routes relay to a paid API: refuse a huge body before it is read."""
+    limits = {"/api/perceive": MAX_PERCEIVE_BYTES, "/api/perceive/session": MAX_SESSION_BYTES}
+    if request.method == "POST" and request.url.path in limits:
         size = request.headers.get("content-length")
-        if size is None or not size.isdigit() or int(size) > MAX_PERCEIVE_BYTES:
+        if size is None or not size.isdigit() or int(size) > limits[request.url.path]:
             return Response(status_code=413)
     return await call_next(request)
 

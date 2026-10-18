@@ -29,6 +29,11 @@
     .hint { color: var(--dim); font-size: 13px; }
     #msg { color: var(--cyan); min-height: 1.4em; }
     .wide { grid-column: 1 / -1; }
+    .lab-grid { display: flex; flex-wrap: wrap; gap: 24px; }
+    .lab-copy { flex: 1; min-width: 260px; }
+    #lab-frame { width: 320px; max-width: 100%; background: #0b0d0b; border-radius: 8px; }
+    #lab-timeline { position: relative; height: 24px; background: #2a302a; border-radius: 6px; overflow: hidden; }
+    .lab-moment { position: absolute; top: 3px; height: 18px; min-width: 3px; background: var(--yellow); }
   </style>
 </head>
 <body>
@@ -73,6 +78,30 @@
       <h2 style="margin-top:16px">Notes for the coach</h2>
       <textarea id="notes" placeholder="e.g. prefers short cues; left side tires first"></textarea>
       <div class="row"><button class="primary" id="save">Save limits, rewards and notes</button></div>
+    </section>
+
+    <section class="wide" id="perceptron-lab">
+      <h2>Perceptron lab</h2>
+      <p id="lab-empty" class="hint">Turn on Perceptron consent above, save, then finish a camera walk to see a report.</p>
+      <div id="lab-report" hidden>
+        <div class="lab-grid">
+          <div>
+            <canvas id="lab-frame" width="320" height="240" aria-label="Leg-only key frame with detected points and foot tracks"></canvas>
+            <p class="hint" id="lab-detect"></p>
+            <p class="hint" id="lab-tracks"></p>
+          </div>
+          <div class="lab-copy">
+            <p><b>Multilook · Clip caption</b><br><span id="lab-caption"></span></p>
+            <p><b>Multilook · Gait note</b><br><span id="lab-gait"></span></p>
+            <p><b>Multilook · Safety</b><br><span id="lab-safety"></span></p>
+            <p class="hint" id="lab-usage"></p>
+            <p class="hint">Structured output · Live step and form checks use JSON schema; agreement appears in Sessions.</p>
+          </div>
+        </div>
+        <p><b>Video clipping · High-step moments</b> <span class="hint" id="lab-duration"></span></p>
+        <div id="lab-timeline" role="img" aria-label="High-step moments in seconds from the game start"></div>
+        <p class="hint" id="lab-clips"></p>
+      </div>
     </section>
 
     <section class="wide">
@@ -124,8 +153,67 @@
       rewards = p.rewards || [];
       $('notes').value = p.notes || '';
       $('perceptronConsent').checked = !!p.perceptronConsent;
+      drawLab(p.perceptronReports?.[0]);
       drawRewards();
       $('current').textContent = `current: ${store.get('zombiewalk.player', 'none')}`;
+    }
+
+    let labGeneration = 0;
+    function drawLab(report) {
+      const generation = ++labGeneration;
+      $('lab-empty').hidden = !!report;
+      $('lab-report').hidden = !report;
+      const canvas = $('lab-frame');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!report) return;
+      $('lab-caption').textContent = report.caption || 'Caption unavailable.';
+      $('lab-gait').textContent = report.gaitNote || 'Gait note unavailable.';
+      $('lab-safety').textContent = report.safety || 'Safety observation unavailable.';
+      $('lab-usage').textContent = `${report.usage?.requests ?? 0} requests · Reasoning effort: low for clipping and tracking; none for Multilook and the Detect API.`;
+      $('lab-detect').textContent = report.points == null ? 'Detect API · unavailable' : `Detect API · ${report.points.length} labelled points`;
+      $('lab-tracks').textContent = report.tracks == null ? 'Object tracking · unavailable' : 'Object tracking · left foot cyan / right foot pink';
+      const tracks = report.tracks || {};
+      const clips = report.clips || [];
+      const end = Math.max(1, ...clips.map((c) => c.t1), ...Object.values(tracks).flat().map((p) => p.t));
+      $('lab-duration').textContent = `0–${end.toFixed(1)} s (last annotation)`;
+      $('lab-clips').textContent = report.clips == null ? 'Video clipping unavailable.' : clips.length
+        ? clips.map((c) => `${c.mention}: ${c.t0.toFixed(1)}${c.t1 !== c.t0 ? `–${c.t1.toFixed(1)}` : ''} s`).join(' · ')
+        : 'No high-step moments marked.';
+      $('lab-timeline').replaceChildren(...clips.map((c) => {
+        const mark = document.createElement('span');
+        mark.className = 'lab-moment';
+        mark.style.left = `${Math.min(99.5, c.t0 / end * 100)}%`;
+        mark.style.width = `${Math.max(0.5, (c.t1 - c.t0) / end * 100)}%`;
+        mark.title = `${c.mention}: ${c.t0}–${c.t1} s`;
+        return mark;
+      }));
+      const draw = (image) => {
+        if (generation !== labGeneration) return;
+        if (image) ctx.drawImage(image, 0, 0, 320, 240);
+        for (const [foot, color] of [['left foot', '#2de2ff'], ['right foot', '#ff2d95']]) {
+          ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+          (tracks[foot] || []).forEach(({ box }, i) => {
+            const x = (box[0] + box[2]) / 2 * 0.32;
+            const y = (box[1] + box[3]) / 2 * 0.24;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          });
+          ctx.stroke();
+        }
+        ctx.font = '12px system-ui';
+        for (const { mention, point } of report.points || []) {
+          const x = point.x * 0.32; const y = point.y * 0.24;
+          ctx.fillStyle = '#ffe44d'; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+          const labelX = Math.max(2, Math.min(x + 7, 318 - ctx.measureText(mention).width));
+          const labelY = Math.max(13, y - 7);
+          ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.strokeText(mention, labelX, labelY);
+          ctx.fillText(mention, labelX, labelY);
+        }
+      };
+      const image = new Image();
+      image.onload = () => draw(image);
+      image.onerror = () => draw(null);
+      if (report.keyFrame) image.src = report.keyFrame; else draw(null);
     }
 
     function drawRewards() {
@@ -155,7 +243,7 @@
 
     async function load(name) {
       if (!name) return;
-      player = await api(`/api/player/${encodeURIComponent(name)}`);
+      player = await api(`/api/player/${encodeURIComponent(name)}?reports=1`);
       fill(player);
       await sessions(player.name);
       say(`loaded ${player.name}`);

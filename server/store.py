@@ -97,7 +97,8 @@ class Store:
         doc = doc or {}
         return {"name": name, "limits": clean_limits(doc.get("limits", {})), "rewards": doc.get("rewards", []),
                 "assistantId": doc.get("assistantId"), "notes": doc.get("notes", ""),
-                "perceptronConsent": bool(doc.get("perceptronConsent", False))}
+                "perceptronConsent": bool(doc.get("perceptronConsent", False)),
+                "perceptronReports": doc.get("perceptronReports", [])}
 
     def update_player(self, name: str, **fields: Any) -> dict[str, Any]:
         """Set only the given fields, so two writers (the panel and the memory task) never overwrite each other."""
