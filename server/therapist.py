@@ -179,7 +179,7 @@ async def remember(player: dict[str, Any], summary: dict[str, Any]) -> str | Non
 
 
 async def report(summary: dict[str, Any], recent: list[dict[str, Any]]) -> dict[str, Any]:
-    history = [describe(r["summary"]) for r in recent[:5]]
+    history = [describe(r["summary"]) for r in recent[:5]]   # the five latest only
     out = await gemini_json(REPORT_SYSTEM, json.dumps({"today": describe(summary), "earlier": history}))
     if out and isinstance(out.get("note"), str):
         return {"note": out["note"], "source": "gemini"}

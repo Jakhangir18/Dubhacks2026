@@ -129,7 +129,7 @@ def rewards_today(rows: list[dict[str, Any]]) -> int:
 async def session(inp: SessionIn, background: BackgroundTasks) -> dict[str, Any]:
     name = inp.player.strip()[:40] or "Player"
     player = await run_in_threadpool(store.player, name)
-    earlier = await run_in_threadpool(store.sessions, name, 10)
+    earlier = await run_in_threadpool(store.sessions, name, 200)   # enough history for the per-day reward cap
     note = await therapist.report(inp.summary, earlier)
     out: dict[str, Any] = {"note": note["note"], "noteSource": note["source"], "reward": None, "receipt": None}
     long_enough = (inp.summary.get("seconds") or 0) >= 20   # the short judge demo is about 30 s
@@ -138,8 +138,13 @@ async def session(inp: SessionIn, background: BackgroundTasks) -> dict[str, Any]
         reward = await therapist.pick_reward(inp.summary, player.get("rewards", []))
         if reward:
             out["reward"] = reward
-            out["receipt"] = visa_checkout(reward, name)
+    # Save first, so a finished walk is never lost if the checkout fails.
     await run_in_threadpool(store.add_session, name, inp.summary, inp.verified, note["note"], out["reward"] is not None)
+    if out["reward"]:
+        try:
+            out["receipt"] = visa_checkout(out["reward"], name)
+        except Exception:  # noqa: BLE001 - a payment error must not lose the session
+            out["receipt"] = {"network": "Visa", "status": "checkout failed, try again from the panel"}
     background.add_task(remember_later, name, inp.summary)   # Backboard memory, off the response path
     return out
 
