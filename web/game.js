@@ -4,15 +4,16 @@ import { newGame, step, addEvent, summary, needCm, startAt, applyParams, RULES }
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
 import { connectBridge } from './bridge.js';
+import { ACTS, ENDING } from './lore.js';
 
 const Phaser = window.Phaser;
 const Warp = window.Warp;
 
 const C = { green: 0x7cff4f, yellow: 0xffe44d, magenta: 0xff2d95, cyan: 0x2de2ff, orange: 0xff9a1f,
-  white: 0xffffff, red: 0xff4d4d, violet: 0x9b6bff, path: 0x10240f, zone: 0x163d12 };
+  white: 0xffffff, red: 0xff4d4d, violet: 0x9b6bff, path: 0x19352f, zone: 0x295d45 };
 const hex = (c) => `#${c.toString(16).padStart(6, '0')}`;
-const TEXT = { fontFamily: 'system-ui, -apple-system, Segoe UI, sans-serif', fontStyle: 'bold', color: '#ffffff',
-  stroke: '#000000', strokeThickness: 8 };
+const TEXT = { fontFamily: 'Trebuchet MS, system-ui, sans-serif', fontStyle: 'bold', color: '#ffffff',
+  stroke: '#19352f', strokeThickness: 8 };
 const txt = (size, color = C.white) => ({ ...TEXT, fontSize: `${size}px`, color: hex(color) });
 
 // ---------- shared state ----------
@@ -104,10 +105,21 @@ window.addEventListener('keydown', (e) => {
   if (map[k]) { map[k](); e.preventDefault(); }
 });
 
-// ---------- art, drawn in code (own designs, high contrast for a dim projector) ----------
+// ---------- original local SVG art; procedural art remains the per-file fallback ----------
+const ART = {
+  'gus-idle': [160, 192], 'gus-step': [160, 192], 'gus-celebrate': [160, 192],
+  zombie: [80, 80, 'gus-portrait'],
+  flower: [128, 128, 'flower-marigold'], 'flower-bell': [128, 128], 'flower-rose': [128, 128],
+  pod: [128, 128], seed: [64, 64], 'foot-l': [80, 124], 'foot-r': [80, 124],
+  'tile-grass-light': [160, 160], 'tile-grass-dark': [160, 160], 'tile-dirt': [160, 160],
+  'tile-stone': [160, 160], 'tile-puddle': [160, 160], 'tile-cracked': [160, 160], 'tile-target': [160, 160],
+  house: [260, 240], fence: [192, 80], tree: [128, 144, 'tree-lime'], 'tree-teal': [128, 144],
+  moon: [128, 128], 'cloud-puff': [164, 80], 'cloud-long': [164, 80],
+  petal: [24, 20], spark: [24, 24], goo: [24, 24],
+};
 function makeTextures(scene) {
   const g = scene.make.graphics({ x: 0, y: 0, add: false });
-  const done = (key, w, h) => { g.generateTexture(key, w, h); g.clear(); };
+  const done = (key, w, h) => { if (!scene.textures.exists(key)) g.generateTexture(key, w, h); g.clear(); };
 
   // sunflower to stomp
   g.fillStyle(C.yellow);
@@ -165,13 +177,82 @@ function makeTextures(scene) {
   g.fillStyle(0x000000); for (let x = 25; x < 58; x += 7) g.fillRect(x, 52, 2, 13);
   done('zombie', 80, 80);
 
+  // New art also has a fallback, so one missing file cannot leave a missing-texture box.
+  for (const [key, [w, h]] of Object.entries(ART)) {
+    if (scene.textures.exists(key)) continue;
+    if (key.startsWith('tile-')) {
+      const color = { 'tile-grass-light': 0xb3e96b, 'tile-grass-dark': 0x60b852,
+        'tile-dirt': 0xdfaa68, 'tile-stone': 0xbdcfc7, 'tile-puddle': C.cyan,
+        'tile-cracked': 0x93c66b, 'tile-target': C.yellow }[key];
+      g.fillStyle(color); g.fillRoundedRect(4, 4, w - 8, h - 8, 14);
+      g.lineStyle(6, C.path); g.strokeRoundedRect(4, 4, w - 8, h - 8, 14);
+    } else if (key.startsWith('gus-')) {
+      g.fillStyle(C.violet); g.fillRoundedRect(38, 90, 84, 65, 16);
+      g.fillStyle(C.green); g.fillRoundedRect(26, 10, 108, 96, 25);
+      g.fillStyle(C.white); g.fillCircle(57, 48, 15); g.fillCircle(102, 48, 15);
+      g.fillStyle(C.path); g.fillCircle(59, 51, 6); g.fillCircle(100, 51, 6);
+      g.lineStyle(6, C.path); g.lineBetween(55, 80, 108, 80);
+      g.fillStyle(C.yellow); g.fillEllipse(49, 171, 42, 22); g.fillEllipse(110, 171, 42, 22);
+    } else if (key.startsWith('foot-')) {
+      g.fillStyle(C.white); g.fillEllipse(40, 79, 48, 72);
+      for (let i = 0; i < 3; i++) g.fillCircle(20 + i * 20, 28, 10);
+    } else if (key.startsWith('flower-')) {
+      g.fillStyle(key === 'flower-rose' ? C.magenta : C.violet);
+      for (let i = 0; i < 6; i++) g.fillCircle(64 + Math.cos(i * Math.PI / 3) * 32, 60 + Math.sin(i * Math.PI / 3) * 32, 22);
+      g.fillStyle(C.yellow); g.fillCircle(64, 60, 25);
+      g.fillStyle(C.path); g.fillCircle(55, 57, 5); g.fillCircle(75, 57, 5);
+    } else if (key === 'fence') {
+      g.fillStyle(0xffe2a2); g.fillRect(0, 30, w, 14); g.fillRect(0, 58, w, 14);
+      for (let x = 20; x < w; x += 64) g.fillRoundedRect(x, 8, 22, 72, 6);
+    } else {
+      g.fillStyle(key === 'moon' ? C.yellow : key === 'tree-teal' ? 0x6fe0b0 : 0xb9e9dc);
+      g.fillEllipse(w / 2, h / 2, w - 12, h - 12);
+      g.lineStyle(6, C.path); g.strokeEllipse(w / 2, h / 2, w - 12, h - 12);
+    }
+    done(key, w, h);
+  }
   g.destroy();
+}
+
+class Preload extends Phaser.Scene {
+  constructor() { super('preload'); }
+  preload() {
+    const { width: W, height: H } = this.scale;
+    this.add.text(W / 2, H / 2, 'Waking up Gus…', txt(40, C.yellow)).setOrigin(0.5);
+    for (const [key, [width, height, file = key]] of Object.entries(ART)) {
+      this.load.svg(key, `art/${file}.svg`, { width, height });
+    }
+  }
+  create() { makeTextures(this); this.scene.start('boot'); }
+}
+
+// Shared storybook scenery: no external fonts, filters, shaders, or per-frame allocations.
+function gardenBackdrop(scene, W, H) {
+  const b = scene.add.graphics();
+  b.fillStyle(0x245b67); b.fillRect(0, 0, W, H);
+  b.fillStyle(0x438d62); b.fillEllipse(W * 0.78, H * 0.43, W * 1.2, H * 0.68);
+  b.fillStyle(0x73bc62); b.fillEllipse(W * 0.15, H * 0.66, W * 1.5, H * 0.7);
+  b.fillStyle(0x96d364); b.fillRect(0, H * 0.66, W, H * 0.34);
+  scene.add.image(W * 0.15, H * 0.16, 'moon').setDisplaySize(H * 0.18, H * 0.18);
+  scene.add.image(W * 0.36, H * 0.13, 'cloud-long').setScale(0.9);
+  scene.add.image(W * 0.91, H * 0.09, 'cloud-puff').setScale(0.8);
+  for (let i = 0; i < 6; i++) {
+    const x = (i + 0.5) * W / 6;
+    scene.add.image(x, H * 0.72, 'fence').setDisplaySize(W / 6 + 4, H * 0.1);
+  }
+  for (let i = 0; i < 4; i++) {
+    const x = i < 2 ? W * (0.04 + i * 0.08) : W * (0.88 + (i - 2) * 0.08);
+    scene.add.image(x, H * (0.4 + (i % 2) * 0.12), i % 2 ? 'tree-teal' : 'tree').setScale(H / 660);
+  }
+  for (let i = 0; i < 6; i++) {
+    const x = W * (i < 3 ? 0.06 + i * 0.08 : 0.78 + (i - 3) * 0.08);
+    scene.add.image(x, H * (0.88 + (i % 2) * 0.03), ['flower', 'flower-bell', 'flower-rose'][i % 3]).setScale(H / 1100);
+  }
 }
 
 class Boot extends Phaser.Scene {
   constructor() { super('boot'); }
   create() {
-    makeTextures(this);
     applyWarp();
     if (params.get('auto') === '1') toggleAutoWalk();
     const sample = { score: 180, formPct: 82, steps: 412, cadence: 96, stompPct: 75, dodgePct: 70, highLiftAvgCm: { L: 13.5, R: 11 } };
@@ -187,15 +268,20 @@ class Title extends Phaser.Scene {
   create() {
     this.started = false;
     const { width: W, height: H } = this.scale;
-    for (let i = 0; i < 14; i++) {
-      this.add.image(Phaser.Math.Between(0, W), Phaser.Math.Between(0, H), 'tree').setAlpha(0.35).setScale(0.6 + Math.random());
-    }
-    this.add.image(W / 2, H * 0.22, 'house').setScale(Math.min(1.2, H / 600));
-    this.add.text(W / 2, H * 0.47, 'ZOMBIE WALK HOME', txt(Math.round(Math.min(W / 11, 96)), C.green)).setOrigin(0.5);
-    this.add.text(W / 2, H * 0.6, 'Walk in place to start', txt(40, C.yellow)).setOrigin(0.5);
-    this.add.text(W / 2, H * 0.68, `or press Enter · player: ${settings.player}`, txt(26)).setOrigin(0.5);
-    const z = this.add.image(W / 2, H * 0.84, 'zombie').setScale(1.4);
-    this.tweens.add({ targets: z, y: z.y - 14, duration: 450, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+    gardenBackdrop(this, W, H);
+    this.add.image(W * 0.73, H * 0.22, 'house').setScale(Math.min(1.2, H / 660));
+    const titleSize = Math.round(Math.min(W / 11, 96));
+    this.add.text(W / 2, H * 0.39, 'ZOMBIE', txt(titleSize, C.yellow)).setOrigin(0.5)
+      .setShadow(0, 7, '#19352f', 0, true, true);
+    this.add.text(W / 2, H * 0.51, 'WALK HOME', txt(titleSize, 0xc0ff91)).setOrigin(0.5)
+      .setShadow(0, 7, '#19352f', 0, true, true);
+    const plaque = this.add.graphics();
+    plaque.fillStyle(C.path); plaque.fillRoundedRect(W / 2 - 290, H * 0.63 - 34, 580, 102, 22);
+    plaque.lineStyle(4, 0xffe2a2); plaque.strokeRoundedRect(W / 2 - 290, H * 0.63 - 34, 580, 102, 22);
+    this.add.text(W / 2, H * 0.63, 'Walk in place to start', txt(40, C.yellow)).setOrigin(0.5);
+    this.add.text(W / 2, H * 0.63 + 43, `or press Enter · player: ${settings.player}`, txt(26)).setOrigin(0.5);
+    const z = this.add.image(W / 2, H * 0.86, 'gus-idle').setScale(H / 1000);
+    this.tweens.add({ targets: z, y: z.y - 10, angle: 3, duration: 650, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
     const steps = [];
     this.off = onFoot((ev) => {
       if (ev.kind !== 'strike') return;
@@ -216,46 +302,52 @@ class Title extends Phaser.Scene {
 }
 
 // ---------- the walk home ----------
-const ACTS = {
-  walk: { title: 'ACT 1 · WALK HOME', hint: 'Keep a steady pace', voice: 'Let us walk home. Keep a steady pace.' },
-  garden: { title: 'ACT 2 · STOMP THE FLOWERS', hint: 'High step onto the glowing flower', voice: 'Flowers ahead. High step and stomp them.' },
-  storm: { title: 'ACT 3 · SEED STORM', hint: 'Lift the foot the seed is aiming at', voice: 'Seed storm. Lift your foot high when a seed comes.' },
-};
-
 class Play extends Phaser.Scene {
   constructor() { super('play'); }
 
   create() {
     this.g = newGame(settings.limits, Date.now() % 100000);
     this.sprites = new Map();
-    this.scroll = 0;
+    this.marchPhase = 0;
+    this.hudWidth = 0;
     this.lift = { L: 0, R: 0 };            // shown lift, decays
     this.footFlash = { L: 0, R: 0 };
     this.lastCue = 0;
     this.frameWall = performance.now();
 
     const { width: W, height: H } = this.scale;
-    this.bg = this.add.graphics();
-    this.trees = Array.from({ length: 10 }, (_, i) => this.add.image(i % 2 ? W * 0.07 : W * 0.93, (H / 10) * i, 'tree').setAlpha(0.5));
-    this.house = this.add.image(W * 0.84, 76, 'house').setScale(0.22);
-    this.pods = { L: this.add.image(0, 0, 'pod').setVisible(false).setScale(0.8), R: this.add.image(0, 0, 'pod').setVisible(false).setScale(0.8) };
-    this.feet = { L: this.add.image(0, 0, 'foot').setFlipX(true).setAlpha(0.35), R: this.add.image(0, 0, 'foot').setAlpha(0.35) };
-    this.hud = this.add.graphics();
-    this.actText = this.add.text(24, 16, '', txt(30, C.green));
-    this.scoreText = this.add.text(W - 24, 14, '', txt(34, C.yellow)).setOrigin(1, 0);
-    this.paceText = this.add.text(W - 24, 100, '', txt(22)).setOrigin(1, 0);
-    this.coachText = this.add.text(W / 2, H * 0.3, '', txt(34, C.cyan)).setOrigin(0.5);
-    this.waitText = this.add.text(W / 2, H * 0.56, 'KEEP WALKING', txt(64, C.orange)).setOrigin(0.5).setVisible(false);
-    this.banner = this.add.text(W / 2, H * 0.4, '', txt(64, C.green)).setOrigin(0.5).setAlpha(0);
-    this.zombie = this.add.image(0, 0, 'zombie').setScale(0.45);
+    this.bg = this.add.graphics().setDepth(-20);
+    // A fixed pool: ten rows includes offscreen recycling, about seven are visible above the feet.
+    this.board = Array.from({ length: 20 }, () => this.add.image(0, 0, 'tile-grass-light').setDepth(-18));
+    this.walkingZone = this.add.graphics().setDepth(-10);
+    this.targetTiles = ['L', 'R'].map(() => this.add.image(0, 0, 'tile-target').setDepth(-15));
+    this.trees = Array.from({ length: 8 }, (_, i) => this.add.image(0, 0, i % 3 ? 'tree' : 'tree-teal').setDepth(-12));
+    this.edging = Array.from({ length: 6 }, (_, i) => this.add.image(0, 0,
+      ['tile-stone', 'tile-puddle', 'tile-cracked'][i % 3]).setDepth(-14));
+    this.fences = [this.add.image(0, 0, 'fence').setDepth(-12), this.add.image(0, 0, 'fence').setDepth(-12)];
+    this.house = this.add.image(W * 0.84, 76, 'house').setScale(0.22).setDepth(31);
+    this.pods = { L: this.add.image(0, 0, 'pod').setVisible(false).setScale(0.8).setDepth(3),
+      R: this.add.image(0, 0, 'pod').setVisible(false).setScale(0.8).setDepth(3) };
+    this.feet = { L: this.add.image(0, 0, 'foot-l').setDepth(12), R: this.add.image(0, 0, 'foot-r').setDepth(12) };
+    this.gus = this.add.image(W / 2, H * 0.88, 'gus-idle').setDepth(13);
+    this.hud = this.add.graphics().setDepth(30);
+    this.actText = this.add.text(24, 16, '', txt(30, C.green)).setDepth(31);
+    this.scoreText = this.add.text(W - 24, 14, '', txt(34, C.yellow)).setOrigin(1, 0).setDepth(31);
+    this.paceText = this.add.text(W - 24, 100, '', txt(22)).setOrigin(1, 0).setDepth(31);
+    this.coachText = this.add.text(W / 2, H * 0.3, '', { ...txt(34, C.cyan), align: 'center' }).setOrigin(0.5).setDepth(32);
+    this.waitText = this.add.text(W / 2, H * 0.56, 'KEEP WALKING', txt(64, C.orange)).setOrigin(0.5).setVisible(false).setDepth(32);
+    this.bannerBack = this.add.graphics().setDepth(39).setVisible(false);
+    this.banner = this.add.text(W / 2, H * 0.4, '', { ...txt(64, C.green), align: 'center' }).setOrigin(0.5).setAlpha(0).setDepth(40);
+    this.intro = this.add.text(W / 2, H * 0.5, '', { ...txt(32, C.white), align: 'center', lineSpacing: 10 }).setOrigin(0.5).setAlpha(0).setDepth(40);
+    this.zombie = this.add.image(0, 0, 'zombie').setScale(0.45).setDepth(31);
 
     this.fx = {
       petals: this.add.particles(0, 0, 'petal', { speed: { min: 150, max: 420 }, lifespan: 900, rotate: { min: 0, max: 360 },
-        scale: { start: 1.6, end: 0.2 }, gravityY: 300, emitting: false }),
-      sparks: this.add.particles(0, 0, 'spark', { speed: { min: 120, max: 360 }, lifespan: 600, scale: { start: 1.4, end: 0 },
-        tint: [C.cyan, C.white, C.green], emitting: false }),
-      goo: this.add.particles(0, 0, 'goo', { speed: { min: 60, max: 260 }, lifespan: 700, scale: { start: 1.5, end: 0.3 },
-        emitting: false }),
+        scale: { start: 1.1, end: 0.2 }, gravityY: 300, maxParticles: 32, maxAliveParticles: 32, emitting: false }).setDepth(20),
+      sparks: this.add.particles(0, 0, 'spark', { speed: { min: 120, max: 360 }, lifespan: 600, scale: { start: 1, end: 0 },
+        tint: [C.cyan, C.white, C.green], maxParticles: 28, maxAliveParticles: 28, emitting: false }).setDepth(20),
+      goo: this.add.particles(0, 0, 'goo', { speed: { min: 60, max: 260 }, lifespan: 700, scale: { start: 1, end: 0.3 },
+        maxParticles: 20, maxAliveParticles: 20, emitting: false }).setDepth(20),
     };
 
     this.off = onFoot((ev) => {
@@ -288,24 +380,32 @@ class Play extends Phaser.Scene {
   showAct() {
     const a = ACTS[this.g.act];
     if (!a) return;
-    this.banner.setText(a.title).setAlpha(1).setScale(0.6);
-    this.tweens.add({ targets: this.banner, scale: 1, duration: 400, ease: 'Back.out' });
-    this.tweens.add({ targets: this.banner, alpha: 0, delay: 2200, duration: 600 });
+    this.tweens.killTweensOf([this.banner, this.intro]);
+    this.banner.setText(a.title).setAlpha(1);
+    this.intro.setText(a.intro.join('\n')).setAlpha(1);
+    this.tweens.add({ targets: [this.banner, this.intro], alpha: 0, delay: 3800, duration: 600 });
     this.coachText.setText(a.hint);
-    say(a.voice);
+    say(a.intro.join(' '));
   }
 
   popText(x, y, text, color) {
-    const t = this.add.text(x, y, text, txt(44, color)).setOrigin(0.5);
+    const t = this.add.text(x, y, text, txt(44, color)).setOrigin(0.5).setDepth(25);
     this.tweens.add({ targets: t, y: y - 90, alpha: 0, duration: 900, onComplete: () => t.destroy() });
   }
 
   resolveFx(th, L) {
     const x = L.lanes[th.lane];
     const y = L.zoneY;
-    if (th.kind === 'flower' && th.result === 'hit') { this.fx.petals.explode(26, x, y); this.popText(x, y - 40, 'SMASH!', C.yellow); }
+    if (th.kind === 'flower' && th.result === 'hit') {
+      this.fx.petals.explode(26, x, y);
+      this.popText(x, y - 40, 'SMASH!', C.yellow);
+      // A separate short-lived stamp also works for the last plant of an act.
+      const stamp = this.add.image(x, y, this.flowerKey(th.id)).setDepth(19);
+      this.tweens.add({ targets: stamp, scaleX: 1.5, scaleY: 0.35, duration: 110, yoyo: true,
+        onComplete: () => { this.tweens.add({ targets: stamp, scale: 0.3, alpha: 0, duration: 160, onComplete: () => stamp.destroy() }); } });
+    }
     else if (th.kind === 'flower') this.popText(x, y - 40, 'higher step!', C.orange);
-    else if (th.result === 'hit') { this.fx.sparks.explode(24, x, y); this.popText(x, y - 40, 'DODGED!', C.cyan); }
+    else if (th.result === 'hit') { this.fx.sparks.explode(24, x, y); this.cameras.main.flash(140, 190, 255, 235); this.popText(x, y - 40, 'DODGED!', C.cyan); }
     else { this.fx.goo.explode(20, x, y); this.cameras.main.shake(160, 0.006); this.popText(x, y - 40, 'SPLAT', C.magenta); }
   }
 
@@ -371,16 +471,54 @@ class Play extends Phaser.Scene {
   drawWorld(L, out, dt) {
     const { W, H } = L;
     const pxPerCm = (L.zoneY - L.top) / RULES.aheadCm;
-    this.scroll = (this.scroll + out.speed * dt * pxPerCm) % 80;
+    const rowH = (L.zoneY - L.top) / 6;
+    // World distance keeps the checker parity and scenery continuous through recycling and resizing.
+    const rowsTravelled = this.g.travelledCm / (RULES.aheadCm / 6);
+    const offset = (rowsTravelled % 1) * rowH;
+    const rowIndex = Math.floor(rowsTravelled);
     const b = this.bg;
     b.clear();
-    b.fillStyle(C.path); b.fillRect(W * 0.16, 0, W * 0.68, H);
-    b.fillStyle(C.green, 0.5);
-    for (let y = -80 + this.scroll; y < H; y += 80) b.fillRect(W / 2 - 4, y, 8, 44);   // moving centre line
-    b.fillStyle(C.zone, 0.9); b.fillRect(0, L.zoneY - 30, W, H - L.zoneY + 30);
-    b.lineStyle(6, C.green, 0.9); b.lineBetween(0, L.zoneY, W, L.zoneY);
-    this.trees.forEach((t, i) => { t.y = ((i * H) / 10 + this.scroll * 2) % (H + 80) - 40; });
+    b.fillStyle(0x43864b); b.fillRect(0, 0, W, H);
+    b.fillStyle(C.path); b.fillRoundedRect(W * 0.155, L.top - 10, W * 0.69, H, 18);
+    for (let row = 0; row < 10; row++) {
+      for (let col = 0; col < 2; col++) {
+        const tile = this.board[row * 2 + col];
+        const parity = ((row - rowIndex + col) % 2 + 2) % 2;
+        tile.setTexture(parity ? 'tile-grass-dark' : 'tile-grass-light')
+          .setPosition(L.lanes[col ? 'R' : 'L'], L.top + (row - 1) * rowH + offset)
+          .setDisplaySize(W * 0.34, rowH + 1);
+      }
+    }
+    // This stationary highlighted row is centered on the exact judging line, yFor(0).
+    this.targetTiles.forEach((tile, i) => tile.setPosition(L.lanes[i ? 'R' : 'L'], L.zoneY)
+      .setDisplaySize(W * 0.34, rowH));
+    this.trees.forEach((t, i) => {
+      t.setPosition(i % 2 ? W * 0.07 : W * 0.93,
+        ((Math.floor(i / 2) * H / 4 + this.g.travelledCm * pxPerCm) % (H + 160)) - 80)
+        .setScale(Math.min(1.1, W / 1100));
+    });
+    this.edging.forEach((tile, i) => tile.setPosition(i % 2 ? W * 0.1 : W * 0.9, H * (0.25 + Math.floor(i / 2) * 0.19))
+      .setDisplaySize(W * 0.07, rowH * 0.7));
+    this.fences.forEach((fence, i) => fence.setPosition(W * (i ? 0.92 : 0.08), L.top + 12).setDisplaySize(W * 0.15, 60));
+    // Opaque foot pads keep the walking zone legible on a white projection mat.
+    const z = this.walkingZone;
+    z.clear();
+    z.fillStyle(C.zone); z.fillRect(0, L.zoneY + rowH / 2, W, H - L.zoneY);
+    z.lineStyle(6, 0xffe778); z.lineBetween(W * 0.16, L.zoneY, W * 0.84, L.zoneY);
+    for (const lane of ['L', 'R']) {
+      z.fillStyle(0x173e37); z.fillRoundedRect(L.lanes[lane] - W * 0.105, L.zoneY + rowH * 0.6, W * 0.21, H - L.zoneY - rowH * 0.65, 24);
+      z.lineStyle(5, 0x91d970); z.strokeRoundedRect(L.lanes[lane] - W * 0.105, L.zoneY + rowH * 0.6, W * 0.21, H - L.zoneY - rowH * 0.65, 24);
+    }
+    this.marchPhase += dt * out.pace.cadence / 60 * Math.PI;
+    const marching = out.pace.cadence > 0;
+    const beat = Math.sin(this.marchPhase);
+    this.gus.setTexture(marching ? 'gus-step' : 'gus-idle').setFlipX(marching && beat < 0)
+      .setPosition(W / 2, H * 0.89 - (marching ? Math.abs(beat) * 7 : 0))
+      .setScale(Math.min((H - L.zoneY) / 230, W / 1100))
+      .setAngle(out.pace.ok ? beat * 3 : Math.sin(this.g.t * 7) * 8);
   }
+
+  flowerKey(id) { return ['flower', 'flower-bell', 'flower-rose'][(id - 1) % 3]; }
 
   drawThings(L) {
     const g = this.g;
@@ -389,18 +527,30 @@ class Play extends Phaser.Scene {
       live.add(th.id);
       let s = this.sprites.get(th.id);
       if (!s) {
-        s = this.add.image(L.lanes[th.lane], L.top, th.kind === 'flower' ? 'flower' : 'seed');
+        const pad = this.add.image(0, 8, 'tile-dirt').setDisplaySize(142, 90);
+        const plant = this.add.image(0, 0, th.kind === 'flower' ? this.flowerKey(th.id) : 'seed');
+        // Pads travel with the exact rules position; tile decoration never snaps an obstacle's distance.
+        s = this.add.container(L.lanes[th.lane], L.top, [pad, plant]).setDepth(5);
         this.sprites.set(th.id, s);
-        if (th.kind === 'seed') { const pod = this.pods[th.lane]; this.tweens.add({ targets: pod, scale: 1.25, duration: 120, yoyo: true }); }
+        if (th.kind === 'seed') {
+          const pod = this.pods[th.lane];
+          this.tweens.add({ targets: pod, scaleX: 1, scaleY: 0.65, duration: 120, yoyo: true });
+        }
       }
       const y = this.yFor(Math.max(th.distCm, -40), L);
       const near = Math.max(0, 1 - th.distCm / RULES.aheadCm);
-      s.setPosition(L.lanes[th.lane], y).setScale(0.55 + near * 0.65).setAlpha(th.result ? 0.25 : 1);
-      if (th.kind === 'seed' && !th.result) s.setRotation(s.rotation + 0.15);
+      const plant = s.list[1];
+      s.setPosition(L.lanes[th.lane], y).setScale(Math.min(1.15, L.W / 850));
+      s.setAlpha(th.result ? 0.25 : 1);
+      s.list[0].setTexture(near > 0.72 && !th.result ? 'tile-target' : 'tile-dirt').setDisplaySize(142, 90);
+      plant.setVisible(!(th.kind === 'flower' && th.result === 'hit'));
+      if (th.kind === 'seed' && !th.result) plant.setRotation(plant.rotation + 0.15);
+      else plant.setAngle(Math.sin(g.t * 3 + th.id) * 5);
     }
     for (const [id, s] of this.sprites) if (!live.has(id)) { s.destroy(); this.sprites.delete(id); }
     const storm = g.act === 'storm';
-    for (const lane of ['L', 'R']) this.pods[lane].setVisible(storm).setPosition(L.lanes[lane], L.top - 10);
+    for (const lane of ['L', 'R']) this.pods[lane].setVisible(storm)
+      .setPosition(L.W * (lane === 'L' ? 0.08 : 0.92), Math.max(132, L.top) + 72);
   }
 
   drawHud(L, out, dt) {
@@ -408,6 +558,8 @@ class Play extends Phaser.Scene {
     const g = this.g;
     const h = this.hud;
     h.clear();
+    h.fillStyle(C.path); h.fillRect(0, 0, W, Math.max(132, L.top));
+    h.lineStyle(4, 0x9fe074); h.lineBetween(0, Math.max(132, L.top), W, Math.max(132, L.top));
 
     // next thing per lane: ghost footprint and the lift needed
     const next = {};
@@ -417,11 +569,17 @@ class Play extends Phaser.Scene {
       this.lift[lane] = Math.max(0, this.lift[lane] - dt * 25);
       const th = next[lane];
       const urgent = th && th.distCm < 140;
-      const pulse = urgent ? 0.55 + 0.45 * Math.sin(g.t * 14) : 0.3;
+      const pulse = urgent ? 0.8 + 0.2 * Math.sin(g.t * 14) : 1;
       this.feet[lane].setPosition(L.lanes[lane], L.zoneY + (H - L.zoneY) * 0.45)
         .setScale(Math.min(1.4, (H - L.zoneY) / 110))
-        .setTint(urgent ? (th.kind === 'flower' ? C.yellow : C.magenta) : C.green)
         .setAlpha(Math.max(pulse, this.footFlash[lane]));
+      // Canvas-friendly colored rim: the same urgency cue without a WebGL-only image tint.
+      if (urgent || this.footFlash[lane] > 0) {
+        h.lineStyle(7, urgent ? (th.kind === 'flower' ? C.yellow : C.magenta) : C.white,
+          Math.max(pulse, this.footFlash[lane]));
+        h.strokeRoundedRect(L.lanes[lane] - W * 0.105, L.zoneY + (L.zoneY - L.top) / 10,
+          W * 0.21, H - L.zoneY - (L.zoneY - L.top) / 10 - 8, 24);
+      }
       // lift bar beside each footprint: current lift against the target line
       const bx = lane === 'L' ? L.lanes.L - W * 0.12 : L.lanes.R + W * 0.12;
       const barH = (H - L.zoneY) * 0.8;
@@ -436,7 +594,7 @@ class Play extends Phaser.Scene {
     }
 
     // progress to home: the zombie walks along the bar towards the house, which grows as it gets close
-    const px = W * 0.2, pw = W * 0.5, py = 76;
+    const px = W * 0.07, pw = W * 0.5, py = 90;
     this.house.setPosition(px + pw + 50, py).setScale(0.18 + this.progress() * 0.14);
     h.fillStyle(0x222222); h.fillRoundedRect(px, py - 10, pw, 20, 10);
     h.fillStyle(C.green); h.fillRoundedRect(px, py - 10, Math.max(20, pw * this.progress()), 20, 10);
@@ -450,10 +608,24 @@ class Play extends Phaser.Scene {
     // positions follow the current size (fullscreen or a projector resolution change)
     this.scoreText.setPosition(W - 24, 14);
     this.paceText.setPosition(W - 24, 100);
-    this.coachText.setPosition(W / 2, H * 0.3);
+    this.coachText.setPosition(W / 2, Math.max(158, H * 0.22));
     this.waitText.setPosition(W / 2, H * 0.56);
+    // Wrapping re-rasterizes Phaser text: only do it on resize, never every frame.
+    if (this.hudWidth !== W) {
+      this.hudWidth = W;
+      this.coachText.setWordWrapWidth(W * 0.88);
+      this.banner.setWordWrapWidth(W * 0.9);
+      this.intro.setWordWrapWidth(W * 0.9);
+    }
     this.banner.setPosition(W / 2, H * 0.4);
-    this.trees.forEach((tr, i) => tr.setX(i % 2 ? W * 0.07 : W * 0.93));
+    this.intro.setPosition(W / 2, this.banner.y + this.banner.height / 2 + 60);
+    this.bannerBack.clear().setVisible(this.banner.alpha > 0).setAlpha(this.banner.alpha);
+    this.bannerBack.fillStyle(C.path, 0.97);
+    this.bannerBack.fillRoundedRect(W * 0.03, this.banner.y - this.banner.height / 2 - 22,
+      W * 0.94, this.banner.height + this.intro.height + 62, 24);
+    this.bannerBack.lineStyle(5, C.yellow);
+    this.bannerBack.strokeRoundedRect(W * 0.03, this.banner.y - this.banner.height / 2 - 22,
+      W * 0.94, this.banner.height + this.intro.height + 62, 24);
     this.actText.setText(ACTS[g.act] ? ACTS[g.act].title : '');
     this.scoreText.setText(`${g.score} pts${g.streak >= 5 ? '  x2' : ''}`);
     this.paceText.setText(`form · ${out.pace.cadence} steps/min (min ${g.limits.minCadence})`);
@@ -467,23 +639,31 @@ class Home extends Phaser.Scene {
   create(data) {
     const s = data.summary;
     const { width: W, height: H } = this.scale;
-    const house = this.add.image(W / 2, H * 0.2, 'house').setScale(Math.min(1.0, H / 800));
-    this.tweens.add({ targets: house, scale: house.scale * 1.06, duration: 600, yoyo: true, repeat: -1 });
-    this.add.particles(W / 2, H * 0.2, 'spark', { speed: { min: 80, max: 260 }, lifespan: 1400, quantity: 2,
+    gardenBackdrop(this, W, H);
+    const house = this.add.image(W * 0.62, H * 0.18, 'house').setScale(Math.min(0.95, H / 900));
+    this.tweens.add({ targets: house, scale: house.scale * 1.04, duration: 600, yoyo: true, repeat: -1 });
+    const gus = this.add.image(W * 0.4, H * 0.2, 'gus-celebrate').setScale(Math.min(1, H / 850));
+    this.tweens.add({ targets: gus, y: gus.y - 12, angle: 5, duration: 420, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+    this.add.particles(W / 2, H * 0.19, 'spark', { speed: { min: 80, max: 260 }, lifespan: 1400, quantity: 2,
+      frequency: 120, maxParticles: 36, maxAliveParticles: 36,
       tint: [C.yellow, C.green, C.cyan, C.magenta], scale: { start: 1.2, end: 0 } });
-    this.add.text(W / 2, H * 0.43, 'HOME!', txt(80, C.green)).setOrigin(0.5);
+    const card = this.add.graphics();
+    card.fillStyle(C.path); card.fillRoundedRect(W * 0.08, H * 0.34, W * 0.84, H * 0.56, 26);
+    card.lineStyle(5, 0xffe2a2); card.strokeRoundedRect(W * 0.08, H * 0.34, W * 0.84, H * 0.56, 26);
+    this.add.text(W / 2, H * 0.37, 'HOME!', txt(80, C.green)).setOrigin(0.5);
+    this.add.text(W / 2, H * 0.46, ENDING, { ...txt(26, C.yellow), wordWrap: { width: W * 0.8 }, align: 'center' }).setOrigin(0.5);
     const lines = [
       `Score ${s.score}   ·   Form ${s.formPct}%`,
       `${s.steps} steps   ·   ${s.cadence} steps/min`,
       `Flowers stomped ${s.stompPct ?? 0}%   ·   Seeds dodged ${s.dodgePct ?? 0}%`,
       `High steps  left ${s.highLiftAvgCm?.L ?? '-'} cm   right ${s.highLiftAvgCm?.R ?? '-'} cm`,
     ];
-    lines.forEach((l, i) => this.add.text(W / 2, H * 0.51 + i * 38, l, txt(26)).setOrigin(0.5));
+    lines.forEach((l, i) => this.add.text(W / 2, H * 0.55 + i * 38, l, txt(26)).setOrigin(0.5));
     this.add.text(W / 2, H * 0.92, 'Press R to walk again', txt(24, C.yellow)).setOrigin(0.5);
-    this.noteText = this.add.text(W / 2, H * 0.74, data.result ? data.result.note : 'The coach is writing your note…', { ...txt(22, C.cyan), wordWrap: { width: W * 0.8 }, align: 'center' }).setOrigin(0.5);
-    this.rewardText = this.add.text(W / 2, H * 0.84, '', txt(26, C.magenta)).setOrigin(0.5);
+    this.noteText = this.add.text(W / 2, Math.max(H * 0.78, H * 0.55 + 158), data.result ? data.result.note : 'The coach is writing your note…', { ...txt(22, C.cyan), wordWrap: { width: W * 0.8 }, align: 'center' }).setOrigin(0.5);
+    this.rewardText = this.add.text(W / 2, H * 0.86, '', { ...txt(26, C.magenta), wordWrap: { width: W * 0.8 }, align: 'center' }).setOrigin(0.5);
     if (data.result) this.showResult(data.result);
-    say(`You made it home. ${s.stompPct ?? 0} percent of flowers stomped. Great walking.`);
+    say(`${ENDING} ${s.stompPct ?? 0} percent of flowers stomped. Great walking.`);
     this.input.keyboard.on('keydown-R', () => { playerReady = loadPlayer(); this.scene.start('title'); });
     const again = () => this.scene.restart(data);
     this.scale.once('resize', again);
@@ -509,9 +689,10 @@ class Home extends Phaser.Scene {
 
 // ---------- boot ----------
 window.zombieGame = new Phaser.Game({
-  type: Phaser.AUTO,
+  // This small 2D scene needs no shaders; Canvas also avoids software-WebGL stalls.
+  type: Phaser.CANVAS,
   parent: 'stage',
   backgroundColor: '#000000',
   scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
-  scene: [Boot, Title, Play, Home],
+  scene: [Preload, Boot, Title, Play, Home],
 });
