@@ -152,7 +152,7 @@
     const video = document.getElementById('video');
     const select = document.getElementById('devices');
     const stats = document.getElementById('camstats');
-    let frames = 0, lastCount = performance.now();
+    let frames = 0, lastCount = performance.now(), counting = false;
 
     async function startCamera(deviceId) {
       if (video.srcObject) video.srcObject.getTracks().forEach((t) => t.stop());
@@ -163,7 +163,8 @@
       const current = video.srcObject.getVideoTracks()[0].getSettings().deviceId;
       select.innerHTML = devices.map((d, i) => `<option value="${d.deviceId}">${d.label || 'camera ' + (i + 1)}</option>`).join('');
       select.value = current;
-      countFrames();
+      frames = 0; lastCount = performance.now();
+      if (!counting) { counting = true; countFrames(); }  // one loop only, even after switching cameras
     }
 
     function countFrames() {
