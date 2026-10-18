@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 import os
 import re
@@ -469,6 +470,7 @@ class PerceiveIn(BaseModel):
     foot: str | None = None   # for step: "L" or "R"
     thing: str | None = None  # for step: "flower" or "seed"
     frames: list[Any] = Field(max_length=perceive.MAX_FRAMES * 4)   # bad frames are skipped one by one
+    view: str = "legs"        # "overhead": feet.py's camera above the belt; "legs": the game window's camera
 
 
 @router.post("/perceive")
@@ -477,16 +479,22 @@ async def perceive_frames(inp: PerceiveIn) -> dict[str, Any]:
     if not player.get("perceptronConsent"):
         return {"source": "no-consent"}   # nothing leaves the laptop without consent
     frames = perceive.clean_frames(inp.frames)
+    view = inp.view if inp.view in perceive.VIEWS else "legs"
     if inp.kind == "step" and inp.foot in {"L", "R"} and inp.thing in {"flower", "seed"}:
-        return await perceive.check_step(frames, inp.foot, inp.thing)
+        return await perceive.check_step(frames, inp.foot, inp.thing, view)
     if inp.kind == "form":
-        return await perceive.check_form(frames)
+        return await perceive.check_form(frames, view)
     return {"source": "bad-request"}
 
 
 class PerceiveSessionIn(BaseModel):
     player: str = "Player"
     frames: list[Any] = Field(max_length=perceive.MAX_SESSION_FRAMES * 4)
+    view: str = "legs"
+    sessionId: str | None = None   # the walk it belongs to: the dashboard and the report show it there
+
+
+SESSION_WAIT_S = 30   # the report usually takes longer than the save at Home; if not, it waits this long for the session
 
 
 @router.post("/perceive/session")
@@ -495,9 +503,16 @@ async def perceive_session(inp: PerceiveSessionIn) -> dict[str, Any]:
     if not player.get("perceptronConsent"):
         return {"source": "no-consent"}
     frames = perceive.clean_frames(inp.frames, cap=perceive.MAX_SESSION_FRAMES)
-    report = await perceive.session_report(frames)
+    report = await perceive.session_report(frames, inp.view if inp.view in perceive.VIEWS else "legs")
     if report["source"] == "perceptron":
         latest = await run_in_threadpool(store.player, inp.player)
         await run_in_threadpool(store.update_player, inp.player,
                                 perceptronReports=[report, *latest.get("perceptronReports", [])][:5])
+        if inp.sessionId and SESSION_ID.fullmatch(inp.sessionId):
+            # The walk's own copy, without the foot tracks (the panel's lab draws those from the player's reports).
+            look = {k: report.get(k) for k in ("view", "clips", "points", "keyFrame", "caption", "gaitNote", "safety")}
+            for _ in range(SESSION_WAIT_S):
+                if await run_in_threadpool(store.update_session, inp.sessionId, perceptron={**look, "ts": time.time()}):
+                    break
+                await asyncio.sleep(1)
     return report

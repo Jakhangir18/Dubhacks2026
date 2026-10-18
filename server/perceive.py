@@ -1,7 +1,9 @@
 """Perceptron Mk1.5 as a second pair of eyes (Perceptron perception track).
 
-The browser detector decides every step in real time. Perceptron then checks a few timestamped frames
-of the lower legs (cropped below the knee, no face) and answers in a fixed JSON shape:
+The game decides every step in real time. Perceptron then checks a few timestamped frames and answers in a fixed
+JSON shape. The frames come from one of two views: "overhead", feet.py's camera above the belt (shoes and the projected
+flowers from above, never a face), used whenever its pictures reach the game; or "legs", the game window's own camera
+cropped below the knees.
 - step check: did the named foot really step onto the flower, or lift over the seed, in these frames?
 - form check: is the player on the pad, holding the rail, walking steadily?
 Frames are sent only when the player's therapist panel has Perceptron consent switched on.
@@ -86,8 +88,21 @@ def clean_frames(frames: list[dict[str, Any]], cap: int = MAX_FRAMES) -> list[di
     return out
 
 
-def step_question(foot: str, kind: str) -> str:
+VIEWS = {"legs", "overhead"}
+OVERHEAD = ("These timestamped frames are a top-down view of a walking belt seen from a camera above it. A game is "
+            "projected onto the floor in front of the walker: glowing flowers move towards the feet, and the walker "
+            "steps onto them. The camera may be rotated or mirrored, so do not rely on left and right in the picture. ")
+
+
+def step_question(foot: str, kind: str, view: str = "legs") -> str:
     side = "left" if foot == "L" else "right"
+    if view == "overhead":
+        if kind == "flower":
+            ask = ("Answer whether a shoe comes down on, or covers, the glowing flower as it reaches the feet "
+                   f"(it is in the walker's {side} lane).")
+        else:
+            ask = f"Answer whether both shoes stay clear of the projected seed ball as it reaches the feet (it is in the walker's {side} lane)."
+        return OVERHEAD + ask + " Use 'unclear' when the shoes or the flower are hidden or the frames do not show it."
     if kind == "flower":
         action = (f"the {side} knee is raised clearly higher than in a normal walking step "
                   "and the foot then comes down onto the bright projected flower in its lane")
@@ -100,6 +115,8 @@ def step_question(foot: str, kind: str) -> str:
 FORM_QUESTION = ("These timestamped frames show a person's lower legs on a walking pad with a game projected on the floor. "
                  "Is the person on the pad, are they holding a rail or support, and are they stepping steadily? "
                  "Use 'unclear' when the frames do not show it.")
+FORM_QUESTION_OVERHEAD = (OVERHEAD + "Are both feet on the belt, are the hands holding a rail or support (answer 'unclear' "
+                          "when no hands are in the picture), and are the steps steady and even?")
 
 
 async def ask(frames: list[dict[str, Any]], question: str, schema: dict[str, Any], timeout: float = 12) -> dict[str, Any] | None:
@@ -127,16 +144,16 @@ async def ask(frames: list[dict[str, Any]], question: str, schema: dict[str, Any
         return None
 
 
-async def check_step(frames: list[dict[str, Any]], foot: str, kind: str) -> dict[str, Any]:
-    out = await ask(frames, step_question(foot, kind), STEP_SCHEMA)
+async def check_step(frames: list[dict[str, Any]], foot: str, kind: str, view: str = "legs") -> dict[str, Any]:
+    out = await ask(frames, step_question(foot, kind, view), STEP_SCHEMA)
     if not out or out.get("verdict") not in {"yes", "no", "unclear"}:
         return {"verdict": "skipped", "source": "off"}
     return {"verdict": out["verdict"], "footVisible": bool(out.get("footVisible")),
             "note": str(out.get("note", ""))[:140], "source": "perceptron"}
 
 
-async def check_form(frames: list[dict[str, Any]]) -> dict[str, Any]:
-    out = await ask(frames, FORM_QUESTION, FORM_SCHEMA)
+async def check_form(frames: list[dict[str, Any]], view: str = "legs") -> dict[str, Any]:
+    out = await ask(frames, FORM_QUESTION_OVERHEAD if view == "overhead" else FORM_QUESTION, FORM_SCHEMA)
     if not out:
         return {"source": "off"}
     pick = lambda k: out.get(k) if out.get(k) in {"yes", "no", "unclear"} else "unclear"
@@ -251,9 +268,32 @@ async def ask_session(url: str, body: dict[str, Any], usage: dict[str, int]) -> 
         return None
 
 
-async def session_report(frames: list[dict[str, Any]]) -> dict[str, Any]:
+# The walk report's questions for each view: what a camera above the belt can see differs from a side view of the legs.
+REPORT = {
+    "legs": {
+        "clip": ("Mark every moment a foot is lifted clearly higher than a normal walking step; "
+                 "mention 'left high step' or 'right high step'."),
+        "categories": ["foot", "flower", "seed ball"],
+        "note": ("Write a two-sentence gait note for the therapist on cadence, symmetry and high-step quality. "
+                 "Describe only what these sampled lower-leg frames show; acknowledge uncertainty."),
+        "safety": ("Write one safety line about holding a rail, stumbles and leaving the pad. "
+                   "These frames show only lower legs; say when something is not visible rather than guessing."),
+    },
+    "overhead": {
+        "clip": OVERHEAD + "Mark every moment a shoe lands on a glowing flower; mention 'flower stomp'.",
+        "categories": ["shoe", "flower"],
+        "note": (OVERHEAD + "Write a two-sentence note for the therapist on how evenly the feet step and how well they "
+                 "land on the flowers. Describe only what these sampled top-down frames show; acknowledge uncertainty."),
+        "safety": (OVERHEAD + "Write one safety line about staying in the middle of the belt and steady footing. "
+                   "Say when something is not visible rather than guessing."),
+    },
+}
+
+
+async def session_report(frames: list[dict[str, Any]], view: str = "legs") -> dict[str, Any]:
     if len(frames) < 2 or not os.environ.get("PERCEPTRON_API_KEY"):
         return {"source": "off"}
+    ask_for = REPORT.get(view, REPORT["legs"])
     usage = {"requests": 0}
     video = {"type": "video_frames", "video_frames": {"frames": frames}}
     key_frame = frames[len(frames) // 2]["image_url"]["url"]
@@ -272,7 +312,7 @@ async def session_report(frames: list[dict[str, Any]]) -> dict[str, Any]:
 
     async def detect() -> Any:
         result = await ask_session("https://api.perceptron.inc/v1/detect", {
-            "media": {"type": "image", "image_url": key_frame}, "categories": ["foot", "flower", "seed ball"],
+            "media": {"type": "image", "image_url": key_frame}, "categories": ask_for["categories"],
             "config": {"output": "point", "reasoning_effort": "none"},
         }, usage)
         return parse_points(result) if result is not None else None
@@ -282,17 +322,14 @@ async def session_report(frames: list[dict[str, Any]]) -> dict[str, Any]:
             "model": MODEL, "context": [{"role": "user", "content": [video]}],
             "prompts": [
                 "Write a one-sentence social caption for this walk clip. Keep it kid-friendly and use no names.",
-                ("Write a two-sentence gait note for the therapist on cadence, symmetry and high-step quality. "
-                "Describe only what these sampled lower-leg frames show; acknowledge uncertainty."),
-                ("Write one safety line about holding a rail, stumbles and leaving the pad. "
-                "These frames show only lower legs; say when something is not visible rather than guessing."),
+                ask_for["note"],
+                ask_for["safety"],
             ], "n": 1, "reasoning_effort": "none", "max_completion_tokens": 400,   # with reasoning, 512 tokens came back empty
         }, usage)
         return parse_multilook(result) if result is not None else None
 
     results = await asyncio.gather(
-        annotation("clip", "Mark every moment a foot is lifted clearly higher than a normal walking step; "
-                   "mention 'left high step' or 'right high step'."),
+        annotation("clip", ask_for["clip"]),
         annotation("box", "Track both feet over these frames. Return one track per foot, with mentions "
                    "'left foot' and 'right foot', using timestamped point_box annotations."),
         detect(), multilook(), return_exceptions=True,
@@ -302,4 +339,4 @@ async def session_report(frames: list[dict[str, Any]]) -> dict[str, Any]:
         return {"source": "off"}
     return {"source": "perceptron", "clips": clips, "tracks": tracks, "points": points, "keyFrame": key_frame,
             "caption": (looks or {}).get("caption"), "gaitNote": (looks or {}).get("gaitNote"),
-            "safety": (looks or {}).get("safety"), "usage": usage}
+            "safety": (looks or {}).get("safety"), "usage": usage, "view": view if view in VIEWS else "legs"}
