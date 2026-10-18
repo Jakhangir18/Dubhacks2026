@@ -1,9 +1,9 @@
 // Zombie Walk Home: Phaser scenes, art, HUD and input. Rules live in logic.js.
 // Floor projection: things arrive at the pad's front edge; ghost feet mark the toes below.
-import { newGame, step, addEvent, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
+import { newGame, step, addEvent, addShoes, shoesLive, resetShoes, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
-import { connectBridge } from './bridge.js';
+import { connectBridge, SHOES_EVENT, FRAME_EVENT } from './bridge.js';
 import { ACTS, ENDING } from './lore.js';
 import { GardenSound } from './sound.js';
 import { WalkClip, uploadClip } from './clip.js';
@@ -124,9 +124,64 @@ const remotePerceiver = new RemotePerceiver();
 let perceiver = localPerceiver;
 if (params.has('scene')) window.zombiewalk = { perceiver: localPerceiver, tracker: cameraPanel.tracker };   // development and end-to-end tests
 
+// Shoe sightings from feet.py through the bridge: the boxes go on to the camera window first (so detection can be
+// checked before any calibration), then onto the field: into the game being played, or, on the title and home
+// screens, into a scratch game whose derived steps reach the bus, so walking on the pad starts the game.
+const scratch = newGame();
+window.addEventListener(SHOES_EVENT, (e) => {
+  if (cameraWindowAlive()) send('shoes-seen', { boxes: e.detail.boxes });
+  if (!camH) return;
+  const play = window.zombieGame?.scene.getScene('play');
+  if (play?.sys.isActive() && !play.paused && !zone.active) { play.feedShoes(e.detail.boxes); return; }
+  const before = scratch.stats.steps;
+  scratch.t = performance.now() / 1000;
+  addShoes(scratch, mapShoes(e.detail.boxes, floorLayout(FIELD.width, FIELD.height)));
+  if (scratch.stats.steps > before) emitFoot({ foot: scratch.strikes[scratch.strikes.length - 1].foot, kind: 'strike', source: 'feet' });
+});
+
+// feet.py's camera picture goes on to the camera window, where the shoe calibration is clicked.
+window.addEventListener(FRAME_EVENT, (e) => { if (cameraWindowAlive()) send('frame-seen', { jpeg: e.detail.jpeg }); });
+
 // Foot events from the camera window on the laptop screen; the game stamps them on arrival like any source.
 // While the camera window runs, this window's own camera (V) would count every step twice: ignore it.
 const doubleCamera = (ev) => ev.source === 'camera' && cameraWindowAlive();
+// Pose-based steps are noise once feet.py shoes drive the game.
+const POSE_SOURCES = new Set(['camera', 'camera-window']);
+
+// Camera -> field: the homography saved by the camera window's shoe calibration (normalised camera coords to field px).
+const readCamToField = () => { const h = Warp.store.get(Warp.CAM_KEY, null); return Array.isArray(h) && h.length === 8 && h.every(Number.isFinite) ? h : null; };
+let camH = readCamToField();
+window.addEventListener('storage', (e) => { if (e.key === Warp.CAM_KEY) camH = readCamToField(); });   // the camera window writes it
+// The server keeps the calibration too (saved by the camera window, or set by hand): a newer one replaces the local copy.
+async function pullShoeCal() {
+  try {
+    const cal = await withTimeout(api('/api/shoecal'), 3000);
+    if (!cal.h || !(cal.ts > Warp.store.get(Warp.CAM_KEY + '.ts', 0))) return;
+    Warp.store.set(Warp.CAM_KEY, cal.h); Warp.store.set(Warp.CAM_KEY + '.ts', cal.ts);
+    Warp.store.set(Warp.CAM_KEY + '.points', cal.points || null); Warp.store.set(Warp.CAM_KEY + '.picture', cal.picture || 'feed');
+    camH = readCamToField();
+  } catch { /* offline: the local copy stays */ }
+}
+pullShoeCal();
+setInterval(pullShoeCal, 4000);
+
+// Field y of a thing at distCm from the hit line, and back.
+const fieldY = (distCm, L) => L.zoneY - (distCm / RULES.aheadCm) * (L.zoneY - L.top);
+const fieldDist = (y, L) => (L.zoneY - y) * RULES.aheadCm / (L.zoneY - L.top);
+
+// Shoe boxes (fractions of feet.py's picture) onto the field: the toe tip is on the floor; the box top is the ankle,
+// above the floor, so the heel is taken at about 60 % down the box.
+function mapShoes(boxes, L) {
+  const shoes = [];
+  for (const [x1, y1, x2, y2] of boxes.slice(0, 2)) {
+    const cx = (x1 + x2) / 2;
+    const [fx, fy] = Warp.mapPoint(camH, cx, y2);
+    const [, fyHeel] = Warp.mapPoint(camH, cx, y1 + 0.6 * (y2 - y1));
+    if (![fx, fy, fyHeel].every(Number.isFinite)) continue;
+    shoes.push({ xFrac: fx / L.W, nearCm: fieldDist(fy, L), farCm: fieldDist(fyHeel, L) });
+  }
+  return shoes;
+}
 
 // When the camera window appears, give it the current banner at once instead of at the next update.
 let cameraWasAlive = false;
@@ -149,7 +204,7 @@ connectBridge((status) => { document.getElementById('bridge').textContent = stat
 
 // ---------- projector corner warp ----------
 // Portrait like the pad, and a 9:16 walk clip. The one place the field size is set: Warp reads it from #stage.
-const FIELD = { width: 720, height: 1280 };
+const FIELD = Warp.FIELD;
 Object.assign(document.getElementById('stage').style, { width: `${FIELD.width}px`, height: `${FIELD.height}px` });
 const zone = new WalkingZone();
 new AmbientGarden(zone);
@@ -530,6 +585,9 @@ class Play extends Phaser.Scene {
     this.paused = false;
     this.highSound = { L: false, R: false };
     this.g = newGame(settings.limits, Date.now() % 100000);
+    this.g.toeCm = -fieldDist(this.layout().toeY, this.layout());   // world cm from the hit line to the toes
+    this.shoeRings = ['L', 'R'].map(() => this.add.ellipse(0, 0, 150, 80).setStrokeStyle(10, C.cyan, 0.8).setVisible(false).setDepth(11));
+    this.lastShoes = 0;
     perceiver = cameraWindowAlive() ? remotePerceiver : localPerceiver;
     perceiver.reset(settings.perceptron, settings.player, () => this.paused || this.sys.isPaused());
     this.events.once('shutdown', () => perceiver.stop());   // no frames leave on the Home or Title screens
@@ -562,6 +620,7 @@ class Play extends Phaser.Scene {
 
     this.off = onFoot((ev) => {
       if (doubleCamera(ev)) return;
+      if (shoesLive(this.g) && POSE_SOURCES.has(ev.source)) return;
       if (this.paused || zone.active) return;                          // the world is frozen; steps do not count
       // Stamp with the game clock, interpolated to the moment the event arrived between two frames,
       // so a slow frame rate does not bunch steps together.
@@ -591,11 +650,25 @@ class Play extends Phaser.Scene {
       publishGarden({ paused: this.paused, coachColor: '', coach: this.paused ? 'Paused · Space to keep walking' : this.coachLine });
       sound.setMusic(!this.paused);
       clip.setPaused(this.paused);
+      if (!this.paused) resetShoes(this.g);   // sightings and half swings from before the pause are stale
     });
     if (settings.greeting) { this.coachLine = settings.greeting; setTimeout(() => say(settings.greeting), 2600); }
     const jump = params.get('act');
     if (jump) { startAt(this.g, jump); params.delete('act'); }   // development shortcut, first game only
     this.showAct();
+  }
+
+  // Shoe boxes from feet.py while this game runs: onto the field, into the rules, with the usual step feedback.
+  feedShoes(boxes) {
+    const before = this.g.stats.steps;
+    addShoes(this.g, mapShoes(boxes, this.layout()), this.g.t + (performance.now() - this.frameWall) / 1000);
+    this.lastShoes = performance.now();
+    if (this.g.stats.steps > before) {   // a shoe swing landed: the same feedback as a sensor strike
+      const s = this.g.strikes[this.g.strikes.length - 1];
+      this.footFlash[s.foot] = 1;
+      sound.play('step');
+      if (cameraWindowAlive()) send('foot-seen', { ev: { foot: s.foot, kind: 'strike', source: 'feet' } });
+    }
   }
 
   layout() {
@@ -605,9 +678,7 @@ class Play extends Phaser.Scene {
     return this.currentLayout;
   }
 
-  yFor(distCm, L) {
-    return L.zoneY - (distCm / RULES.aheadCm) * (L.zoneY - L.top);
-  }
+  yFor(distCm, L) { return fieldY(distCm, L); }
 
   showAct() {
     const a = ACTS[this.g.act];
@@ -706,8 +777,9 @@ class Play extends Phaser.Scene {
   localCue(sum) {
     if (sum.cadence < this.g.limits.minCadence) return 'A little faster, keep stepping';
     if (sum.asymmetryPct !== null && sum.asymmetryPct > 20) return 'Even steps, left and right the same';
-    if (this.g.act === 'garden' && sum.stompPct !== null && sum.stompPct < 60) return 'Knee up high, then stomp the flower';
-    if (this.g.act === 'storm' && sum.dodgePct !== null && sum.dodgePct < 60) return 'Lift the foot higher over the seed';
+    const shoes = shoesLive(this.g);   // shoe mode: it is about where the foot lands, not how high it goes
+    if (this.g.act === 'garden' && sum.stompPct !== null && sum.stompPct < 60) return shoes ? 'Step right onto the flower' : 'Knee up high, then stomp the flower';
+    if (this.g.act === 'storm' && sum.dodgePct !== null && sum.dodgePct < 60) return shoes ? 'Keep that foot out of the seed\u2019s lane' : 'Lift the foot higher over the seed';
     return 'Great walking, keep it up';
   }
 
@@ -793,7 +865,7 @@ class Play extends Phaser.Scene {
       pad.setScale(windowOpen ? 1 : 1 + 0.06 * Math.sin(g.t * Math.PI * 6));
       const arc = s.list[2];
       arc.clear();
-      if (windowOpen && !th.result) {
+      if (windowOpen && !th.result && !shoesLive(g)) {   // the timing arc belongs to the lift rules
         const arrival = th.arriveT ?? g.t + (out.speed > 0 ? th.distCm / out.speed : 0);   // the world stops when the pace drops
         const left = Math.max(0, Math.min(1, (arrival + RULES.afterS - g.t) / (RULES.beforeS + RULES.afterS)));
         if (left > 0) {
@@ -813,6 +885,13 @@ class Play extends Phaser.Scene {
   }
 
   drawHud(L, out, dt) {
+    // Rings under the detected shoes: the live check that the shoe calibration matches the floor.
+    const fresh = shoesLive(this.g) && performance.now() - this.lastShoes < 400;
+    this.shoeRings.forEach((ring, i) => {
+      const s = this.g.shoes[i];
+      ring.setVisible(fresh && !!s);
+      if (s) ring.setPosition(s.xFrac * L.W, this.yFor((s.nearCm + s.farCm) / 2, L));   // where the shoe really is, lane or not
+    });
     const g = this.g;
     const h = this.hud;
     h.clear();
@@ -831,8 +910,8 @@ class Play extends Phaser.Scene {
       this.feet[lane].setTexture(`foot-ghost-${lane.toLowerCase()}${gated && active ? '-amber' : ''}`);
       // Each step lights its footprint briefly, so a working sensor is visible at a glance.
       this.feet[lane].setAlpha(Math.max(gated && active ? 0.3 + 0.7 * (1 - beat % 1) : 0.3, this.footFlash[lane]));
-      drawMeter(h, L, lane, this.lift[lane], need, th?.kind === 'flower' ? C.amber : C.pink,
-        this.meterFlash[lane], urgent);
+      if (!shoesLive(g)) drawMeter(h, L, lane, this.lift[lane], need, th?.kind === 'flower' ? C.amber : C.pink,
+        this.meterFlash[lane], urgent);   // lift meters mean nothing while shoes drive the game
       this.lift[lane] = Math.max(0, this.lift[lane] - dt * 25);
     }
 
@@ -841,7 +920,7 @@ class Play extends Phaser.Scene {
       const act = ACTS[g.act];
       publishGarden({ cadence: out.pace.cadence, act: g.act, paceOk: out.pace.ok || g.t <= 3,
         paused: this.paused, title: act?.title || '', score: `${g.score} pts${g.streak >= 5 ? '  x2' : ''}`,
-        progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · speed x${speedScale(g).toFixed(1)} · form ${Math.round(out.form * 100)}%${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
+        progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · speed x${speedScale(g).toFixed(1)}${shoesLive(g) ? ' · shoes' : ''} · form ${Math.round(out.form * 100)}%${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
         coachColor: g.t < this.feedbackUntil ? this.feedbackColor : '',
         coach: g.t < this.feedbackUntil ? this.feedback : g.t < this.actIntroUntil ? act.intro.join(' ') : this.coachLine });
     }

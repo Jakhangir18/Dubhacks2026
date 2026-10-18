@@ -212,6 +212,32 @@ def sessions(name: str) -> list[dict[str, Any]]:
     return store.sessions(name, limit=30)
 
 
+# ---------------------------------------------------------------- shoe calibration (camera -> field homography)
+# Saved by the camera window and read by every game window, so one calibration serves the whole setup and can be
+# set from anywhere (for example by hand from a camera frame) without touching the browser.
+class ShoeCalIn(BaseModel):
+    h: list[float]                            # 8 homography numbers, normalised camera coordinates to field pixels
+    points: list[list[float]] | None = None   # the four clicked corners, fractions of the picture
+    picture: str = "feed"
+
+
+@router.get("/shoecal")
+def get_shoecal() -> dict[str, Any]:
+    return store.setting("shoecal") or {}
+
+
+@router.put("/shoecal")
+def put_shoecal(inp: ShoeCalIn) -> dict[str, Any]:
+    if len(inp.h) != 8 or not all(math.isfinite(v) for v in inp.h):
+        raise HTTPException(422, "h must be 8 finite numbers")
+    points = inp.points or []
+    if points and (len(points) != 4 or any(len(p) != 2 or not all(math.isfinite(v) for v in p) for p in points)):
+        raise HTTPException(422, "points must be four [x, y] pairs")
+    value = {"h": inp.h, "points": points, "picture": inp.picture[:20], "ts": time.time()}
+    store.set_setting("shoecal", value)
+    return value
+
+
 @router.get("/limits/{name}")
 def limits(name: str) -> dict[str, Any]:
     return store.player(name)["limits"]

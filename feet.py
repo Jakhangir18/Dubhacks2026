@@ -12,10 +12,14 @@ Detector keeps a little state (recent foot sizes), so use one instance per camer
 """
 import argparse
 import atexit
+import base64
 import collections
+import http.client
+import json
 import statistics
 import threading
 import time
+import urllib.parse
 from dataclasses import dataclass
 
 import cv2
@@ -80,6 +84,64 @@ class FeetDetector:
         return kept
 
 
+class ShoeSender:
+    """Posts each frame's shoe boxes to the game server (/api/events, kind "shoes") from a background thread.
+    Keeps one connection open; a frame that arrives while the last one is still in flight is dropped, never queued."""
+
+    def __init__(self, server, source="feet"):
+        u = urllib.parse.urlsplit(server)
+        if u.scheme not in ("http", "https") or not u.hostname:
+            raise SystemExit(f"--server needs a full URL like https://host:8443, got {server!r}")
+        self.https = u.scheme == "https"
+        self.host, self.port = u.hostname, u.port or (443 if self.https else 80)
+        self.source = source
+        self.conn = None
+        self.pending = None
+        self.frame = None   # the newest preview frame waits in its own slot, so a busy connection never loses it
+        self.lock = threading.Condition()
+        self.listeners = None
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def send(self, boxes, w, h, frame=None):
+        event = {"kind": "shoes", "source": self.source,
+                 "boxes": [[round(f.x1 / w, 4), round(f.y1 / h, 4), round(f.x2 / w, 4), round(f.y2 / h, 4), round(f.conf, 3)]
+                           for f in boxes]}
+        preview = None
+        if frame is not None:   # a small JPEG of what the camera sees, for the calibration clicks in the browser
+            scale = 480 / max(w, h)   # long side 480 px, portrait or landscape
+            small = cv2.resize(frame, (max(1, round(w * scale)), max(1, round(h * scale))))
+            ok, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 60])
+            if ok:
+                preview = {"kind": "frame", "source": self.source,
+                           "jpeg": "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()}
+        with self.lock:
+            self.pending = event
+            if preview is not None:
+                self.frame = preview
+            self.lock.notify()
+
+    def _run(self):
+        while True:
+            with self.lock:
+                while self.pending is None:
+                    self.lock.wait()
+                events = [self.pending] + ([self.frame] if self.frame is not None else [])
+                body, self.pending, self.frame = json.dumps({"events": events}), None, None
+            try:
+                if self.conn is None:
+                    cls = http.client.HTTPSConnection if self.https else http.client.HTTPConnection
+                    self.conn = cls(self.host, self.port, timeout=3)   # a frame batch over Wi-Fi can take a moment
+                self.conn.request("POST", "/api/events", body=body, headers={"Content-Type": "application/json"})
+                r = self.conn.getresponse()
+                data = r.read()
+                self.listeners = json.loads(data).get("listeners") if r.status == 200 else None
+            except Exception:  # noqa: BLE001 - a bad reply must not kill the sender thread; the next frame retries
+                self.listeners = None
+                if self.conn is not None:
+                    self.conn.close()
+                self.conn = None
+
+
 def camera_names():
     """Camera names in the order OpenCV indexes them (macOS AVFoundation)."""
     import AVFoundation as av
@@ -122,38 +184,57 @@ def main():
     p.add_argument("--conf", type=float, default=0.15)
     p.add_argument("--max-area", type=float, default=0.15, help="reject boxes above this fraction of the frame")
     p.add_argument("--record", action="store_true", help="save preview to clip_<time>.mp4 (saved even on q or Ctrl-C)")
+    p.add_argument("--server", help="game server, e.g. https://host:8443: send each frame's shoe boxes to /api/events")
+    p.add_argument("--no-preview", action="store_true", help="no window (headless)")
+    p.add_argument("--rotate", type=int, default=0, choices=(0, 90, 180, 270),
+                   help="rotate the camera picture clockwise before detection (a camera mounted on its side)")
     args = p.parse_args()
 
     det = FeetDetector(args.classes.split(","), args.conf, args.max_area)
     cap = open_camera(args.camera_name, args.camera)
+    sender = ShoeSender(args.server) if args.server else None
     writer = None
     if args.record:
         path = time.strftime("clip_%Y%m%d_%H%M%S.mp4")
         size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+        if args.rotate in (90, 270):
+            size = (size[1], size[0])   # the clip holds the rotated frames
         writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), cap.get(cv2.CAP_PROP_FPS) or 30, size)
         atexit.register(writer.release)
         print("Recording to", path)
 
+    rotation = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}.get(args.rotate)
     times = []
+    last_frame_sent = 0.0
     while True:
         ok, frame = cap.read()
         if not ok:
             break
+        if rotation is not None:
+            frame = cv2.rotate(frame, rotation)
         t0 = time.perf_counter()
         feet = det(frame)
         times.append(time.perf_counter() - t0)
+        if sender:
+            now = time.time()
+            with_frame = now - last_frame_sent > 0.5   # two pictures a second are enough to click corners on
+            if with_frame:
+                last_frame_sent = now
+            sender.send(feet, frame.shape[1], frame.shape[0], frame if with_frame else None)
         for f in det.rejected:
             cv2.rectangle(frame, (f.x1, f.y1), (f.x2, f.y2), (0, 0, 255), 1)
         for f in feet:
             cv2.rectangle(frame, (f.x1, f.y1), (f.x2, f.y2), (0, 255, 0), 2)
             cv2.putText(frame, f"{f.label} {f.conf:.2f}", (f.x1, max(f.y1 - 6, 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-        cv2.putText(frame, f"{times[-1] * 1000:.0f} ms | {len(feet)} kept, {len(det.rejected)} rejected", (10, 25),
+        link = "" if not sender else f" | game windows: {sender.listeners}" if sender.listeners is not None else " | server: no reply"
+        cv2.putText(frame, f"{times[-1] * 1000:.0f} ms | {len(feet)} kept, {len(det.rejected)} rejected{link}", (10, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.imshow("feet (q to quit)", frame)
         if writer:
             writer.write(frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
+        if not args.no_preview:
+            cv2.imshow("feet (q to quit)", frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
     cap.release()
     cv2.destroyAllWindows()
     if times:

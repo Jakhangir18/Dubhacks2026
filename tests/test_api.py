@@ -154,3 +154,12 @@ def test_plant_speed_is_kept_between_its_bounds():
     assert clean_limits({"speedScale": 7})["speedScale"] == 2.0
     assert clean_limits({"speedScale": 0})["speedScale"] == 0.3
     assert clean_limits({})["speedScale"] == 0.7
+
+
+def test_shoe_calibration_round_trip_and_validation():
+    assert client.get("/api/shoecal").json() == {}
+    r = client.put("/api/shoecal", json={"h": [1, 0, 0, 0, 1, 0, 0, 0], "points": [[0, 0], [1, 0], [1, 1], [0, 1]]})
+    assert r.status_code == 200 and r.json()["ts"] > 0
+    assert client.get("/api/shoecal").json()["h"] == [1, 0, 0, 0, 1, 0, 0, 0]
+    assert client.put("/api/shoecal", json={"h": [1, 2, 3]}).status_code == 422
+    assert client.put("/api/shoecal", json={"h": [1] * 8, "points": [[0, 0]]}).status_code == 422
