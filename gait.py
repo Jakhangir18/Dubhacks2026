@@ -41,6 +41,7 @@ import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from itertools import pairwise
 
 import cv2
 import mediapipe as mp
@@ -190,13 +191,13 @@ def analyze(rows):
     stance, n_cycles = {}, {}
     for s, rs in side_rows.items():
         ts = [r["t"] for r in rs]
-        col = lambda k: [r[f"{s}_{k}"] for r in rs]
+        col = lambda k, s=s, rs=rs: [r[f"{s}_{k}"] for r in rs]
         st = find_strikes(ts, smooth([d * (r[f"{s}_ankle_x"] - r[f"{s}_hip_x"]) for r in rs])) if rs else []
         to = find_strikes(ts, smooth([-d * (r[f"{s}_toe_x"] - r[f"{s}_hip_x"]) for r in rs])) if rs else []
         res["strikes"][s], res["toe_offs"][s] = st, to
-        strides = [b - a for a, b in zip(st, st[1:])]
+        strides = [b - a for a, b in pairwise(st)]
         typical = statistics.median(strides) if strides else None
-        cycles = [(a, b) for a, b in zip(st, st[1:]) if b - a < 1.6 * typical]  # drop cycles spanning tracking gaps
+        cycles = [(a, b) for a, b in pairwise(st) if b - a < 1.6 * typical]  # drop cycles spanning tracking gaps
         n_cycles[s] = len(cycles)
         res["stride"][s] = statistics.mean(b - a for a, b in cycles) if cycles else None
         res["stride_cv"][s] = cv([b - a for a, b in cycles])
@@ -248,7 +249,7 @@ def analyze(rows):
     by_t = {r["t"]: r for r in rows}
     for s in SIDES:
         o = "R" if s == "L" else "L"
-        times = [t - pt for (pt, ps), (t, ts_) in zip(events, events[1:])
+        times = [t - pt for (pt, ps), (t, ts_) in pairwise(events)
                  if ts_ == s and ps == o and res["stride"][s] and t - pt < res["stride"][s]]
         lens = [d * (by_t[t][f"{s}_heel_x"] - by_t[t][f"{o}_heel_x"])
                 for t in res["strikes"][s] if by_t[t].get(f"{o}_heel_x") is not None]
@@ -260,7 +261,7 @@ def analyze(rows):
     res["cadence"] = 120 / stride if stride else None
     # cross-check: steps counted between consecutive strikes of either foot, leaving out gaps and near-double strikes
     # (one footfall given to both labels). Far from cadence means strikes were missed or labels mixed up.
-    gaps = [b - a for (a, _), (b, _) in zip(events, events[1:])]
+    gaps = [b - a for (a, _), (b, _) in pairwise(events)]
     med = statistics.median(gaps) if gaps else 0
     steps = [x for x in gaps if 0.5 * med <= x <= 1.5 * med]
     res["cadence_steps"] = 60 / statistics.mean(steps) if steps and med > 0 else None
@@ -332,7 +333,7 @@ def summarize(rows, start=None, end=None):
     n = max(1, round((ts[-1] - ts[0]) / WINDOW))
     edges = [ts[0] + (ts[-1] - ts[0]) * i / n for i in range(n)] + [math.inf]
     parts, trend = [], []
-    for a, b in zip(edges, edges[1:]):
+    for a, b in pairwise(edges):
         part = analyze(rows[bisect.bisect_left(ts, a):bisect.bisect_left(ts, b)])
         if part:
             parts.append(part)
@@ -401,8 +402,7 @@ class GaitTracker:
             print(f"Downloading {model} pose model (one time)...")
             try:
                 urllib.request.urlretrieve(url, path)
-            except Exception:
-                # Network proxy may block urllib TLS; fall back to curl.
+            except Exception:  # noqa: BLE001 - a network proxy may block urllib's TLS; curl is the fallback
                 subprocess.run(["curl", "-fsSL", "-o", path, url], check=True)
         self.landmarker = vision.PoseLandmarker.create_from_options(vision.PoseLandmarkerOptions(
             base_options=mp_python.BaseOptions(model_asset_path=path), running_mode=vision.RunningMode.VIDEO))
@@ -411,7 +411,7 @@ class GaitTracker:
         self._seen = []    # (side, points, confidence) of the last frame, for draw()
         self._ms = -1      # last timestamp given to MediaPipe, which needs them strictly increasing
         # every frame with all 33 landmarks streams to disk instead of memory
-        self._csv = open(csv_path, "w", newline="", buffering=1) if csv_path else None
+        self._csv = open(csv_path, "w", newline="", buffering=1) if csv_path else None  # noqa: SIM115 - closed by close()
         self._csv_writer = None
 
     def update(self, frame, t, index=None):
@@ -475,7 +475,7 @@ class GaitTracker:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if self.found else (0, 0, 255), 2)
         for s, xy, vis in self._seen:
             color = (0, 255, 0) if vis >= MIN_VIS else (0, 0, 255)
-            for a, b in zip(xy, xy[1:]):
+            for a, b in pairwise(xy):
                 cv2.line(frame, tuple(map(int, a)), tuple(map(int, b)), color, 2)
             cv2.putText(frame, f"{s} vis {vis:.2f}", (int(xy[1][0]) + 8, int(xy[1][1])), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
@@ -789,7 +789,7 @@ class SessionFollower:
         if res is None:   # nothing measurable yet: still check in, so the game knows a side camera follows this walk
             try:
                 post_json(f"{self.server}/api/gait", {"player": cur["player"], "source": "side-camera", "summary": None, "sessionId": cur["id"]}, timeout=5)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 - a missed check-in is harmless; the next one comes in LIVE_EVERY s
                 pass
             return
         try:
