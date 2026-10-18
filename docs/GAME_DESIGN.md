@@ -1,49 +1,46 @@
 # Game design
 
-The product is the therapist; the game is how the therapy is delivered. Every mechanic maps to a training method with published evidence (sources in [research/evidence.md](research/evidence.md)).
+The product is the coach; the game is how the exercises get done. Evidence: [research/kids-evidence.md](research/kids-evidence.md), [research/kids-design.md](research/kids-design.md), [research/therapist.md](research/therapist.md).
 
 ## The player and the world
 
-- The player is a zombie walking through a garden. Walking slowly is the theme, not a failure.
-- The belt has two lanes, one per foot. In projector mode the garden is painted onto the belt from above and scrolls at the measured belt speed, so plants look fixed to the belt. In screen mode (no projector yet) the same game is shown as a road on a TV in front of the treadmill, which is the set-up the V-TIME trial used.
+- The player is a zombie walking through a garden. Plants come towards the player in two lanes, one per foot.
+- **Floor mode (core, children):** the garden is projected onto a firm floor or a white mat; plants scroll towards the player while the child walks in place or steps forward onto them.
+- **Walking-pad mode (optional, teens and adults 14+, supervised):** the player walks on the pad; the garden is shown on a screen or wall in front (the V-TIME set-up), scrolling at the measured belt speed. Nothing is projected onto the belt.
 
-## Mechanics mapped to therapy
+## Mechanics mapped to exercises
 
-| What the player sees | What it trains | What is measured |
+| What the player sees | What it practises | What is measured |
 |---|---|---|
-| **Sunflower** in the left or right lane: step on it with that foot | step placement and step length (step training) | heel strike position and timing against the target |
-| **Cactus** spits a seed at one foot: lift that foot high | obstacle clearance (V-TIME obstacles) | lift height of the lowest point of the foot, in cm |
-| **Sign** with a question ("7 + 5?"): answer aloud | dual-task walking | speech recognition |
-| **Ghost footprints** glowing one step ahead | where and when to step | none; this is the therapist showing the way |
-| **Waves** get denser | progressive difficulty | coach sets spacing, obstacle rate and lift threshold |
+| **Sunflower** in the left or right lane: step on it with that foot | step placement, coordination | heel strike position and timing against the target |
+| **Cactus** spits a seed at one foot: lift that foot high | foot clearance, balance | lift height of the lowest point of the foot, in cm |
+| **Sign** with a question ("7 + 5?"): answer aloud | dual-task movement | speech recognition |
+| **Ghost footprints** glowing one step ahead | where and when to step | none; the coach is showing the way |
+| **Waves** get denser | progression | coach sets spacing, obstacle rate and lift threshold |
 
-Scoring: a hit is counted only inside a short time window around arrival (about 0.25 s for sunflowers), each foot event can be used once, and nothing counts unless walking is verified (both feet stepping, step length matching belt speed).
+Scoring: a hit counts only inside a short window around arrival (about 0.25 s for sunflowers), each foot event is used once, and in walking-pad mode nothing counts unless walking is verified.
 
-## The AI therapist
+## The coach
 
-- **Every frame (code, not a model):** step events, step length, lift height per foot, left-right symmetry, hits and misses.
-- **Every 20 to 30 seconds (language model):** reads a summary, speaks one cue of at most 12 words with an external focus ("clear the cactus" rather than "bend your knee"), then sets the next wave: target spacing, obstacle rate, lift threshold. It suggests speed changes; the person presses the remote.
-- **Safety rules outside the model:** speed suggestions capped, automatic pause when steps stop or the walker drifts back, a stop button, a conservative start.
-- **After the session:** a report for the family and the clinician: distance, hit rates, lift height per foot and its trend, symmetry, dual-task accuracy, one flag when a pattern worsens.
-- Coaching rules from [research/therapist.md](research/therapist.md):
-  - Screen every player with PAR-Q+ first; any "yes" means no unsupervised session.
-  - Start the belt at about 80% of the player's normal floor walking speed. Change one difficulty setting at a time, step back a level after a failure, and raise belt speed only between sessions (at most 10% a week, as in V-TIME).
-  - Introduce elements in stages, as the C-Mill protocol did: plain walking, then targets, then obstacles, then speed changes.
-  - A sound on every target and obstacle; at most one spoken cue every 20 to 30 seconds; a short summary after each walking bout. Cues are at most 12 words, one instruction, aimed at a target on the belt, saying what to do.
-  - Stop the belt and end the session on chest pain, dizziness, breathlessness, lasting joint pain, "stop", a stumble, or drifting to the rear of the deck.
-  - Wellness wording only: no disease names, no fall-risk scores, no clinical cut-offs; "evaluation by a healthcare professional may be helpful" is allowed.
-- Defaults the research did not settle (marked "Design" in the brief and tunable): starting lift threshold 5 to 15 cm, level-up at 8 of 10 successes, level-down at 4 of 10.
+- **Every frame (code, not a model):** step events, lift height per foot, left-right symmetry, hits and misses.
+- **Game feedback on every step for children** (sound, splat, sparkle), faded slowly as they improve: children given reduced feedback retained less and need feedback reduced more gradually.
+- **Spoken cues:** at most one every 20 to 30 seconds, at most 12 words, one instruction, aimed at a target ("clear the cactus"), saying what to do.
+- **Inside the therapist's limits:** the therapist (or a preset) sets the exercise mix, the lift range and the session length; the coach adapts only within them. Change one setting at a time; step back a level after a failure (level up at 8 of 10 successes, down at 4 of 10, tunable).
+- **Session length:** default about 16.5 minutes (the average dose of effective parent-run home programmes for cerebral palsy), then the game locks until the next session; the therapist may change it.
+- **Stop rules:** pain, dizziness, "stop", a stumble; in walking-pad mode also drifting to the rear of the deck.
+- **Accessibility:** adjustable game speed, adjustable sensitivity, larger targets for children with motor impairments.
+- **Wording:** wellness terms only (coordination, balance, strength, endurance, general mobility); no disease names or recovery claims.
 
-## Family league and Visa
+## Parents, therapist, rewards and Visa
 
-- Each family member plays; the weekly table scores each person against their own baseline, so a grandmother and a teenager compete fairly.
-- A sponsor (a parent or grandparent) funds a weekly pool; the pool is split by points; nobody stakes or loses money.
-- A generative-AI host announces the table, explains each person's progress, picks a reward for the winner and checks it out through Visa (sandbox for the demo).
-- Business story: once every session is verified, a family, an employer or an insurer can pay per verified session.
+- After each session: a report for the parent and the therapist (minutes played, hit rates, lift height per foot and its trend, symmetry).
+- **Family reward pool:** a parent funds rewards; completed sessions unlock them; a generative-AI host picks a reward the child chose and checks it out through Visa (sandbox for the demo). This mirrors the 2025 DubHacks Visa winner, a kids' habit app with parent-controlled rewards.
+- **Family league** for older players: each person is scored against their own baseline, so siblings and parents compete fairly.
+- Business story: verified sessions let a therapist see real adherence; a family, a clinic or an insurer can pay per verified session.
 
 ## Demo (90 seconds)
 
-1. The judge steps on; 10-second calibration; plants start scrolling.
-2. The judge steps on sunflowers and lifts a foot over a cactus spit; the screen shows "lift 14 cm".
-3. The coach speaks a cue; the judge answers a sign aloud.
-4. Report card, family table, and the round winner's reward paid through the Visa sandbox.
+1. A judge steps onto the projected garden; ten-second calibration.
+2. Sunflowers and cacti arrive; the judge steps and lifts; the screen shows "lift 14 cm"; the coach speaks one cue.
+3. The judge answers a sign aloud.
+4. Report card, the therapist's limits screen, and a reward unlocked and paid through the Visa sandbox.
