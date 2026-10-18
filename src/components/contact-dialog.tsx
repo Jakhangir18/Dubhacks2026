@@ -52,26 +52,30 @@ export function ContactDialog() {
 
   return (
     <Dialog open={contactOpen} onOpenChange={close}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="rounded-[26px] border-[2.5px] border-[#2c4639] shadow-[5px_5px_0_#050809] ring-0 sm:max-w-lg">
         {sent ? (
           <div className="pr-6">
             <DialogHeader>
-              <DialogTitle>The care team has your note.</DialogTitle>
-              <DialogDescription>
+              <DialogTitle className="font-display text-2xl font-normal tracking-wide text-[#ffd76a]">The care team has your note.</DialogTitle>
+              <DialogDescription className="leading-6 text-white/70">
                 {topic === "Something hurts"
                   ? "Pause practice until someone replies. If this is urgent, contact your clinician directly rather than waiting on this form."
                   : "A clinician replies within one business day. Your walking history stays attached to the note."}
               </DialogDescription>
             </DialogHeader>
-            <Button type="button" className="mt-5 h-10 rounded-full px-4" onClick={() => close(false)}>
+            <Button
+              type="button"
+              className="mt-5 h-10 rounded-full border-[2.5px] border-[#0b1a14] bg-[#9cff5a] px-4 font-semibold text-[#0b1a14] shadow-[0_4px_0_#3d7a19] hover:bg-[#b4ff82]"
+              onClick={() => close(false)}
+            >
               Done
             </Button>
           </div>
         ) : (
           <form onSubmit={onSubmit} className="grid gap-4 pr-2">
             <DialogHeader>
-              <DialogTitle>Contact the care team</DialogTitle>
-              <DialogDescription>
+              <DialogTitle className="font-display text-2xl font-normal tracking-wide text-[#ffd76a]">Contact the care team</DialogTitle>
+              <DialogDescription className="leading-6 text-white/70">
                 Form questions, pain, the kit, or scheduling. Maya can talk about walking scores. People answer this.
               </DialogDescription>
             </DialogHeader>
@@ -81,7 +85,7 @@ export function ContactDialog() {
                 id="care-topic"
                 value={topic}
                 onChange={(event) => setTopic(event.target.value)}
-                className="h-10 rounded-lg border border-input bg-white px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+                className="h-10 rounded-xl border-[2.5px] border-[#2c4639] bg-[#070b10] px-3 text-sm text-white outline-none [color-scheme:dark] focus-visible:border-[#9cff5a] focus-visible:ring-3 focus-visible:ring-[#9cff5a]/25"
               >
                 {TOPICS.map((item) => (
                   <option key={item}>{item}</option>
@@ -95,10 +99,10 @@ export function ContactDialog() {
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
                 placeholder="The left step shortened during Even stride, and the knee felt unstable after."
-                className="min-h-28 bg-white"
+                className="min-h-28 rounded-xl border-[2.5px] border-[#2c4639] bg-[#070b10] text-white placeholder:text-white/40 focus-visible:border-[#9cff5a] focus-visible:ring-[#9cff5a]/25 dark:bg-[#070b10]"
                 aria-invalid={Boolean(errors.message)}
               />
-              {errors.message ? <p className="text-sm text-destructive">{errors.message}</p> : null}
+              {errors.message ? <p className="text-sm font-medium text-[#ff8fa0]">{errors.message}</p> : null}
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="care-contact">How should they reach you?</Label>
@@ -107,16 +111,21 @@ export function ContactDialog() {
                 value={contact}
                 onChange={(event) => setContact(event.target.value)}
                 placeholder="Email or phone"
-                className="h-10 bg-white"
+                className="h-10 rounded-xl border-[2.5px] border-[#2c4639] bg-[#070b10] text-white placeholder:text-white/40 focus-visible:border-[#9cff5a] focus-visible:ring-[#9cff5a]/25 dark:bg-[#070b10]"
                 aria-invalid={Boolean(errors.contact)}
               />
-              {errors.contact ? <p className="text-sm text-destructive">{errors.contact}</p> : null}
+              {errors.contact ? <p className="text-sm font-medium text-[#ff8fa0]">{errors.contact}</p> : null}
             </div>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" className="h-10 rounded-full px-4" onClick={() => close(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 rounded-full border-[2.5px] border-[#2c4639] bg-transparent px-4 text-white hover:bg-white/10 dark:bg-transparent"
+                onClick={() => close(false)}
+              >
                 Cancel
               </Button>
-              <Button type="submit" className="h-10 rounded-full bg-orange px-4 text-white hover:bg-[#d9772b]">
+              <Button type="submit" className="h-10 rounded-full border-[2.5px] border-[#0b1a14] bg-[#ffb21e] px-4 font-semibold text-[#0b1a14] shadow-[0_4px_0_#a8690b] hover:bg-[#ffc54d]">
                 Send note
               </Button>
             </div>

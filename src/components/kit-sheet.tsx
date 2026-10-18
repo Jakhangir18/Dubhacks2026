@@ -12,6 +12,9 @@ import {
 } from "@/components/ui/sheet"
 import { useStride } from "@/lib/store"
 
+const CARD = "rounded-2xl border-[2.5px] border-[#2c4639] bg-[#070b10]/70 p-4 shadow-[4px_4px_0_#050809]"
+const ICON = "grid size-8 place-items-center rounded-full bg-[#12261a] text-[#9cff5a] ring-2 ring-[#9cff5a]/40"
+
 export function KitSheet() {
   const { kitOpen, setKitOpen, state, setSensor, reconnectKit } = useStride()
   const [checking, setChecking] = useState(false)
@@ -31,8 +34,8 @@ export function KitSheet() {
     <Sheet open={kitOpen} onOpenChange={setKitOpen}>
       <SheetContent side="right" className="w-full data-[side=right]:sm:max-w-md">
         <SheetHeader className="pr-8">
-          <SheetTitle>Movement kit</SheetTitle>
-          <SheetDescription>
+          <SheetTitle className="font-display text-2xl font-normal tracking-wide text-[#ffd76a]">Movement kit</SheetTitle>
+          <SheetDescription className="leading-6 text-white/70">
             The trackpad scores the walk. It times each step and feels the left-right shift. The camera keeps you in frame. The projection puts the lawn on the floor.
           </SheetDescription>
         </SheetHeader>
@@ -51,25 +54,30 @@ export function KitSheet() {
             online={state.sensors.trackpad}
             onToggle={() => setSensor("trackpad", !state.sensors.trackpad)}
           />
-          <div className="rounded-2xl border border-border bg-white p-4">
+          <div className={CARD}>
             <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 font-semibold text-ink">
-                <span className="grid size-8 place-items-center rounded-full bg-mint text-forest">
+              <div className="flex items-center gap-2 font-semibold text-white">
+                <span className={ICON}>
                   <Projector className="size-4" />
                 </span>
                 Projection
               </div>
-              <span className="text-xs font-semibold text-forest">Ready</span>
+              <span className="text-xs font-bold tracking-[0.12em] uppercase text-[#9cff5a]">Ready</span>
             </div>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            <p className="mt-2 text-sm leading-6 text-white/65">
               Casts the lawn onto the trackpad. You stomp the plants you see. They close in when pace or stride slips.
             </p>
           </div>
-          <Button type="button" className="h-10 rounded-full" onClick={runCheck} disabled={checking}>
+          <Button
+            type="button"
+            className="h-11 rounded-full border-[2.5px] border-[#0b1a14] bg-[#9cff5a] font-semibold text-[#0b1a14] shadow-[0_4px_0_#3d7a19] hover:bg-[#b4ff82]"
+            onClick={runCheck}
+            disabled={checking}
+          >
             {checking ? "Checking the kit…" : "Run a connection check"}
           </Button>
           {checked ? (
-            <p className="text-sm text-forest" role="status">
+            <p className="text-sm font-semibold text-[#9cff5a]" role="status">
               Camera and trackpad both answered.
             </p>
           ) : null}
@@ -93,21 +101,21 @@ function SensorRow({
   onToggle: () => void
 }) {
   return (
-    <div className="rounded-2xl border border-border bg-white p-4">
+    <div className={CARD}>
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 font-semibold text-ink">
-          <span className="grid size-8 place-items-center rounded-full bg-mint text-forest">{icon}</span>
+        <div className="flex items-center gap-2 font-semibold text-white">
+          <span className={ICON}>{icon}</span>
           {name}
         </div>
-        <span className={online ? "text-xs font-semibold text-forest" : "text-xs font-semibold text-orange"}>
+        <span className={online ? "text-xs font-bold tracking-[0.12em] text-[#9cff5a] uppercase" : "text-xs font-bold tracking-[0.12em] text-[#ffb21e] uppercase"}>
           {online ? "Connected" : "Offline"}
         </span>
       </div>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">{body}</p>
+      <p className="mt-2 text-sm leading-6 text-white/65">{body}</p>
       <button
         type="button"
         onClick={onToggle}
-        className="mt-3 text-sm font-semibold text-forest underline-offset-4 hover:underline"
+        className="mt-3 text-sm font-semibold text-[#9cff5a] underline-offset-4 hover:underline"
       >
         {online ? `Mark ${name.toLowerCase()} offline` : `Mark ${name.toLowerCase()} connected`}
       </button>
