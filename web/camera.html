@@ -21,7 +21,8 @@
     section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
     h2 { margin: 0 0 8px; font-size: 14px; color: var(--yellow); letter-spacing: .04em; text-transform: uppercase; }
     .video { position: relative; background: #000; border-radius: 10px; overflow: hidden; }
-    .video video, .video canvas { display: block; width: 100%; }
+    .video video, .video canvas, .video img { display: block; width: 100%; }
+    .video video[hidden], .video img[hidden] { display: none; }   /* author rules beat the UA hidden rule */
     .video canvas { position: absolute; inset: 0; height: 100%; }
     .lifts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
     .lift { font-size: 28px; font-weight: 700; } .lift small { display: block; font-size: 12px; color: var(--dim); font-weight: 400; }
@@ -45,16 +46,21 @@
     <span id="st-cam" class="chip">camera off</span>
     <span id="st-game" class="chip">game window</span>
     <span id="st-pp" class="chip">Perceptron</span>
+    <span id="st-shoes" class="chip">shoes</span>
     <div class="controls">
       <select id="dev"><option value="">press Start to list cameras</option></select>
       <label>Height <input id="height" type="number" min="90" max="210"> cm</label>
       <button id="start">Start</button><button id="stop">Stop</button>
+      <label title="Steps from the pose model; switch off when feet.py shoes drive the game"><input type="checkbox" id="pose" checked> pose steps</label>
+      <button id="calib">Calibrate shoes</button>
     </div>
   </header>
   <main>
     <section>
       <h2>What the camera sees</h2>
-      <div class="video"><video id="video" playsinline muted></video><canvas id="overlay"></canvas></div>
+      <div class="video"><video id="video" playsinline muted></video><img id="feed" alt="" hidden><canvas id="overlay"></canvas></div>
+      <p id="calib-help" class="hint" hidden></p>
+      <p id="feed-note" class="hint" hidden>Showing feet.py's camera (shoe boxes and calibration are in its picture).</p>
       <div class="lifts">
         <div class="lift L"><span id="liftL">–</span> cm<small>left foot lift (yellow)</small></div>
         <div class="lift R"><span id="liftR">–</span> cm<small>right foot lift (cyan)</small></div>

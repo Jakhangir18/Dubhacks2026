@@ -2,6 +2,16 @@
 
 The game needs exactly two kinds of event per foot, on time. Everything else (timing windows, scoring, the therapist, Perceptron) is already built and waits for these events. This page says what to send, where, how the game judges it, how to place the camera, and how to know it works.
 
+## Shoe mode (feet.py): the way that works on the pad
+
+The pose detector fails on the pad (the stand camera sees the belt from above in the dark), so the game now takes **shoe boxes** from `feet.py` and resolves plants by overlap: a shoe on a flower smashes it, a shoe on a seed splats, a flower that passes the toes got away, a seed that passes the toes with a clear lane was dodged. Steps come from each shoe's forward-then-back swing on the belt, so the pace gate works with no lift events at all.
+
+1. On the Mac with the stand camera: `python feet.py --server https://<server> --camera-name <stand camera>`. Each frame it posts `{"kind": "shoes", "boxes": [[x1, y1, x2, y2, conf], ...]}` (fractions of the frame) to `/api/events`; the preview's top line shows `game windows: 1` when the game receives them.
+2. In the camera window (`/camera.html`): **Calibrate shoes**, then click the four projected zone corners in the camera picture in the order FRONT-LEFT, FRONT-RIGHT, BACK-RIGHT, BACK-LEFT. This maps camera pixels onto the game field; the game draws a cyan ring under each shoe, so a wrong calibration is visible at once. Untick **pose steps** there.
+3. Walk. The HUD shows `shoes` in the pace line while sightings arrive.
+
+The lift-based rules below stay for a sensor that measures lift height (a side camera, the Pi); the game uses them when no shoes arrive.
+
 ## What to send
 
 Per step of each foot, in this order (full contract: `vision/CONTRACT.md`):
