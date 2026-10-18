@@ -71,7 +71,7 @@ MAX_GAIT_BYTES = 2_000_000   # a whole-session gait summary with per-act parts i
 async def cap_perceive_body(request: Request, call_next):
     """Perception routes relay to a paid API: refuse a huge body before it is read."""
     limits = {"/api/perceive": MAX_PERCEIVE_BYTES, "/api/perceive/session": MAX_SESSION_BYTES, "/api/events": MAX_EVENTS_BYTES,
-              "/api/gait/final": MAX_GAIT_BYTES}
+              "/api/gait/final": MAX_GAIT_BYTES, "/api/gait/moment": MAX_MOMENT_BODY_BYTES}
     if request.method == "POST" and request.url.path in limits:
         size = request.headers.get("content-length")
         if size is None or not size.isdigit() or int(size) > limits[request.url.path]:   # every sender declares a length
@@ -110,11 +110,45 @@ def clean_shoes(ev: dict[str, Any]) -> dict[str, Any] | None:
     return {"kind": "shoes", "boxes": out, "source": str(ev.get("source", "feet"))[:20]}
 
 
+POSE_POINTS = ("l_shoulder", "r_shoulder", "l_hip", "r_hip", "l_knee", "r_knee", "l_ankle", "r_ankle",
+               "l_heel", "r_heel", "l_toe", "r_toe")   # gait.py's live skeleton over the side picture
+
+
+def finite(v: Any) -> float | None:
+    """A JSON number as a finite float; None for booleans, strings, NaN and infinities."""
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
+
+
+def clean_pose(ev: dict[str, Any]) -> dict[str, Any] | None:
+    """gait.py's live skeleton: the known points as [x, y, visibility] fractions of the side picture (clamped to
+    0..1), the knee flexion per side in degrees or null, and the picture's time (the server's when it is missing).
+    Unknown points and anything that is not a finite number are dropped."""
+    pts = ev.get("pts")
+    if not isinstance(pts, dict):
+        return None
+    kept: dict[str, list[float]] = {}
+    for name in POSE_POINTS:
+        p = pts.get(name)
+        if isinstance(p, list) and len(p) == 3:
+            nums = [finite(v) for v in p]
+            if all(v is not None for v in nums):
+                kept[name] = [max(0.0, min(1.0, v)) for v in nums if v is not None]
+    knee = ev.get("knee")
+    if not isinstance(knee, dict):
+        knee = {}
+    deg = {s: (None if (v := finite(knee.get(s))) is None else max(0.0, min(180.0, v))) for s in ("L", "R")}
+    t = finite(ev.get("t"))
+    return {"kind": "pose", "source": str(ev.get("source", "side"))[:20], "t": time.time() if t is None else t,
+            "pts": kept, "knee": deg}
+
+
 def clean_event(ev: Any) -> dict[str, Any] | None:
     if not isinstance(ev, dict):
         return None
     if ev.get("kind") == "shoes":
         return clean_shoes(ev)
+    if ev.get("kind") == "pose":
+        return clean_pose(ev)
     if ev.get("kind") == "marks":
         marks = ev.get("marks")
         if not isinstance(marks, list):
@@ -242,7 +276,10 @@ async def post_events(inp: EventsIn) -> dict[str, Any]:
 # The phone posts JPEG pictures; gait.py on this host pulls them one by one (long poll) and the dashboard gets
 # two a second as "frame" events with source "side". One picture is kept in memory, never on disk.
 MAX_SIDEFRAME_BYTES = 400_000
+SIDE_LIVE_S = 3.0    # a picture this fresh means the phone is connected
+SIDE_RATE_S = 5.0    # pictures per second are counted over this long
 side_frame: dict[str, Any] = {"seq": 0, "jpeg": b"", "ts": 0.0}
+side_arrivals: deque[float] = deque(maxlen=600)   # when the newest pictures came, from either intake path
 side_cond = asyncio.Condition()
 side_shown_at = 0.0
 
@@ -252,6 +289,7 @@ async def take_sideframe(body: bytes) -> int:
     global side_shown_at
     async with side_cond:
         side_frame.update(seq=side_frame["seq"] + 1, jpeg=body, ts=time.time())
+        side_arrivals.append(side_frame["ts"])
         side_cond.notify_all()
     if time.time() - side_shown_at >= 0.5:
         side_shown_at = time.time()
@@ -280,6 +318,20 @@ async def ws_sideframe(ws: WebSocket) -> None:
         pass
 
 
+def sideframe_status(now: float | None = None) -> dict[str, Any]:
+    """Is the phone sending, and how fast: the dashboard's connect-the-phone step reads this."""
+    now = time.time() if now is None else now
+    ts = side_frame["ts"]
+    recent = sum(1 for t in side_arrivals if t > now - SIDE_RATE_S)
+    return {"connected": ts > 0 and now - ts <= SIDE_LIVE_S, "fps": round(recent / SIDE_RATE_S, 1),
+            "ageS": round(max(0.0, now - ts), 2) if ts > 0 else None, "seq": side_frame["seq"]}
+
+
+@app.get("/api/sideframe/status")
+def get_sideframe_status() -> dict[str, Any]:
+    return sideframe_status()
+
+
 @app.get("/api/sideframe")
 async def get_sideframe(after: int = 0, wait: float = 1.0) -> Response:
     """The next phone picture after `after` (long poll up to `wait` s, at most 5); 204 when none came."""
@@ -297,6 +349,68 @@ async def get_sideframe(after: int = 0, wait: float = 1.0) -> Response:
 from server import api  # imported after load_env() so the store sees MONGODB_URI
 
 app.include_router(api.router)
+
+
+# ---------------------------------------------------------------- moments: the side camera's annotated leg pictures
+# When a stride's knee lift was low, uneven or good, gait.py crops the legs out of that side picture, draws the knee
+# angle on it and posts it here. A camera picture leaves the phone only for the active session and only with that
+# player's AI gait review consent; the dashboard gets it on the game socket and later from the list.
+from server import moments
+
+MAX_MOMENT_BODY_BYTES = moments.MAX_JPEG_BYTES * 4 // 3 + 10_000   # the picture in base64 plus the numbers
+
+
+class MomentIn(BaseModel):
+    sessionId: str
+    kind: str                 # knee_low | uneven | good
+    side: str | None = None   # L | R | null
+    valueDeg: float
+    targetDeg: float
+    t: float                  # seconds since the session started
+    jpg: str                  # base64 JPEG: the leg crop with the skeleton drawn, at most MAX_JPEG_BYTES
+
+
+@app.post("/api/gait/moment", status_code=201)
+async def post_moment(inp: MomentIn) -> dict[str, Any]:
+    if inp.kind not in moments.KINDS or inp.side not in {"L", "R", None}:
+        raise HTTPException(422, "kind must be knee_low, uneven or good; side L, R or null")
+    if not all(math.isfinite(v) for v in (inp.valueDeg, inp.targetDeg, inp.t)):
+        raise HTTPException(422, "valueDeg, targetDeg and t must be finite numbers")
+    active = await run_in_threadpool(api.active_session)
+    if not active or active["id"] != inp.sessionId:
+        raise HTTPException(403, "not the active session")
+    player = await run_in_threadpool(api.store.player, active["player"])
+    if not player.get("aiReviewConsent"):
+        raise HTTPException(403, "no AI gait review consent for this player: nothing is stored")
+    try:
+        jpeg = base64.b64decode(inp.jpg, validate=True)
+    except ValueError as e:   # binascii.Error is one
+        raise HTTPException(415, "jpg must be a base64 JPEG") from e
+    if not jpeg.startswith(b"\xff\xd8"):
+        raise HTTPException(415, "jpg must be a base64 JPEG")
+    if len(jpeg) > moments.MAX_JPEG_BYTES:
+        raise HTTPException(413, f"the picture must be at most {moments.MAX_JPEG_BYTES} bytes")
+    moment = await run_in_threadpool(moments.save, inp.sessionId, inp.kind, inp.side, inp.valueDeg, inp.targetDeg, inp.t, jpeg)
+    if moment is None:
+        raise HTTPException(429, f"this session has its {moments.MAX_PER_SESSION} moments")
+    await broadcast([moment])
+    return moment
+
+
+@app.get("/api/session/{session_id}/moments")
+async def session_moments(session_id: str) -> dict[str, Any]:
+    """The session's moments, oldest first, each as it was broadcast; [] for a session without any."""
+    if not api.SESSION_ID.fullmatch(session_id):
+        raise HTTPException(404, "no such session")
+    return {"moments": await run_in_threadpool(moments.load, session_id)}
+
+
+@app.get("/api/moment/{session_id}/{moment_id}.jpg")
+def moment_image(session_id: str, moment_id: str) -> FileResponse:
+    path = moments.image(session_id, moment_id)
+    if path is None:
+        raise HTTPException(404, "no such moment")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 # ---------------------------------------------------------------- local canvas highlights (no camera uploads)
@@ -437,4 +551,19 @@ def dashboard(path: str) -> FileResponse:
     return FileResponse(file)
 
 
+APP_DIR = ROOT / "app"   # the Next.js dashboard's static export (basePath /app), next to web/ in the deployed tree
+
+
+def mount_app(app: FastAPI, folder: Path) -> bool:
+    """Serve the dashboard export at /app/ when its folder exists (html=True opens index.html for /app/), so the
+    dashboard, the API and the game socket share one origin. Call it before the catch-all web mount: routes match
+    in order, and the web mount claims every path."""
+    if not folder.is_dir():
+        return False
+    app.add_api_route("/app", lambda: RedirectResponse("/app/"), include_in_schema=False)   # the export's paths are relative to the slash
+    app.mount("/app", StaticFiles(directory=folder, html=True), name="app")
+    return True
+
+
+mount_app(app, APP_DIR)
 app.mount("/", StaticFiles(directory=WEB), name="web")

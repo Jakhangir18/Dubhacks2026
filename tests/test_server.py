@@ -128,3 +128,64 @@ def test_phone_pictures_arrive_over_the_socket_too():
         ws.send_bytes(b"junk")   # ignored
         r = client.get("/api/sideframe?after=0&wait=1")
     assert r.status_code == 200 and r.content == jpeg
+
+
+def test_phone_status_says_whether_pictures_come_and_how_fast(monkeypatch):
+    import time
+    from collections import deque
+
+    from server import app as app_module
+    monkeypatch.setattr(app_module, "side_arrivals", deque())
+    monkeypatch.setitem(app_module.side_frame, "seq", 0)
+    monkeypatch.setitem(app_module.side_frame, "ts", 0.0)
+    assert client.get("/api/sideframe/status").json() == {"connected": False, "fps": 0.0, "ageS": None, "seq": 0}
+    jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 16
+    client.post("/api/sideframe", content=jpeg, headers={"content-type": "image/jpeg"})
+    with client.websocket_connect("/ws/sideframe") as ws:   # both intake paths count
+        ws.send_bytes(jpeg)
+        ws.send_bytes(jpeg)
+        client.get("/api/sideframe?after=1&wait=1")
+    s = client.get("/api/sideframe/status").json()
+    assert s["connected"] is True and s["seq"] == 3 and s["fps"] == 0.6 and 0 <= s["ageS"] < 2
+    later = app_module.sideframe_status(now=time.time() + 10)
+    assert later["connected"] is False and later["fps"] == 0.0 and 9 < later["ageS"] < 12 and later["seq"] == 3
+
+
+def test_live_skeleton_is_validated_and_relayed():
+    with client.websocket_connect("/ws/game") as game:
+        r = client.post("/api/events", json={"events": [{"kind": "pose", "source": "side", "t": 1760000000.5, "pts": {
+            "l_hip": [0.5, 1.2, 0.9], "r_knee": [-0.1, 0.4, 1], "l_toe": [0.1, 0.2], "nose": [0.1, 0.1, 1],
+            "r_hip": ["a", 0, 0], "l_knee": [0.3, 0.3, True]},
+            "knee": {"L": 57.2, "R": None}, "extra": 1}]})
+        assert r.json() == {"accepted": 1, "listeners": 1}
+        got = game.receive_json()[0]
+    assert got == {"kind": "pose", "source": "side", "t": 1760000000.5, "pts": {"l_hip": [0.5, 1.0, 0.9], "r_knee": [0.0, 0.4, 1.0]},
+                   "knee": {"L": 57.2, "R": None}}
+    assert clean_event({"kind": "pose", "pts": "none"}) is None
+    assert clean_event({"kind": "pose", "pts": {"r_ankle": [0.2, float("nan"), 1], "l_toe": [0.2, float("inf"), 1]}})["pts"] == {}
+    bare = clean_event({"kind": "pose", "pts": {}, "t": "soon", "knee": {"L": True, "R": 999}})
+    assert bare["knee"] == {"L": None, "R": 180.0} and bare["source"] == "side" and isinstance(bare["t"], float) and bare["t"] > 1e9
+
+
+def test_dashboard_app_is_served_only_when_its_export_folder_exists(tmp_path):
+    from fastapi import FastAPI
+    from fastapi.staticfiles import StaticFiles
+
+    from server.app import WEB, app, mount_app
+    bare = FastAPI()
+    assert mount_app(bare, tmp_path / "app") is False
+    bare.mount("/", StaticFiles(directory=WEB), name="web")
+    assert TestClient(bare).get("/app/").status_code == 404                        # nothing exported yet
+    (tmp_path / "app" / "_next").mkdir(parents=True)
+    (tmp_path / "app" / "index.html").write_text("<div id=dash></div>")
+    (tmp_path / "app" / "_next" / "chunk.js").write_text("console.log(2)")
+    built = FastAPI()
+    assert mount_app(built, tmp_path / "app") is True
+    built.mount("/", StaticFiles(directory=WEB), name="web")                        # the same order as server.app
+    c = TestClient(built)
+    assert "dash" in c.get("/app/").text
+    assert c.get("/app", follow_redirects=False).headers["location"] == "/app/"
+    assert c.get("/app/_next/chunk.js").text == "console.log(2)"
+    assert c.get("/app/missing").status_code == 404
+    assert "Zombie Walk Home" in c.get("/index.html").text                        # the game is still at the root
+    assert app.routes[-1].name == "web"                                            # nothing is mounted behind the catch-all
