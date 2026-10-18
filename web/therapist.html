@@ -29,6 +29,9 @@
     .hint { color: var(--dim); font-size: 13px; }
     #msg { color: var(--cyan); min-height: 1.4em; }
     .wide { grid-column: 1 / -1; }
+    .live-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .stat b { display: block; font-size: 28px; line-height: 1.1; color: var(--green); } .stat small { color: var(--dim); font-size: 12px; }
+    .stat.off b { color: var(--dim); }
     .lab-grid { display: flex; flex-wrap: wrap; gap: 24px; }
     .lab-copy { flex: 1; min-width: 260px; }
     #lab-frame { width: 320px; max-width: 100%; background: #0b0d0b; border-radius: 8px; }
@@ -86,6 +89,20 @@
       <div class="row"><button class="primary" id="save">Save limits, rewards and notes</button></div>
     </section>
 
+    <section class="wide" id="live">
+      <h2>Live walk</h2>
+      <div class="live-grid">
+        <div class="stat off"><b id="lv-state">no game running</b><small id="lv-sub">the game opens a session when the walk starts</small></div>
+        <div class="stat"><b id="lv-pace">–</b><small>steps per minute · game</small></div>
+        <div class="stat"><b id="lv-steps">–</b><small>steps</small></div>
+        <div class="stat"><b id="lv-flowers">–</b><small>flowers hit / judged</small></div>
+        <div class="stat"><b id="lv-form">–</b><small>form (pace, both feet, evenness)</small></div>
+        <div class="stat"><b id="lv-knee">–</b><small>knee bend in swing, near leg · side camera</small></div>
+        <div class="stat"><b id="lv-stride">–</b><small>stride time · variation · side camera</small></div>
+        <div class="stat off"><b id="lv-cam">–</b><small>side camera (the phone)</small></div>
+      </div>
+      <p class="hint" id="lv-last"></p>
+    </section>
     <section class="wide" id="perceptron-lab">
       <h2>Perceptron lab</h2>
       <p id="lab-empty" class="hint">Turn on Perceptron consent above, save, then finish a camera walk to see a report.</p>
@@ -322,6 +339,37 @@
       await sessions(player.name);
       say(`loaded ${player.name}`);
     }
+
+    // ---------- live walk: the game's own numbers and the side camera's, refreshed every 3 s ----------
+    async function live() {
+      try {
+        const active = await api('/api/session/active');
+        const running = !!active.id;
+        $('lv-state').textContent = running ? `${active.player} is walking` : 'no game running';
+        $('lv-state').parentElement.classList.toggle('off', !running);
+        $('lv-sub').textContent = running ? `${Math.round(active.serverTime - active.startedAt)} s since the start` : 'the game opens a session when the walk starts';
+        const log = await api('/api/log?n=120');
+        const pace = [...log].reverse().find((r) => r.what === 'pace');
+        const things = log.filter((r) => r.what === 'flower' || r.what === 'seed');
+        const hits = things.filter((r) => r.result === 'hit').length;
+        $('lv-pace').textContent = pace ? pace.cadence : '–';
+        $('lv-steps').textContent = pace ? pace.steps : '–';
+        $('lv-form').textContent = pace ? `${pace.form}%` : '–';
+        $('lv-flowers').textContent = things.length ? `${hits} / ${things.length}` : '–';
+        $('lv-last').textContent = things.length ? `last: ${things.slice(-6).map((r) => `${r.what} ${r.lane} ${r.result}`).join(' · ')}` : '';
+        const name = active.player || $('players').value;
+        const p = name ? await api(`/api/player/${encodeURIComponent(name)}`) : null;
+        const g = p?.gait, s = g?.summary;
+        const age = g ? Math.round(Date.now() / 1000 - g.ts) : null;
+        const near = s ? ((s.seen_frames?.L ?? 0) >= (s.seen_frames?.R ?? 0) ? 'L' : 'R') : null;   // the leg nearer the phone
+        const knee = s?.flexion?.[near], stride = s?.stride?.[near], cvv = s?.stride_cv?.[near];
+        $('lv-knee').textContent = knee != null ? `${Math.round(180 - knee)}°` : '–';   // the camera reports the knee angle, 180 = straight
+        $('lv-stride').textContent = stride != null ? `${stride.toFixed(2)} s${cvv != null ? ` · ±${Math.round(cvv * 100)}%` : ''}` : '–';
+        $('lv-cam').textContent = !g ? 'not seen yet' : age < 40 ? `live · ${age} s ago` : `last seen ${Math.round(age / 60)} min ago`;
+        $('lv-cam').parentElement.classList.toggle('off', !g || age >= 40);
+      } catch { $('lv-state').textContent = 'live view: server not reachable'; }
+    }
+    setInterval(() => live().catch(() => {}), 3000); live().catch(() => {});
 
     $('load').onclick = () => load($('newname').value.trim() || $('players').value);
     $('players').onchange = () => load($('players').value);
