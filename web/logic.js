@@ -31,6 +31,10 @@ export const RULES = {
   defaultBaseCm: 4,              // normal step height if act 1 measured nothing
   beforeS: 0.6,                  // the lift may peak up to this long before arrival
   afterS: 0.35,                  // or this long after
+  // Shoe mode has a wider window: the foot may be on the thing from this long before it reaches the line (about
+  // 70 cm at a normal pace, the floor says NOW! from there) to this long after. A touch outside it is a miss.
+  shoeBeforeS: 1.2,
+  shoeAfterS: 0.5,
   paceHorizonS: 5,               // cadence is measured over this window
   // The world never freezes while the player walks: below the minimum pace it runs at this share of the minimum
   // and act 1 fills at this rate; only standing still stops it. The pace shows in the form score and the cues.
@@ -53,14 +57,14 @@ export const RULES = {
   points: { stomp: 10, dodge: 15 },
   // Shoe mode (feet.py boxes on the camera): a flower is smashed when a shoe covers it, a seed splats; a thing
   // that passes the toes resolves the other way. Distances are world cm on the field.
-  shoeReachCm: 20,               // margin around the shoe's span when matching a thing
-  shoeFreshS: 0.3,               // a shoe sighting older than this is gone
+  shoeReachCm: 30,               // margin around the shoe's span when matching a thing
+  shoeFreshS: 0.5,               // a shoe sighting older than this is gone (the camera gives about 8 a second, with gaps)
   shoeSwingCm: 40,               // a shoe must travel this far forward, then back, to count as one step (box jitter is under 20)
   shoeStepMinS: 0.3,             // one landing per foot at most this often
   swingCmPerLiftCm: 7.5,         // world cm of forward swing on the belt per cm of 'lift': a long or high step swings far
   toeCm: 300,                    // how far past the hit line the toes are; the game sets it from its layout
   shoeHoldS: 3,                  // shoes drive the game this long after the last sighting, then the lift rules return
-  shoeGapS: 1,                   // a lane unseen this long starts its swing tracking afresh
+  shoeGapS: 2,                   // a lane unseen this long starts its swing tracking afresh (a quarter of frames see no sock)
   stanceS: 6,                    // the toe line follows where the shoes have stood over this window
   stanceMarginCm: 30,            // a thing is gone only this far behind the standing feet
   markReachCm: 90,               // a camera-seen foot-on-mark touches the nearest thing of that kind within this (the sock's centre is not the flower's)
@@ -377,10 +381,10 @@ export function step(g, dt) {
       // smashes a flower and splats on a seed; nothing on it means the flower got away and the seed was dodged.
       if (shoeOn(g, th)) th.touchedT = g.t;
       // The report: the closest a shoe came to the thing inside its timing window (the window the UI shows).
-      const gap = th.arriveT !== null || th.distCm <= speed * RULES.beforeS ? shoeGapCm(g, th) : null;
+      const gap = th.arriveT !== null || th.distCm <= speed * RULES.shoeBeforeS ? shoeGapCm(g, th) : null;
       if (gap !== null && (th.placeCm === undefined || gap < th.placeCm)) th.placeCm = gap;
-      if (th.arriveT !== null && g.t - th.arriveT > RULES.afterS) {
-        const touched = th.touchedT !== undefined && th.touchedT >= th.arriveT - RULES.beforeS;
+      if (th.arriveT !== null && g.t - th.arriveT > RULES.shoeAfterS) {
+        const touched = th.touchedT !== undefined && th.touchedT >= th.arriveT - RULES.shoeBeforeS;
         resolve(g, th, (th.kind === 'flower') === touched ? 'hit' : 'miss', f, out);
       }
     } else if (th.arriveT !== null && g.t - th.arriveT > RULES.afterS) {

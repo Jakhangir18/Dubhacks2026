@@ -369,6 +369,24 @@ test('at the line: a shoe on the flower smashes it, no shoe means it got away', 
   assert.ok(next.distCm > -80);
 });
 
+test('shoe mode window: a foot on the flower a second before the line counts, two seconds before does not', () => {
+  const touchWhile = (lo, hi) => {   // the shoe sits on the next flower only while it is between lo and hi cm from the line
+    const g = toGarden();
+    walkUntil(g, () => g.things.length > 0);
+    const th = g.things[0];
+    const x = th.lane === 'L' ? 0.3 : 0.7;
+    const away = { xFrac: th.lane === 'L' ? 0.7 : 0.3, nearCm: 600, farCm: 580 };   // shoe mode live, touching nothing
+    walkUntil(g, () => {
+      const on = th.distCm > lo && th.distCm < hi;
+      addShoes(g, [on ? { xFrac: x, nearCm: th.distCm + 10, farCm: th.distCm - 10 } : away]);
+      return th.result !== null;
+    }, 30);
+    return th.result;
+  };
+  assert.equal(touchWhile(50, 65), 'hit');     // about 1.0 s before arrival at 100 steps a minute: inside shoeBeforeS
+  assert.equal(touchWhile(95, 115), 'miss');   // about 1.8 s before: outside the window, a real miss
+});
+
 test('at the line: a shoe on the seed splats, a clear lane is a dodge', () => {
   const g = toGarden({ stormSeeds: 2 });
   startAt(g, 'storm');

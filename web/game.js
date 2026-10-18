@@ -636,6 +636,9 @@ class Play extends Phaser.Scene {
     this.g = newGame(settings.limits);
     this.g.toeBaseCm = this.g.toeCm = -fieldDist(this.layout().toeY, this.layout());   // world cm from the hit line to the toes
     this.shoeRings = ['L', 'R'].map(() => this.add.ellipse(0, 0, 150, 80).setStrokeStyle(10, C.cyan, 0.8).setVisible(false).setDepth(11));
+    // One cue word per lane above the nearest thing: READY while it approaches, NOW! while its window is open.
+    this.cueText = {};
+    for (const lane of ['L', 'R']) this.cueText[lane] = this.add.text(0, 0, '', txt(110, C.yellow)).setOrigin(0.5).setDepth(20).setVisible(false);
     this.lastShoes = 0;
     perceiver = cameraWindowAlive() ? remotePerceiver : localPerceiver;
     perceiver.reset(settings.perceptron, settings.player, () => this.paused || this.sys.isPaused());
@@ -777,9 +780,9 @@ class Play extends Phaser.Scene {
     this.nextGardenUpdate = 0;
   }
 
-  laneFlash(lane, color, duration, L) {
+  laneFlash(lane, color, duration, L, alpha = 0.6) {
     const flash = this.add.rectangle(L.lanes[lane], (L.top + L.zoneY) / 2,
-      L.laneW - L.gap / 2, L.zoneY - L.top, color, 0.6).setDepth(1);
+      L.laneW - L.gap / 2, L.zoneY - L.top, color, alpha).setDepth(1);
     this.tweens.add({ targets: flash, alpha: 0, duration, onComplete: () => flash.destroy() });
   }
 
@@ -795,12 +798,13 @@ class Play extends Phaser.Scene {
     if (th.result === 'hit') reaction(th.kind === 'flower' ? 'stomp' : 'dodge');
     const x = L.lanes[th.lane];
     const y = this.yFor(th.distCm, L);   // where the thing is now: it resolves a little past the line
-    this.laneFlash(th.lane, th.result === 'hit' ? C.lime : C.amber, th.result === 'hit' ? 200 : 400, L);
+    // A hit lights the whole lane white: on a dim projector over a black belt it is the one thing nobody can miss.
+    if (th.result === 'hit') this.laneFlash(th.lane, C.white, 350, L, 0.9); else this.laneFlash(th.lane, C.amber, 400, L);
     if (th.kind === 'flower' && th.result === 'hit') {
-      this.fx.petals.explode(70, x, y);
+      this.fx.petals.explode(140, x, y);
       this.showFeedback('SMASH!', C.yellow);
       this.burst(x, y, C.yellow, 'SMASH!');
-      this.cameras.main.shake(120, 0.004);
+      this.cameras.main.shake(120, 0.006);
       const size = PLANT_SCALE * Math.min(1.15, L.W / FIELD.width);
       const stamp = this.add.image(x, y, this.flowerKey(th.id)).setScale(size, size * 1.25);
       this.leaveStamp(stamp, y);
@@ -836,7 +840,7 @@ class Play extends Phaser.Scene {
 
   // One big, short burst at the thing: an expanding ring, a spiky flash and the word, all readable from above.
   burst(x, y, color, word) {
-    const ring = this.add.ellipse(x, y, 150, 90).setStrokeStyle(20, color, 1).setDepth(19);
+    const ring = this.add.ellipse(x, y, 150, 90).setStrokeStyle(28, color, 1).setDepth(19);
     this.tweens.add({ targets: ring, scaleX: 4.2, scaleY: 4.2, alpha: 0, duration: 420, ease: 'Quad.out', onComplete: () => ring.destroy() });
     const star = this.add.graphics({ x, y }).setDepth(19);
     star.fillStyle(C.white, 0.95);
@@ -846,7 +850,7 @@ class Play extends Phaser.Scene {
       star.fillTriangle(0, 0, Math.cos(a) * r, Math.sin(a) * r * 0.6, Math.cos(b) * (i % 2 ? 150 : 60), Math.sin(b) * (i % 2 ? 150 : 60) * 0.6);
     }
     this.tweens.add({ targets: star, scaleX: 1.6, scaleY: 1.6, alpha: 0, angle: 25, duration: 380, onComplete: () => star.destroy() });
-    const text = this.add.text(x, y - 60, word, txt(120, color)).setOrigin(0.5).setDepth(21).setScale(0.4);
+    const text = this.add.text(x, y - 60, word, txt(170, color)).setOrigin(0.5).setDepth(21).setScale(0.4);
     this.tweens.add({ targets: text, scaleX: 1, scaleY: 1, y: y - 200, duration: 220, ease: 'Back.out',
       onComplete: () => this.tweens.add({ targets: text, alpha: 0, y: y - 260, duration: 500, delay: 250, onComplete: () => text.destroy() }) });
   }
@@ -981,8 +985,9 @@ class Play extends Phaser.Scene {
       s.setVisible(!th.result);
       const pad = s.list[1];
       // Once open, the window stays open: a pace dip must not flip the cue back or flash the lane again.
-      const windowOpen = s.windowOpen || th.arriveT !== null || th.distCm <= out.speed * RULES.beforeS;
-      pad.setVisible(near > 0.72 && !th.result);
+      const windowOpen = s.windowOpen || th.arriveT !== null || th.distCm <= out.speed * (shoesLive(g) ? RULES.shoeBeforeS : RULES.beforeS);
+      pad.setVisible(near > 0.6 && !th.result);   // READY from here, NOW! once the window opens (the words are in drawHud)
+      if (windowOpen && !s.windowOpen && !th.result) this.laneFlash(th.lane, C.white, 300, L);
       s.list[0].setVisible(!!camH && !th.result && th.distCm < RULES.markShowCm);   // the camera mark, from just before the line
       pad.setStrokeStyle(12, windowOpen ? C.white : C.lime, windowOpen ? 1 : 0.6);
       pad.setScale(windowOpen ? 1 : 1 + 0.06 * Math.sin(g.t * Math.PI * 6));
@@ -995,7 +1000,6 @@ class Play extends Phaser.Scene {
           arc.lineStyle(16, th.kind === 'seed' ? C.pink : C.white);
           arc.beginPath(); arc.arc(0, 0, 170, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left); arc.strokePath();
         }
-        if (!s.windowOpen) this.laneFlash(th.lane, C.white, 160, L);
       }
       s.windowOpen = windowOpen;
       plant.setVisible(!(th.kind === 'flower' && th.result === 'hit'));
@@ -1030,6 +1034,13 @@ class Play extends Phaser.Scene {
     const next = {};
     for (const th of g.things) if (!th.result && (!next[th.lane] || th.distCm < next[th.lane].distCm)) next[th.lane] = th;
     for (const lane of ['L', 'R']) {
+      const nxt = next[lane], s = nxt && this.sprites.get(nxt.id), cue = this.cueText[lane];
+      const show = !!s && nxt.distCm < RULES.aheadCm * 0.4;   // the same reach as the pad under the thing
+      cue.setVisible(show);
+      if (show) {
+        cue.setText(s.windowOpen ? 'NOW!' : 'READY').setColor(s.windowOpen ? '#ffffff' : '#ffe44d')
+          .setPosition(L.lanes[lane], this.yFor(nxt.distCm, L) - 170).setScale(s.windowOpen ? 1 + 0.08 * Math.sin(g.t * Math.PI * 8) : 1);
+      }
       this.footFlash[lane] = Math.max(0, this.footFlash[lane] - dt * 3);
       this.meterFlash[lane] = Math.max(0, this.meterFlash[lane] - dt);
       const th = next[lane];
