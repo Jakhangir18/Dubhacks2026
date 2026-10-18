@@ -31,6 +31,12 @@ export const RULES = {
   paceHorizonS: 5,               // cadence is measured over this window
   stopAfterS: 1.5,               // no step for this long means the player stopped
   points: { stomp: 10, dodge: 15 },
+  // Shoe mode (feet.py boxes on the camera): a flower is smashed when a shoe covers it, a seed splats; a thing
+  // that passes the toes resolves the other way. Distances are world cm on the field.
+  shoeReachCm: 20,               // margin around the shoe's span when matching a thing
+  shoeFreshS: 0.3,               // a shoe sighting older than this is gone
+  shoeSwingCm: 20,               // a shoe must travel this far forward, then back, to count as one step
+  toeCm: 300,                    // how far past the hit line the toes are; the game sets it from its layout
 };
 
 export function rng(seed = 1) {
@@ -59,6 +65,10 @@ export function newGame(limits = {}, seed = 1) {
     stats: { stomp: [0, 0], dodge: [0, 0], lifts: { L: [], R: [] }, steps: 0 },
     walkLifts: { L: [], R: [] },   // act 1 lifts: the player's normal step height
     base: null,                    // {L, R} normal step height, set when act 1 ends
+    shoeMode: false,               // shoes seen: things resolve by overlap, not by lift height
+    shoes: [],                     // latest sightings {lane, nearCm, farCm, t}
+    shoeTrack: { L: { phase: 'back', max: -Infinity, min: Infinity }, R: { phase: 'back', max: -Infinity, min: Infinity } },
+    toeCm: RULES.toeCm,
     log: [],                     // resolved things for the report and the UI
     actResolved: 0,              // things resolved in the current act (progress bar)
   };
@@ -83,6 +93,41 @@ export function addEvent(g, ev) {
     if (g.act === 'walk') g.walkLifts[e.foot].push(e.liftCm);
   }
   return e;
+}
+
+// ---------- shoes ----------
+// Sightings from the camera, already mapped onto the field: {xFrac: 0..1 across the field, nearCm, farCm} per shoe,
+// nearCm and farCm being the span of the shoe measured from the hit line (negative on the belt). Two shoes take the
+// lanes by order (left-most is the left foot); one shoe takes the side it is on. Each lane's forward-then-back
+// swing on the belt counts as a step, so the pace gate and the cadence work as with any other sensor.
+export function addShoes(g, shoes, t = g.t) {
+  const seen = shoes.filter((s) => [s.xFrac, s.nearCm, s.farCm].every(Number.isFinite)).slice(0, 2)
+    .sort((a, b) => a.xFrac - b.xFrac);
+  g.shoeMode = true;
+  g.shoes = seen.map((s, i) => ({
+    lane: seen.length === 2 ? (i === 0 ? 'L' : 'R') : (s.xFrac < 0.5 ? 'L' : 'R'),
+    nearCm: Math.max(s.nearCm, s.farCm), farCm: Math.min(s.nearCm, s.farCm), t,
+  }));
+  for (const s of g.shoes) {
+    const tr = g.shoeTrack[s.lane];
+    const d = s.nearCm;
+    if (tr.phase === 'back') {
+      tr.min = Math.min(tr.min, d);
+      if (d > tr.min + RULES.shoeSwingCm) { tr.phase = 'forward'; tr.max = d; }
+    } else {
+      tr.max = Math.max(tr.max, d);
+      if (d < tr.max - RULES.shoeSwingCm) {   // the foot stopped going forward: it landed and the belt takes it back
+        tr.phase = 'back'; tr.min = d;
+        addEvent(g, { foot: s.lane, kind: 'strike', t });
+      }
+    }
+  }
+  return g.shoes;
+}
+
+function shoeOn(g, th) {
+  return g.shoes.some((s) => s.lane === th.lane && g.t - s.t <= RULES.shoeFreshS &&
+    th.distCm <= s.nearCm + RULES.shoeReachCm && th.distCm >= s.farCm - RULES.shoeReachCm);
 }
 
 // ---------- pace and form ----------
@@ -188,27 +233,35 @@ export function step(g, dt) {
     if (th.result) continue;
     th.distCm -= moved;
     if (th.arriveT === null && th.distCm <= 0) th.arriveT = g.t;
-    if (th.arriveT !== null && g.t - th.arriveT > RULES.afterS) {
-      const hit = judge(g, th);
-      th.result = hit ? 'hit' : 'miss';
-      const key = th.kind === 'flower' ? 'stomp' : 'dodge';
-      g.stats[key][1] += 1;
-      if (hit) {
-        g.stats[key][0] += 1;
-        g.streak += 1;
-        g.score += Math.round(RULES.points[key] * (0.5 + 0.5 * f) * (g.streak >= 5 ? 2 : 1));
-      } else {
-        g.streak = 0;
-      }
-      g.log.push({ id: th.id, kind: th.kind, lane: th.lane, result: th.result, t: g.t });
-      g.actResolved += 1;
-      out.resolved.push(th);
+    if (g.shoeMode) {
+      // A shoe on a flower smashes it; a shoe on a seed is a splat. Past the toes: the flower got away, the seed was dodged.
+      if (shoeOn(g, th)) resolve(g, th, th.kind === 'flower' ? 'hit' : 'miss', f, out);
+      else if (th.distCm < -g.toeCm) resolve(g, th, th.kind === 'flower' ? 'miss' : 'hit', f, out);
+    } else if (th.arriveT !== null && g.t - th.arriveT > RULES.afterS) {
+      resolve(g, th, judge(g, th) ? 'hit' : 'miss', f, out);
     }
   }
-  g.things = g.things.filter((th) => !th.result || g.t - th.arriveT < 1.5);
+  g.things = g.things.filter((th) => !th.result || g.t - th.resolvedT < 1.5);
   const done = g.spawned >= quota(g) && g.things.every((th) => th.result);
   if (done) nextAct(g, out);
   return out;
+}
+
+function resolve(g, th, result, f, out) {
+  th.result = result;
+  th.resolvedT = g.t;
+  const key = th.kind === 'flower' ? 'stomp' : 'dodge';
+  g.stats[key][1] += 1;
+  if (result === 'hit') {
+    g.stats[key][0] += 1;
+    g.streak += 1;
+    g.score += Math.round(RULES.points[key] * (0.5 + 0.5 * f) * (g.streak >= 5 ? 2 : 1));
+  } else {
+    g.streak = 0;
+  }
+  g.log.push({ id: th.id, kind: th.kind, lane: th.lane, result, t: g.t });
+  g.actResolved += 1;
+  out.resolved.push(th);
 }
 
 function nextAct(g, out) {

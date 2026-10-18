@@ -6,6 +6,9 @@ import { onFoot } from './bus.js';
 import { Perceiver } from './perceive.js';
 import { send, listen } from './link.js';
 
+const CAM_KEY = 'zombiewalk.camToField';
+const CORNERS = ['FRONT-LEFT', 'FRONT-RIGHT', 'BACK-RIGHT', 'BACK-LEFT'];
+
 const store = window.Warp.store;
 const $ = (id) => document.getElementById(id);
 const video = $('video');
@@ -37,10 +40,32 @@ const tracker = new FootTracker({
   },
 });
 
+// Shoe boxes from feet.py (forwarded by the game window) and the calibration corners, drawn over the picture.
+let shoes = { boxes: [], at: 0 };
+let calib = { points: [], active: false };
+function drawShoes(w, h) {
+  if (performance.now() - shoes.at < 500) {
+    octx.lineWidth = 5; octx.strokeStyle = '#9cff5a'; octx.fillStyle = '#9cff5a';
+    for (const [x1, y1, x2, y2] of shoes.boxes) {
+      octx.strokeRect(x1 * w, y1 * h, (x2 - x1) * w, (y2 - y1) * h);
+      octx.beginPath(); octx.arc((x1 + x2) / 2 * w, y2 * h, 8, 0, Math.PI * 2); octx.fill();   // the toe tip the game uses
+    }
+  }
+  const saved = store.get(CAM_KEY + '.points', null);
+  const pts = calib.active ? calib.points : (Array.isArray(saved) ? saved : []);
+  octx.strokeStyle = '#ff2d95'; octx.fillStyle = '#ff2d95'; octx.lineWidth = 4;
+  pts.forEach(([x, y], i) => {
+    octx.beginPath(); octx.arc(x * w, y * h, 10, 0, Math.PI * 2); octx.fill();
+    octx.font = 'bold 26px system-ui'; octx.fillText(CORNERS[i], x * w + 14, y * h - 10);
+  });
+  if (pts.length === 4) { octx.beginPath(); pts.forEach(([x, y], i) => (i ? octx.lineTo(x * w, y * h) : octx.moveTo(x * w, y * h))); octx.closePath(); octx.stroke(); }
+}
+
 function drawSkeleton(lm, state) {
   const w = video.videoWidth || 1280, h = video.videoHeight || 720;
   if (overlay.width !== w || overlay.height !== h) { overlay.width = w; overlay.height = h; }
   octx.clearRect(0, 0, w, h);
+  drawShoes(w, h);
   if (!lm) return;
   octx.lineWidth = 6; octx.lineCap = 'round';
   octx.strokeStyle = '#ffffff88';
@@ -158,6 +183,7 @@ listen((m) => {
   else if (m.type === 'perceiver-step') perceiver.checkStep(m.th);
   else if (m.type === 'perceiver-report-request') perceiver.sessionReport().then((report) => send('perceiver-report', { id: m.id, report }));
   else if (m.type === 'foot-seen' && m.ev) logEvent(m.ev);
+  else if (m.type === 'shoes-seen' && Array.isArray(m.boxes)) { shoes = { boxes: m.boxes, at: performance.now() }; }
   else if (m.type === 'mirror') { $('mirror').src = m.url; gameSeen = performance.now(); }
   else if (m.type === 'game') {
     gameSeen = performance.now();
@@ -181,3 +207,34 @@ setInterval(() => {
   $('st-game').textContent = live ? 'game window linked' : 'game window not open';
   $('st-game').classList.toggle('on', live);
 }, 1000);
+
+// Pose steps off when feet.py shoes drive the game (the game ignores them anyway once shoes arrive).
+$('pose').onchange = () => { tracker.emit = $('pose').checked; };
+
+// Shoe calibration: click the four projected zone corners in the camera picture, in the zone's own order.
+// The homography maps normalised camera coordinates onto the 720 x 1280 game field; the game reads it from storage.
+const FIELD = [[0, 0], [720, 0], [720, 1280], [0, 1280]];
+const help = $('calib-help');
+$('calib').onclick = () => {
+  calib = { points: [], active: true };
+  help.hidden = false;
+  help.textContent = `Click the ${CORNERS[0]} corner of the projected zone in the picture (Esc cancels).`;
+};
+overlay.parentElement.addEventListener('click', (e) => {
+  if (!calib.active) return;
+  const r = overlay.getBoundingClientRect();
+  calib.points.push([(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]);
+  if (calib.points.length < 4) { help.textContent = `Now click ${CORNERS[calib.points.length]}.`; return; }
+  const h = window.Warp.homography(calib.points.map(([x, y]) => [x, y]), FIELD);
+  if (!h.every(Number.isFinite)) { help.textContent = 'Those four points do not make a quad; try again.'; calib.active = false; return; }
+  store.set(CAM_KEY, h);
+  store.set(CAM_KEY + '.points', calib.points);
+  calib.active = false;
+  help.textContent = 'Saved. Walk: the game draws a ring under each shoe; if the rings are off, calibrate again.';
+});
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && calib.active) { calib.active = false; help.hidden = true; } });
+setInterval(() => {
+  const live = performance.now() - shoes.at < 1500;
+  $('st-shoes').textContent = live ? `shoes ${shoes.boxes.length}` : (store.get(CAM_KEY, null) ? 'shoes: calibrated, none seen' : 'shoes: not calibrated');
+  $('st-shoes').classList.toggle('on', live);
+}, 500);

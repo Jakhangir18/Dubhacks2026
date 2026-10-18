@@ -67,3 +67,18 @@ def test_load_env_drops_inline_comments(tmp_path, monkeypatch):
     assert "C_KEY" not in os.environ
     assert os.environ["D_KEY"] == ""
     assert os.environ["E_KEY"] == "#abc"
+
+
+def test_shoe_sightings_are_relayed_and_cleaned():
+    with client.websocket_connect("/ws/game") as game:
+        r = client.post("/api/events", json={"events": [{"kind": "shoes", "source": "feet", "boxes": [
+            [0.1, 0.5, 0.3, 0.9, 0.8], [1.2, -0.1, 0.9, 0.4, 0.5], [0.5, 0.5, 0.4, 0.9, 0.9], "x",
+            [0, 0, 0.1, 0.1, 0.1], [0, 0, 0.2, 0.2, 0.2], [0, 0, 0.3, 0.3, 0.3], [0, 0, 0.4, 0.4, 0.4],
+        ]}]})
+        assert r.json() == {"accepted": 1, "listeners": 1}
+        got = game.receive_json()[0]
+        assert got["kind"] == "shoes" and got["source"] == "feet"
+        # inverted and junk boxes are dropped, the rest kept in order, at most four
+        assert got["boxes"] == [[0.1, 0.5, 0.3, 0.9, 0.8], [0, 0, 0.1, 0.1, 0.1], [0, 0, 0.2, 0.2, 0.2], [0, 0, 0.3, 0.3, 0.3]]
+    assert clean_event({"kind": "shoes", "boxes": "none"}) is None
+    assert clean_event({"kind": "shoes", "boxes": [[True, 0, 1, 1, 1], [0, 0, 1, 1, float("nan")]]})["boxes"] == []

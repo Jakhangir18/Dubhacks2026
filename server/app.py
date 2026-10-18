@@ -72,10 +72,38 @@ async def cap_perceive_body(request: Request, call_next):
 # ---------------------------------------------------------------- event relay (Raspberry Pi -> game)
 game_clients: set[WebSocket] = set()
 VALID_KINDS = {"strike", "lift"}
+MAX_SHOES = 4   # boxes per "shoes" sighting from feet.py
+
+
+def clean_shoes(ev: dict[str, Any]) -> dict[str, Any] | None:
+    """feet.py sighting: up to MAX_SHOES boxes [x1, y1, x2, y2, conf], coordinates as fractions of the frame."""
+    boxes = ev.get("boxes")
+    if not isinstance(boxes, list):
+        return None
+    out = []
+    for box in boxes[: MAX_SHOES * 4]:   # look a little further than the cap so bad boxes do not eat it
+        if len(out) == MAX_SHOES:
+            break
+        if not isinstance(box, list) or len(box) != 5 or any(isinstance(v, bool) for v in box):
+            continue
+        try:
+            nums = [float(v) for v in box]
+        except (TypeError, ValueError):
+            continue
+        if not all(math.isfinite(v) for v in nums):
+            continue
+        x1, y1, x2, y2, conf = (max(0.0, min(1.0, v)) for v in nums)
+        if x2 > x1 and y2 > y1:
+            out.append([x1, y1, x2, y2, conf])
+    return {"kind": "shoes", "boxes": out, "source": str(ev.get("source", "feet"))[:20]}
 
 
 def clean_event(ev: Any) -> dict[str, Any] | None:
-    if not isinstance(ev, dict) or ev.get("foot") not in {"L", "R"} or ev.get("kind") not in VALID_KINDS:
+    if not isinstance(ev, dict):
+        return None
+    if ev.get("kind") == "shoes":
+        return clean_shoes(ev)
+    if ev.get("foot") not in {"L", "R"} or ev.get("kind") not in VALID_KINDS:
         return None
     out: dict[str, Any] = {"foot": ev["foot"], "kind": ev["kind"], "source": str(ev.get("source", "pi"))[:20]}
     if ev["kind"] == "lift":

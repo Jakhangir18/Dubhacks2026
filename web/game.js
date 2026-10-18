@@ -1,9 +1,9 @@
 // Zombie Walk Home: Phaser scenes, art, HUD and input. Rules live in logic.js.
 // Floor projection: things arrive at the pad's front edge; ghost feet mark the toes below.
-import { newGame, step, addEvent, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
+import { newGame, step, addEvent, addShoes, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
-import { connectBridge } from './bridge.js';
+import { connectBridge, SHOES_EVENT } from './bridge.js';
 import { ACTS, ENDING } from './lore.js';
 import { GardenSound } from './sound.js';
 import { WalkClip, uploadClip } from './clip.js';
@@ -127,6 +127,12 @@ if (params.has('scene')) window.zombiewalk = { perceiver: localPerceiver, tracke
 // Foot events from the camera window on the laptop screen; the game stamps them on arrival like any source.
 // While the camera window runs, this window's own camera (V) would count every step twice: ignore it.
 const doubleCamera = (ev) => ev.source === 'camera' && cameraWindowAlive();
+// Pose-based steps are noise once feet.py shoes drive the game.
+const POSE_SOURCES = new Set(['camera', 'camera-window']);
+
+// Camera -> field: the homography saved by the camera window's shoe calibration (normalised camera coords to field px).
+const CAM_KEY = 'zombiewalk.camToField';
+const camToField = () => { const h = Warp.store.get(CAM_KEY, null); return Array.isArray(h) && h.length === 8 && h.every(Number.isFinite) ? h : null; };
 
 // When the camera window appears, give it the current banner at once instead of at the next update.
 let cameraWasAlive = false;
@@ -530,6 +536,36 @@ class Play extends Phaser.Scene {
     this.paused = false;
     this.highSound = { L: false, R: false };
     this.g = newGame(settings.limits, Date.now() % 100000);
+    { const L = this.layout(); this.g.toeCm = (L.toeY - L.zoneY) * RULES.aheadCm / (L.zoneY - L.top); }   // world cm from the hit line to the toes
+    this.shoeRings = ['L', 'R'].map(() => this.add.ellipse(0, 0, 150, 80).setStrokeStyle(10, C.cyan, 0.8).setVisible(false).setDepth(11));
+    this.lastShoes = 0;
+    const onShoes = (e) => {
+      if (this.paused || zone.active) return;
+      const h = camToField();
+      if (!h) return;   // no calibration yet: the camera window's Calibrate shoes button
+      const L = this.layout();
+      const distOf = (y) => (L.zoneY - y) * RULES.aheadCm / (L.zoneY - L.top);   // inverse of yFor
+      const shoes = [];
+      for (const [x1, y1, x2, y2] of e.detail.boxes.slice(0, 2)) {
+        const cx = (x1 + x2) / 2;
+        const [fx, fy] = Warp.mapPoint(h, cx, y2);                 // the toe tip, on the floor
+        const [, fyHeel] = Warp.mapPoint(h, cx, y1 + 0.6 * (y2 - y1));   // about the heel; the box top is the ankle, above the floor
+        if (![fx, fy, fyHeel].every(Number.isFinite)) continue;
+        shoes.push({ xFrac: fx / L.W, nearCm: distOf(fy), farCm: distOf(fyHeel) });
+      }
+      const before = this.g.stats.steps;
+      addShoes(this.g, shoes, this.g.t + (performance.now() - this.frameWall) / 1000);
+      this.lastShoes = performance.now();
+      if (this.g.stats.steps > before) {   // a shoe swing landed: the same feedback as a sensor strike
+        const s = this.g.strikes[this.g.strikes.length - 1];
+        this.footFlash[s.foot] = 1;
+        sound.play('step');
+        if (cameraWindowAlive()) send('foot-seen', { ev: { foot: s.foot, kind: 'strike', source: 'feet' } });
+      }
+      if (cameraWindowAlive()) send('shoes-seen', { boxes: e.detail.boxes });
+    };
+    window.addEventListener(SHOES_EVENT, onShoes);
+    this.events.once('shutdown', () => window.removeEventListener(SHOES_EVENT, onShoes));
     perceiver = cameraWindowAlive() ? remotePerceiver : localPerceiver;
     perceiver.reset(settings.perceptron, settings.player, () => this.paused || this.sys.isPaused());
     this.events.once('shutdown', () => perceiver.stop());   // no frames leave on the Home or Title screens
@@ -562,6 +598,7 @@ class Play extends Phaser.Scene {
 
     this.off = onFoot((ev) => {
       if (doubleCamera(ev)) return;
+      if (this.g.shoeMode && POSE_SOURCES.has(ev.source)) return;
       if (this.paused || zone.active) return;                          // the world is frozen; steps do not count
       // Stamp with the game clock, interpolated to the moment the event arrived between two frames,
       // so a slow frame rate does not bunch steps together.
@@ -813,6 +850,13 @@ class Play extends Phaser.Scene {
   }
 
   drawHud(L, out, dt) {
+    // Rings under the detected shoes: the live check that the shoe calibration matches the floor.
+    const fresh = this.g.shoeMode && performance.now() - this.lastShoes < 400;
+    this.shoeRings.forEach((ring, i) => {
+      const s = this.g.shoes[i];
+      ring.setVisible(fresh && !!s);
+      if (s) ring.setPosition(L.lanes[s.lane], this.yFor((s.nearCm + s.farCm) / 2, L));
+    });
     const g = this.g;
     const h = this.hud;
     h.clear();
@@ -841,7 +885,7 @@ class Play extends Phaser.Scene {
       const act = ACTS[g.act];
       publishGarden({ cadence: out.pace.cadence, act: g.act, paceOk: out.pace.ok || g.t <= 3,
         paused: this.paused, title: act?.title || '', score: `${g.score} pts${g.streak >= 5 ? '  x2' : ''}`,
-        progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · speed x${speedScale(g).toFixed(1)} · form ${Math.round(out.form * 100)}%${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
+        progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · speed x${speedScale(g).toFixed(1)}${g.shoeMode ? ' · shoes' : ''} · form ${Math.round(out.form * 100)}%${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
         coachColor: g.t < this.feedbackUntil ? this.feedbackColor : '',
         coach: g.t < this.feedbackUntil ? this.feedback : g.t < this.actIntroUntil ? act.intro.join(' ') : this.coachLine });
     }

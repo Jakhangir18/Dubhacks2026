@@ -45,16 +45,20 @@
     <span id="st-cam" class="chip">camera off</span>
     <span id="st-game" class="chip">game window</span>
     <span id="st-pp" class="chip">Perceptron</span>
+    <span id="st-shoes" class="chip">shoes</span>
     <div class="controls">
       <select id="dev"><option value="">press Start to list cameras</option></select>
       <label>Height <input id="height" type="number" min="90" max="210"> cm</label>
       <button id="start">Start</button><button id="stop">Stop</button>
+      <label title="Steps from the pose model; switch off when feet.py shoes drive the game"><input type="checkbox" id="pose" checked> pose steps</label>
+      <button id="calib">Calibrate shoes</button>
     </div>
   </header>
   <main>
     <section>
       <h2>What the camera sees</h2>
       <div class="video"><video id="video" playsinline muted></video><canvas id="overlay"></canvas></div>
+      <p id="calib-help" class="hint" hidden></p>
       <div class="lifts">
         <div class="lift L"><span id="liftL">–</span> cm<small>left foot lift (yellow)</small></div>
         <div class="lift R"><span id="liftR">–</span> cm<small>right foot lift (cyan)</small></div>

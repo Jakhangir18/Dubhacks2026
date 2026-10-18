@@ -114,3 +114,7 @@ Please send back: a photo of the projected grid on the mat with the hall lights 
 - Keep the camera window visible: Chrome stops the camera in a hidden or fully covered window.
 - The camera window owns the camera: pick the camera, set the player's height, press Start. It shows the camera picture with the leg skeleton, live lift values and a graph, every step and plant, a copy of the projected game, and every Perceptron verdict. Leave the game's own camera (V) off.
 - Both windows must be in the same browser on the same laptop; they talk over a BroadcastChannel.
+
+## Shoe mode (feet.py on the stand camera)
+
+Run `python feet.py --server https://<server> --camera-name <stand camera>` on the Mac, then in `/camera.html` press **Calibrate shoes** and click the four projected zone corners in the picture (FRONT-LEFT, FRONT-RIGHT, BACK-RIGHT, BACK-LEFT) and untick **pose steps**. A shoe on a flower smashes it, a shoe on a seed splats, a thing that passes the toes resolves the other way; steps come from the shoes' swing on the belt. Cyan rings under the shoes on the field show the calibration is right. Details: `docs/DETECTION_HANDOFF.md`.
