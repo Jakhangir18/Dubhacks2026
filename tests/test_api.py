@@ -13,7 +13,7 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch, tmp_path):
-    for key in ("GEMINI_API_KEY", "BACKBOARD_API_KEY", "MONGODB_URI"):
+    for key in ("GEMINI_API_KEY", "BACKBOARD_API_KEY", "MONGODB_URI", "PERCEPTRON_API_KEY"):
         monkeypatch.delenv(key, raising=False)
     fresh = Store()
     fresh.file = tmp_path / "store.json"
@@ -29,7 +29,7 @@ def summary(**over):
 
 
 def test_status_reports_fallbacks():
-    assert client.get("/api/status").json() == {"gemini": False, "backboard": False, "storage": "file", "visa": "mock"}
+    assert client.get("/api/status").json() == {"gemini": False, "backboard": False, "storage": "file", "visa": "mock", "perceptron": False}
 
 
 def test_limits_are_cleaned_and_kept_inside_their_ranges():

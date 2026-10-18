@@ -5,27 +5,34 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Zombie Walk Home</title>
   <link rel="icon" href="data:,">
-  <style>
-    html, body { margin: 0; height: 100%; background: #245b67; overflow: hidden; font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
-    #stage { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; }
-    #handles { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
-    .warp-handle { position: absolute; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%;
-      background: #ff2d95; border: 3px solid #fff; color: #fff; font: 700 12px system-ui; display: grid;
-      place-items: center; cursor: grab; pointer-events: auto; touch-action: none; }
-    #keys { position: fixed; left: 12px; right: 12px; bottom: 10px; z-index: 20; color: #9aa; font-size: 13px;
-      background: rgba(0,0,0,.6); padding: 6px 10px; border-radius: 8px; }
-    #keys b { color: #7CFF4F; }
-  </style>
+  <link rel="stylesheet" href="projection.css">
   <!-- Phaser 3.80.1 (MIT) and all game art are served locally for the projector. -->
   <script src="vendor/phaser.min.js"></script>
   <script src="warp.js"></script>
 </head>
 <body>
+  <canvas id="ambient" aria-hidden="true"></canvas>
   <div id="stage"></div>
+  <section id="garden-hud" aria-label="Walking progress">
+    <div class="hud-heading"><strong id="act-title"></strong><strong id="score"></strong></div>
+    <label class="home-progress">HOME <progress id="home-progress" max="1" value="0"></progress></label>
+    <div id="pace"></div>
+    <div id="coach"></div>
+    <strong id="walk-prompt" hidden>KEEP WALKING</strong>
+  </section>
+  <section id="zone-setup" hidden aria-label="Mark your walking zone">
+    <div id="setup-copy">
+      <h1>Mark your walking zone</h1>
+      <p>Front = the end of the pad closest to the projector and camera; plants come from the front.</p>
+      <p>Drag the front corners first, then the back corners. Leave space in front for the large game text.</p>
+      <div class="setup-actions"><button id="rotate-zone" type="button">Rotate 90°</button><button id="save-zone" type="button">Done · Enter</button></div>
+      <p id="zone-help" role="status"></p>
+    </div>
+  </section>
   <div id="handles"></div>
-  <div id="keys">
-    <b>A/D</b> step · <b>Q/E</b> high step · <b>W</b> auto-walk · <b>Space</b> pause · <b>C</b> corners ·
-    <b>F</b> fullscreen · <b>M</b> voice on/off · <b>N</b> sound/music · <b>V</b> camera · <b>K</b> hide keys · <span id="bridge">bridge offline</span>
+  <div id="keys" hidden>
+    <b>A/D</b> step · <b>Q/E</b> high step · <b>W</b> auto-walk · <b>Space</b> pause · <b>Z/C</b> zone ·
+    <b>F</b> fullscreen · <b>M</b> voice on/off · <b>N</b> sound/music · <b>V</b> camera · <b>K</b> keys · <span id="bridge">bridge offline</span>
   </div>
   <script type="module" src="game.js"></script>
 </body>

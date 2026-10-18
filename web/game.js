@@ -7,6 +7,9 @@ import { connectBridge } from './bridge.js';
 import { ACTS, ENDING } from './lore.js';
 import { GardenSound } from './sound.js';
 import { WalkClip, uploadClip } from './clip.js';
+import { WalkingZone } from './zone.js';
+import { AmbientGarden } from './ambient.js';
+import { Perceiver } from './perceive.js';
 
 const Phaser = window.Phaser;
 const Warp = window.Warp;
@@ -18,7 +21,7 @@ const C = { green: 0x7cff4f, yellow: 0xffe44d, magenta: 0xff2d95, cyan: 0x2de2ff
 const hex = (c) => `#${c.toString(16).padStart(6, '0')}`;
 const TEXT = { fontFamily: 'Trebuchet MS, system-ui, sans-serif', fontStyle: 'bold', color: '#ffffff',
   stroke: '#19352f', strokeThickness: 8 };
-const txt = (size, color = C.white) => ({ ...TEXT, fontSize: `${size}px`, color: hex(color) });
+const txt = (size, color = C.white) => ({ ...TEXT, fontSize: `${Math.max(24, size)}px`, color: hex(color) });
 
 // ---------- shared state ----------
 // URL options for development and screenshots: ?scene=play&act=garden&auto=1
@@ -28,6 +31,7 @@ const settings = {
   limits: {},                                       // the current player's limits from the server (therapist panel)
   player: Warp.store.get('zombiewalk.player', 'Player'),
   greeting: null,
+  perceptron: false,                                // consent on and a key on the server
 };
 
 // ---------- server calls; every one has an offline fallback ----------
@@ -42,11 +46,14 @@ const DEMO = { walkSeconds: 8, gardenPlants: 4, stormSeeds: 4 };
 // Called before every game, so limits saved in the therapist panel apply to the next walk without a reload.
 async function loadPlayer() {
   const name = encodeURIComponent(settings.player);
-  const [player, plan] = await Promise.allSettled([
+  const [player, plan, status] = await Promise.allSettled([
     withTimeout(api(`/api/player/${name}`), 3000),
     withTimeout(api(`/api/plan/${name}`), 8000),
+    withTimeout(api('/api/status'), 3000),
   ]);
   settings.limits = player.status === 'fulfilled' ? { ...player.value.limits } : {};
+  settings.perceptron = player.status === 'fulfilled' && player.value.perceptronConsent === true &&
+    status.status === 'fulfilled' && status.value.perceptron === true;
   if (params.get('demo') === '1') Object.assign(settings.limits, DEMO);
   settings.greeting = plan.status === 'fulfilled' ? plan.value.say : null;
 }
@@ -96,20 +103,42 @@ function toggleAutoWalk() {
 
 // ---------- camera and Raspberry Pi inputs ----------
 const cameraPanel = mountCameraPanel();          // V: phone or webcam, live lift values
+const perceiver = new Perceiver(cameraPanel.tracker);   // Perceptron second opinion on the same camera
+if (params.has('scene')) window.zombiewalk = { perceiver, tracker: cameraPanel.tracker };   // development and end-to-end tests
 connectBridge((status) => { document.getElementById('bridge').textContent = status; });   // Pi events via the server
 
 // ---------- projector corner warp ----------
-const stage = document.getElementById('stage');
-const handleLayer = document.getElementById('handles');
-let corners = Warp.store.get(Warp.CORNERS_KEY, null);
-let editingCorners = false;
-function applyWarp() { Warp.apply(stage, corners); }
-function toggleCorners() {
-  editingCorners = !editingCorners;
-  if (!editingCorners) { handleLayer.innerHTML = ''; return; }
-  corners = corners || Warp.defaultCorners(innerWidth, innerHeight);
-  Warp.handles(handleLayer, corners, (c) => { corners = c; Warp.store.set(Warp.CORNERS_KEY, c); applyWarp(); });
-  applyWarp();
+const zone = new WalkingZone();
+new AmbientGarden(zone);
+// Reuse the event and payload. The ambient canvas never allocates objects in its frame loop.
+const gardenState = { cadence: 0, act: 'title', paceOk: true, paused: false,
+  title: '', score: '', coach: '', pace: '', progress: 0 };
+const gardenEvent = new CustomEvent('zombiewalk:pace', { detail: gardenState });
+function publishGarden(values) { Object.assign(gardenState, values); window.dispatchEvent(gardenEvent); }
+function reaction(value) { window.dispatchEvent(new CustomEvent('zombiewalk:reaction', { detail: value })); }
+function openZone() {
+  const game = window.zombieGame;
+  if (!game || zone.active || !game.scene.isActive('title') && !game.scene.isActive('play') && !game.scene.isActive('home')) return;
+  const scenes = game.scene.getScenes(true);
+  const play = scenes.find(scene => scene.sys.settings.key === 'play');
+  const home = scenes.find(scene => scene.sys.settings.key === 'home');
+  const homeResult = home?.homeData.result;
+  const homeShare = home?.homeData.share;
+  for (const scene of scenes) { scene.scene.pause(); scene.scene.setVisible(false); }
+  sound.setMusic(false); clip.setPaused(true);
+  game.scene.start('zone');
+  zone.open(() => {
+    game.scene.stop('zone');
+    for (const scene of scenes) { scene.scene.resume(); scene.scene.setVisible(true); }
+    if (play) play.frameWall = performance.now();
+    // A session response or clip upload may have completed while Home was paused.
+    if (home) {
+      if (home.homeData.result && home.homeData.result !== homeResult) home.showResult(home.homeData.result);
+      if (home.homeData.share && home.homeData.share !== homeShare) home.showShare(home.homeData.share);
+      else if (!home.homeData.share && home.homeData.shareStatus) { home.shareText.setText(home.homeData.shareStatus); home.layoutCard(); }
+    }
+    sound.setMusic(!!play && !play.paused); clip.setPaused(!!play?.paused);
+  });
 }
 
 window.addEventListener('keydown', (e) => {
@@ -119,7 +148,7 @@ window.addEventListener('keydown', (e) => {
   const map = {
     a: () => keyStep('L', 4), d: () => keyStep('R', 4),
     q: () => keyStep('L', 16), e: () => keyStep('R', 16),
-    w: toggleAutoWalk, c: toggleCorners,
+    w: toggleAutoWalk, c: openZone, z: openZone,
     f: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()),
     m: () => {
       settings.voice = !settings.voice; Warp.store.set('zombiewalk.voice', settings.voice);
@@ -129,6 +158,7 @@ window.addEventListener('keydown', (e) => {
     k: () => { const el = document.getElementById('keys'); el.hidden = !el.hidden; },
     v: () => cameraPanel.toggle(),
   };
+  if (zone.active && ['a', 'd', 'q', 'e', 'w', 'c', 'z'].includes(k)) return;
   if (map[k]) { map[k](); e.preventDefault(); }
 });
 
@@ -224,12 +254,41 @@ function gardenBackdrop(scene, W, H) {
 class Boot extends Phaser.Scene {
   constructor() { super('boot'); }
   create() {
-    applyWarp();
-    if (params.get('auto') === '1') toggleAutoWalk();
+    zone.apply();
+    if (!zone.saved) {
+      this.scene.start('zone');
+      zone.open(() => { window.zombieGame.scene.stop('zone'); window.zombieGame.scene.start('boot'); });
+      return;
+    }
+    if (params.get('auto') === '1' && !autoWalk) toggleAutoWalk();
     const sample = { score: 180, formPct: 82, steps: 412, cadence: 96, stompPct: 75, dodgePct: 70, highLiftAvgCm: { L: 13.5, R: 11 } };
     const first = params.get('scene');
     if (first === 'home') this.scene.start('home', { summary: sample });   // development: preview the end screen
     else this.scene.start(first === 'play' ? 'play' : 'title');
+  }
+}
+
+// The calibration preview has no rules clock, input subscription or recording side effects.
+class ZonePreview extends Phaser.Scene {
+  constructor() { super('zone'); }
+  create() {
+    const { width: W, height: H } = this.scale;
+    const bg = this.add.graphics();
+    bg.fillStyle(C.path); bg.fillRect(0, 0, W, H);
+    for (let row = 0; row < 6; row++) for (let lane = 0; lane < 2; lane++) {
+      this.add.image(W * (lane ? .67 : .33), H * (.08 + row * .12),
+        (row + lane) % 2 ? 'tile-grass-dark' : 'tile-grass-light').setDisplaySize(W * .33, H * .125);
+    }
+    bg.lineStyle(8, C.yellow); bg.lineBetween(W * .16, H * .78, W * .84, H * .78);
+    this.add.image(W * .33, H * .88, 'foot-l').setDisplaySize(W * .08, H * .18);
+    this.add.image(W * .67, H * .88, 'foot-r').setDisplaySize(W * .08, H * .18);
+    for (let i = 0; i < 3; i++) {
+      const flower = this.add.image(W * (i % 2 ? .67 : .33), H * .1, ['flower', 'flower-bell', 'flower-rose'][i]).setScale(1.1);
+      this.tweens.add({ targets: flower, y: H * .73, duration: 4000, delay: i * 1200, repeat: -1 });
+    }
+    const resize = () => this.scene.restart();
+    this.scale.on('resize', resize);
+    this.events.once('shutdown', () => this.scale.off('resize', resize));
   }
 }
 
@@ -238,6 +297,8 @@ class Title extends Phaser.Scene {
   constructor() { super('title'); }
   create() {
     this.started = false;
+    publishGarden({ act: 'title', cadence: 0, paceOk: true, paused: false,
+      title: 'ZOMBIE WALK HOME', score: '', coach: 'Walk in place or press Enter · Z to mark your zone', pace: '', progress: 0 });
     const { width: W, height: H } = this.scale;
     gardenBackdrop(this, W, H);
     this.add.image(W * 0.73, H * 0.22, 'house').setScale(Math.min(1.2, H / 660));
@@ -273,7 +334,7 @@ class Title extends Phaser.Scene {
   }
   restartOnResize() { if (!this.started) this.scene.restart(); }
   go() {
-    if (this.started) return;
+    if (this.started || zone.active) return;
     sound.unlock();
     this.started = true;
     playerReady.then(() => this.scene.start('play'));
@@ -290,9 +351,11 @@ class Play extends Phaser.Scene {
     this.paused = false;
     this.highSound = { L: false, R: false };
     this.g = newGame(settings.limits, Date.now() % 100000);
+    perceiver.reset(settings.perceptron, settings.player);
     this.sprites = new Map();
-    this.marchPhase = 0;
-    this.hudWidth = 0;
+    this.nextGardenUpdate = 0;
+    this.coachLine = '';
+    this.feedbackUntil = 0;
     this.currentLayout = null;
     this.worldLayout = null;
     this.rowIndex = null;
@@ -301,31 +364,15 @@ class Play extends Phaser.Scene {
     this.lastCue = 0;
     this.frameWall = performance.now();
 
-    const { width: W, height: H } = this.scale;
     this.bg = this.add.graphics().setDepth(-20);
     // A fixed pool: ten rows includes offscreen recycling, about seven are visible above the feet.
     this.board = Array.from({ length: 20 }, () => this.add.image(0, 0, 'tile-grass-light').setDepth(-18));
     this.walkingZone = this.add.graphics().setDepth(-10);
     this.targetTiles = ['L', 'R'].map(() => this.add.image(0, 0, 'tile-target').setDepth(-15));
-    this.trees = Array.from({ length: 8 }, (_, i) => this.add.image(0, 0, i % 3 ? 'tree' : 'tree-teal').setDepth(-12));
-    this.edging = Array.from({ length: 6 }, (_, i) => this.add.image(0, 0,
-      ['tile-stone', 'tile-puddle', 'tile-cracked'][i % 3]).setDepth(-14));
-    this.fences = [this.add.image(0, 0, 'fence').setDepth(-12), this.add.image(0, 0, 'fence').setDepth(-12)];
-    this.house = this.add.image(W * 0.84, 76, 'house').setScale(0.22).setDepth(31);
     this.pods = { L: this.add.image(0, 0, 'pod').setVisible(false).setScale(0.8).setDepth(3),
       R: this.add.image(0, 0, 'pod').setVisible(false).setScale(0.8).setDepth(3) };
     this.feet = { L: this.add.image(0, 0, 'foot-l').setDepth(12), R: this.add.image(0, 0, 'foot-r').setDepth(12) };
-    this.gus = this.add.image(W / 2, H * 0.88, 'gus-idle').setDepth(13);
     this.hud = this.add.graphics().setDepth(30);
-    this.actText = this.add.text(24, 16, '', txt(30, C.green)).setDepth(31);
-    this.scoreText = this.add.text(W - 24, 14, '', txt(34, C.yellow)).setOrigin(1, 0).setDepth(31);
-    this.paceText = this.add.text(W - 24, 100, '', txt(22)).setOrigin(1, 0).setDepth(31);
-    this.coachText = this.add.text(W / 2, H * 0.3, '', { ...txt(34, C.cyan), align: 'center' }).setOrigin(0.5).setDepth(32);
-    this.waitText = this.add.text(W / 2, H * 0.56, 'KEEP WALKING', txt(64, C.orange)).setOrigin(0.5).setVisible(false).setDepth(32);
-    this.bannerBack = this.add.graphics().setDepth(39).setVisible(false);
-    this.banner = this.add.text(W / 2, H * 0.4, '', { ...txt(64, C.green), align: 'center' }).setOrigin(0.5).setAlpha(0).setDepth(40);
-    this.intro = this.add.text(W / 2, H * 0.5, '', { ...txt(32, C.white), align: 'center', lineSpacing: 10 }).setOrigin(0.5).setAlpha(0).setDepth(40);
-    this.zombie = this.add.image(0, 0, 'zombie').setScale(0.45).setDepth(31);
 
     this.fx = {
       petals: this.add.particles(0, 0, 'petal', { speed: { min: 150, max: 420 }, lifespan: 900, rotate: { min: 0, max: 360 },
@@ -337,7 +384,7 @@ class Play extends Phaser.Scene {
     };
 
     this.off = onFoot((ev) => {
-      if (this.paused) return;                          // the world is frozen; steps do not count
+      if (this.paused || zone.active) return;                          // the world is frozen; steps do not count
       // Stamp with the game clock, interpolated to the moment the event arrived between two frames,
       // so a slow frame rate does not bunch steps together.
       const e = addEvent(this.g, { ...ev, t: this.g.t + (performance.now() - this.frameWall) / 1000 });
@@ -358,11 +405,13 @@ class Play extends Phaser.Scene {
     });
     this.events.once('shutdown', () => this.off());
     this.input.keyboard.on('keydown-SPACE', () => {
+      if (zone.active) return;
       this.paused = !this.paused;
+      publishGarden({ paused: this.paused, coach: this.paused ? 'Paused · Space to keep walking' : this.coachLine });
       sound.setMusic(!this.paused);
       clip.setPaused(this.paused);
     });
-    if (settings.greeting) { this.coachText.setText(settings.greeting); setTimeout(() => say(settings.greeting), 2600); }
+    if (settings.greeting) { this.coachLine = settings.greeting; setTimeout(() => say(settings.greeting), 2600); }
     const jump = params.get('act');
     if (jump) { startAt(this.g, jump); params.delete('act'); }   // development shortcut, first game only
     this.showAct();
@@ -372,15 +421,14 @@ class Play extends Phaser.Scene {
     const { width: W, height: H } = this.scale;
     if (this.currentLayout?.W === W && this.currentLayout.H === H) return this.currentLayout;
     const zoneY = H * 0.74;
-    const hudH = Math.max(132, H * 0.16);
-    // Leave room for the full plant above its spawn center and the coach cue.
-    const top = hudH + Math.max(140, H * 0.15);
+    // All words live outside the zone; only reserve room for a whole plant at the front.
+    const top = H * 0.10;
     const rowH = (zoneY - top) / 6;
     const lanes = { L: W * 0.33, R: W * 0.67 };
     const padY = zoneY + rowH * 0.6;
     const pads = Object.fromEntries(Object.entries(lanes).map(([lane, x]) => [lane,
       { x: x - W * 0.105, y: padY, w: W * 0.21, h: H - padY - 12 } ]));
-    this.currentLayout = { W, H, zoneY, hudH, top, rowH, lanes, pad: (lane) => pads[lane] };
+    this.currentLayout = { W, H, zoneY, top, rowH, lanes, pad: (lane) => pads[lane] };
     return this.currentLayout;
   }
 
@@ -393,34 +441,35 @@ class Play extends Phaser.Scene {
     if (!a) return;
     sound.play('act');
     if (this.g.act === 'storm') clip.start(this.game.canvas, sound.capture?.stream);
-    this.tweens.killTweensOf([this.banner, this.intro]);
-    this.banner.setText(a.title).setAlpha(1);
-    this.intro.setText(a.intro.join('\n')).setAlpha(1);
-    this.tweens.add({ targets: [this.banner, this.intro], alpha: 0, delay: 3800, duration: 600 });
-    this.coachText.setText(a.hint);
+    this.actIntroUntil = this.g.t + 4.4;
+    this.coachLine = a.hint;
+    this.nextGardenUpdate = 0;
     say(a.intro.join(' '));
   }
 
-  popText(x, y, text, color) {
-    const t = this.add.text(x, y, text, txt(44, color)).setOrigin(0.5).setDepth(25);
-    this.tweens.add({ targets: t, y: y - 90, alpha: 0, duration: 900, onComplete: () => t.destroy() });
+  showFeedback(text) {
+    this.feedback = text;
+    this.feedbackUntil = this.g.t + 1.2;
+    this.nextGardenUpdate = 0;
   }
 
   resolveFx(th, L) {
+    perceiver.checkStep(th);
     sound.play(th.result !== 'hit' ? 'miss' : th.kind === 'flower' ? 'stomp' : 'dodge');
+    if (th.result === 'hit') reaction(th.kind === 'flower' ? 'stomp' : 'dodge');
     const x = L.lanes[th.lane];
     const y = L.zoneY;
     if (th.kind === 'flower' && th.result === 'hit') {
       this.fx.petals.explode(26, x, y);
-      this.popText(x, y - 40, 'SMASH!', C.yellow);
+      this.showFeedback('SMASH!');
       // A separate short-lived stamp also works for the last plant of an act.
       const stamp = this.add.image(x, y, this.flowerKey(th.id)).setDepth(19);
       this.tweens.add({ targets: stamp, scaleX: 1.5, scaleY: 0.35, duration: 110, yoyo: true,
         onComplete: () => { this.tweens.add({ targets: stamp, scale: 0.3, alpha: 0, duration: 160, onComplete: () => stamp.destroy() }); } });
     }
-    else if (th.kind === 'flower') this.popText(x, y - 40, 'higher step!', C.orange);
-    else if (th.result === 'hit') { this.fx.sparks.explode(24, x, y); this.cameras.main.flash(140, 190, 255, 235); this.popText(x, y - 40, 'DODGED!', C.cyan); }
-    else { this.fx.goo.explode(20, x, y); this.cameras.main.shake(160, 0.006); this.popText(x, y - 40, 'SPLAT', C.magenta); }
+    else if (th.kind === 'flower') this.showFeedback('Higher step!');
+    else if (th.result === 'hit') { this.fx.sparks.explode(24, x, y); this.cameras.main.flash(140, 190, 255, 235); this.showFeedback('DODGED!'); }
+    else { this.fx.goo.explode(20, x, y); this.cameras.main.shake(160, 0.006); this.showFeedback('SPLAT'); }
   }
 
   progress() {
@@ -444,7 +493,7 @@ class Play extends Phaser.Scene {
       cue = this.localCue(sum);
     }
     if (!this.sys.isActive() || this.g !== g || !cue) return;
-    this.coachText.setText(cue);
+    this.coachLine = cue;
     say(cue);
   }
 
@@ -457,7 +506,7 @@ class Play extends Phaser.Scene {
   }
 
   update(_time, deltaMs) {
-    if (this.paused) return;
+    if (this.paused || zone.active) return;
     const dt = Math.min(1, deltaMs / 1000);   // only a stalled tab is capped: events arrive in real time, game time must keep up
     this.frameWall = performance.now();
     const out = step(this.g, dt);
@@ -466,8 +515,11 @@ class Play extends Phaser.Scene {
     if (out.actChanged) {
       if (this.g.act === 'home') {
         // The scene is about to close: play the sounds, skip visuals that would be torn down at once.
-        for (const th of out.resolved) sound.play(th.result !== 'hit' ? 'miss' : th.kind === 'flower' ? 'stomp' : 'dodge');
-        this.scene.start('home', { summary: summary(this.g) }); return;
+        for (const th of out.resolved) {
+          sound.play(th.result !== 'hit' ? 'miss' : th.kind === 'flower' ? 'stomp' : 'dodge');
+          if (th.result === 'hit') reaction(th.kind === 'flower' ? 'stomp' : 'dodge');
+        }
+        this.scene.start('home', { summary: { ...summary(this.g), perceptron: perceiver.summary() } }); return;
       }
       this.sprites.forEach((s) => s.destroy());
       this.sprites.clear();
@@ -481,14 +533,13 @@ class Play extends Phaser.Scene {
       this.askCoach();
     }
 
-    this.drawWorld(L, out, dt);
+    this.drawWorld(L);
     this.drawThings(L);
     this.drawHud(L, out, dt);
   }
 
-  drawWorld(L, out, dt) {
+  drawWorld(L) {
     const { W, H } = L;
-    const pxPerCm = (L.zoneY - L.top) / RULES.aheadCm;
     const { rowH } = L;
     // World distance keeps the checker parity and scenery continuous through recycling and resizing.
     const rowsTravelled = this.g.travelledCm / (RULES.aheadCm / 6);
@@ -504,16 +555,12 @@ class Play extends Phaser.Scene {
       b.fillStyle(C.path); b.fillRoundedRect(W * 0.155, L.top - 10, W * 0.69, H, 18);
       this.targetTiles.forEach((tile, i) => tile.setPosition(L.lanes[i ? 'R' : 'L'], L.zoneY)
         .setDisplaySize(W * 0.34, rowH));
-      this.edging.forEach((tile, i) => tile.setPosition(i % 2 ? W * 0.1 : W * 0.9, L.top + (L.zoneY - L.top) * Math.floor(i / 2) / 3)
-        .setDisplaySize(W * 0.07, rowH * 0.7));
-      this.fences.forEach((fence, i) => fence.setPosition(W * (i ? 0.92 : 0.08), L.top - 32).setDisplaySize(W * 0.15, 60));
       for (const lane of ['L', 'R']) {
         this.pods[lane].setPosition(W * (lane === 'L' ? 0.08 : 0.92), L.top + 48);
         const pad = L.pad(lane);
         this.feet[lane].setPosition(L.lanes[lane], pad.y + pad.h / 2)
           .setScale(Math.min(1.4, (pad.h - 16) / 124, (pad.w - 16) / 80));
       }
-      this.trees.forEach((t) => t.setScale(Math.min(1.1, W / 1100)));
       // Opaque foot pads keep the walking zone legible on a white projection mat.
       const z = this.walkingZone;
       z.clear();
@@ -536,19 +583,6 @@ class Play extends Phaser.Scene {
       }
     }
     this.rowIndex = rowIndex;
-    this.trees.forEach((t, i) => t.setPosition(i % 2 ? W * 0.07 : W * 0.93,
-      ((Math.floor(i / 2) * H / 4 + this.g.travelledCm * pxPerCm) % (H + 160)) - 80));
-    this.marchPhase += dt * out.pace.cadence / 60 * Math.PI;
-    const marching = out.pace.cadence > 0;
-    const beat = Math.sin(this.marchPhase);
-    const gusKey = marching ? 'gus-step' : 'gus-idle';
-    if (this.gus.texture.key !== gusKey) this.gus.setTexture(gusKey);
-    const zoneH = H - L.zoneY;
-    // The diagonal bound includes Gus's tilt; reserve the full seven-pixel hop too.
-    this.gus.setFlipX(marching && beat < 0)
-      .setPosition(W / 2, L.zoneY + zoneH / 2 + 3.5 - (marching ? Math.abs(beat) * 7 : 0))
-      .setScale(Math.min((zoneH - 31) / Math.hypot(160, 192), W / 1100))
-      .setAngle(out.pace.ok ? beat * 3 : Math.sin(this.g.t * 7) * 8);
   }
 
   flowerKey(id) { return ['flower', 'flower-bell', 'flower-rose'][(id - 1) % 3]; }
@@ -593,8 +627,6 @@ class Play extends Phaser.Scene {
     const g = this.g;
     const h = this.hud;
     h.clear();
-    h.fillStyle(C.path); h.fillRect(0, 0, W, L.hudH);
-    h.lineStyle(4, 0x9fe074); h.lineBetween(0, L.hudH, W, L.hudH);
 
     // next thing per lane: ghost footprint and the lift needed
     const next = {};
@@ -626,43 +658,14 @@ class Play extends Phaser.Scene {
       }
     }
 
-    // progress to home: the zombie walks along the bar towards the house, which grows as it gets close
-    const px = W * 0.07, pw = W * 0.5, py = L.hudH * 0.52;
-    this.house.setPosition(px + pw + W * 0.06, py - 15).setScale(0.18 + this.progress() * 0.14);
-    h.fillStyle(0x222222); h.fillRoundedRect(px, py - 10, pw, 20, 10);
-    h.fillStyle(C.green); h.fillRoundedRect(px, py - 10, Math.max(20, pw * this.progress()), 20, 10);
-    this.zombie.setPosition(px + pw * this.progress(), py);
-
-    // form meter
-    const fc = out.form >= 0.7 ? C.green : out.form >= 0.4 ? C.yellow : C.red;
-    h.fillStyle(0x222222); h.fillRoundedRect(W - 236, 66, 212, 20, 10);
-    h.fillStyle(fc); h.fillRoundedRect(W - 236, 66, Math.max(20, 212 * out.form), 20, 10);
-
-    // positions follow the current size (fullscreen or a projector resolution change)
-    this.scoreText.setPosition(W - 24, 14);
-    this.paceText.setPosition(W - 24, L.hudH - this.paceText.height - 6);
-    this.coachText.setPosition(W / 2, L.hudH + 30);
-    this.waitText.setPosition(W / 2, H * 0.56);
-    // Wrapping re-rasterizes Phaser text: only do it on resize, never every frame.
-    if (this.hudWidth !== W) {
-      this.hudWidth = W;
-      this.coachText.setWordWrapWidth(W * 0.88);
-      this.banner.setWordWrapWidth(W * 0.9);
-      this.intro.setWordWrapWidth(W * 0.9);
+    if (g.t >= this.nextGardenUpdate) {
+      this.nextGardenUpdate = g.t + .2;
+      const act = ACTS[g.act];
+      publishGarden({ cadence: out.pace.cadence, act: g.act, paceOk: out.pace.ok || g.t <= 3,
+        paused: this.paused, title: act?.title || '', score: `${g.score} pts${g.streak >= 5 ? '  x2' : ''}`,
+        progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · form ${Math.round(out.form * 100)}%${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
+        coach: g.t < this.feedbackUntil ? this.feedback : g.t < this.actIntroUntil ? act.intro.join(' ') : this.coachLine });
     }
-    this.banner.setPosition(W / 2, H * 0.4);
-    this.intro.setPosition(W / 2, this.banner.y + this.banner.height / 2 + 60);
-    this.bannerBack.clear().setVisible(this.banner.alpha > 0).setAlpha(this.banner.alpha);
-    this.bannerBack.fillStyle(C.path, 0.97);
-    this.bannerBack.fillRoundedRect(W * 0.03, this.banner.y - this.banner.height / 2 - 22,
-      W * 0.94, this.banner.height + this.intro.height + 62, 24);
-    this.bannerBack.lineStyle(5, C.yellow);
-    this.bannerBack.strokeRoundedRect(W * 0.03, this.banner.y - this.banner.height / 2 - 22,
-      W * 0.94, this.banner.height + this.intro.height + 62, 24);
-    this.actText.setText(ACTS[g.act] ? ACTS[g.act].title : '');
-    this.scoreText.setText(`${g.score} pts${g.streak >= 5 ? '  x2' : ''}`);
-    this.paceText.setText(`form · ${out.pace.cadence} steps/min (min ${g.limits.minCadence})`);
-    this.waitText.setVisible(!out.pace.ok && g.t > 3);
   }
 }
 
@@ -674,6 +677,8 @@ class Home extends Phaser.Scene {
     sound.setMusic(false);
     if (!data.replay) sound.play('home');
     const s = data.summary;
+    publishGarden({ act: 'home', cadence: 0, paceOk: true, paused: false, title: 'HOME BEFORE SUNRISE!',
+      score: `${s.score} pts`, progress: 1, pace: `${s.steps} steps · form ${s.formPct}%`, coach: 'Welcome home, Gus! · R to walk again' });
     const { width: W, height: H } = this.scale;
     gardenBackdrop(this, W, H);
     this.house = this.add.image(W * 0.62, H * 0.18, 'house');
@@ -695,6 +700,7 @@ class Home extends Phaser.Scene {
       `Flowers stomped ${s.stompPct ?? 0}%   ·   Seeds dodged ${s.dodgePct ?? 0}%`,
       `High steps  left ${s.highLiftAvgCm?.L ?? '-'} cm   right ${s.highLiftAvgCm?.R ?? '-'} cm`,
     ];
+    if (s.perceptron?.checked) lines.push(`Perceptron double-check agreed on ${s.perceptron.agree} of ${s.perceptron.checked} steps`);
     this.stats = lines.map((line) => text(line, bodySize));
     // Measure a three-line slot before replacing the sample with the asynchronous note.
     this.noteText = text('Ag\nAg\nAg', small ? 18 : 22, C.cyan);
@@ -728,10 +734,8 @@ class Home extends Phaser.Scene {
     withTimeout(api('/api/session', { player: settings.player, summary: s, verified }), 25000)
       .then((result) => { data.result = result; if (this.sys.isActive()) this.showResult(result); })
       .catch(() => {
-        if (this.sys.isActive()) {
-          this.noteText.setText('Not saved: the game server did not answer.');
-          this.layoutCard();
-        }
+        data.result = { note: 'Not saved: the game server did not answer.' };
+        if (this.sys.isActive()) this.showResult(data.result);
       });
   }
 
@@ -820,6 +824,9 @@ window.zombieGame = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'stage',
   backgroundColor: '#000000',
-  scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
-  scene: [Preload, Boot, Title, Play, Home],
+  // RESIZE measures the parent's transformed bounds and would shrink the board twice.
+  // Size the source canvas explicitly; Warp alone maps it to the walking zone.
+  scale: { mode: Phaser.Scale.NONE, width: window.innerWidth, height: window.innerHeight },
+  scene: [Preload, Boot, ZonePreview, Title, Play, Home],
 });
+window.addEventListener('resize', () => window.zombieGame.scale.resize(innerWidth, innerHeight));
