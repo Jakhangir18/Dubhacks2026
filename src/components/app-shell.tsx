@@ -3,7 +3,7 @@
 import { useSyncExternalStore, type ReactNode } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Bell, House, Play, Sparkles, TrendingUp } from "lucide-react"
+import { Bell, History, House, Play, Sparkles } from "lucide-react"
 import { motion } from "motion/react"
 import { Logo } from "@/components/logo"
 import { ContactDialog } from "@/components/contact-dialog"
@@ -11,14 +11,14 @@ import { KitSheet } from "@/components/kit-sheet"
 import { NotificationsSheet } from "@/components/notifications-sheet"
 import { ProfileSheet } from "@/components/profile-sheet"
 import { Button } from "@/components/ui/button"
-import { PATIENT } from "@/lib/levels"
+import { useGame } from "@/lib/game-data"
 import { useStride } from "@/lib/store"
 import { cn } from "cn"
 
 const NAV = [
   { href: "/", label: "Overview", icon: House },
-  { href: "/play", label: "Walk home", icon: Play },
-  { href: "/progress", label: "My progress", icon: TrendingUp },
+  { href: "/play", label: "Live walk", icon: Play },
+  { href: "/activity", label: "Sessions", icon: History },
   { href: "/therapist", label: "Maya", icon: Sparkles },
 ]
 
@@ -59,18 +59,6 @@ export function PageActions() {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const pathname = usePathname()
-  const immersive = pathname.startsWith("/play/session")
-
-  if (immersive) {
-    return (
-      <>
-        {children}
-        <ContactDialog />
-      </>
-    )
-  }
-
   return (
     <div className="relative min-h-screen bg-background text-foreground">
       <NightSky />
@@ -98,10 +86,16 @@ function NightSky() {
   )
 }
 
+function initialsOf(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  return (parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : name.slice(0, 2)).toUpperCase()
+}
+
 function TopBar() {
   const pathname = usePathname()
-  const { state, derived, setKitOpen, setProfileOpen } = useStride()
-  const kitReady = state.sensors.camera && state.sensors.trackpad
+  const { setKitOpen, setProfileOpen } = useStride()
+  const { online, running, player } = useGame()
+  const label = online === null ? "Connecting" : online ? (running ? "Walking now" : "Server online") : "No server"
   return (
     <header className="flex items-center justify-between gap-3 py-4">
       <Link href="/" aria-label="Zombie Walk Home, overview">
@@ -136,21 +130,22 @@ function TopBar() {
           type="button"
           onClick={() => setKitOpen(true)}
           className="hidden items-center gap-2 rounded-full border-[2.5px] border-[#2c4639] bg-[#0d171c] px-3 py-1.5 text-xs font-semibold text-white/80 transition hover:border-[#2de2c4] xl:flex"
+          aria-label={`Connections: ${label}`}
         >
           <span className="relative flex size-2">
-            <span className={cn("absolute inline-flex size-full animate-ping rounded-full opacity-60", kitReady ? "bg-[#9cff5a]" : "bg-orange")} />
-            <span className={cn("relative inline-flex size-2 rounded-full", kitReady ? "bg-[#9cff5a]" : "bg-orange")} />
+            <span className={cn("absolute inline-flex size-full animate-ping rounded-full opacity-60", online ? "bg-[#9cff5a]" : "bg-orange")} />
+            <span className={cn("relative inline-flex size-2 rounded-full", online ? "bg-[#9cff5a]" : "bg-orange")} />
           </span>
-          {kitReady ? "Kit ready" : "Check kit"}
+          {label}
         </button>
         <PageActions />
         <button
           type="button"
           onClick={() => setProfileOpen(true)}
           className="grid size-10 place-items-center rounded-full border-[2.5px] border-[#ffb21e] bg-[#2a1f0e] text-xs font-bold text-[#ffd76a] transition hover:-rotate-6"
-          aria-label={`${PATIENT.name}, level ${derived.playerLevel}`}
+          aria-label={`${player}, profile`}
         >
-          {PATIENT.initials}
+          {initialsOf(player)}
         </button>
       </div>
     </header>
@@ -179,7 +174,7 @@ function MobileNav() {
                 )}
               >
                 <Icon className="size-4" />
-                {item.label === "My progress" ? "Progress" : item.label}
+                {item.label}
               </Link>
             </li>
           )

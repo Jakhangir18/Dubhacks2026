@@ -2,19 +2,21 @@
 
 import Link from "next/link"
 import { motion, useReducedMotion } from "motion/react"
-import { ArrowRight, Moon, Play } from "lucide-react"
+import { ArrowRight, Moon, Play, Smartphone } from "lucide-react"
 import { Bob, Magnetic, Parallax, PopTitle, SpringBars, Tilt } from "@/components/motion"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { Particles } from "@/components/ui/particles"
-import { formatLevel, formatMinutes, formatWhen, greeting } from "@/lib/format"
-import { LEVEL_MARKS } from "@/lib/levels"
-import { streakCopy } from "@/lib/metrics"
+import { DemoTag, MomentCard, NumberGrid, WalkWords, walkFigures } from "@/components/walk-bits"
+import { api, useMounted, usePoll } from "@/lib/game"
+import { useGame } from "@/lib/game-data"
+import { useSideCamera } from "@/lib/live"
+import { asset } from "@/lib/paths"
 import { GAME_BUTTON, MAYA_AVATAR, ZOMBIE, sticker } from "@/lib/sticker"
-import { useStride } from "@/lib/store"
+import { clockLabel, durationLabel, mayaLine, startOfWeekLocal, streakOf, weekOf, whenLabel, type Walk } from "@/lib/walks"
 import { cn } from "cn"
 
-/** Garden friends the player meets as gardens are cleared (Umami Land-style collectibles). */
+/** Garden friends the player meets as walks reach home (Umami Land-style collectibles). */
 const COLLECTION = [
   { src: "/art/flower-marigold.png", name: "Marmalade" },
   { src: "/art/flower-bell.png", name: "Ding-Dong" },
@@ -23,6 +25,22 @@ const COLLECTION = [
   { src: "/art/moon.png", name: "Moon" },
   { src: "/art/house.png", name: "Home" },
 ]
+
+function greet(date: Date) {
+  const hour = date.getHours()
+  if (hour >= 4 && hour < 12) return "Good morning"
+  if (hour >= 12 && hour < 17) return "Good afternoon"
+  if (hour >= 17 && hour < 22) return "Good evening"
+  return "Hello"
+}
+
+/** How far Gus got on the latest walk: home is the house; a walk cut short stops along the track. */
+function walkProgress(walk: Walk | null) {
+  if (!walk) return 4
+  if (walk.home) return 100
+  if (walk.rounds) return Math.min(88, Math.round((walk.rounds / (walk.rounds + 1)) * 100))
+  return 24
+}
 
 /** The zombie shuffles along the track toward his cottage, like the in-game top bar. */
 export function HomeTrack({ progress }: { progress: number }) {
@@ -38,7 +56,6 @@ export function HomeTrack({ progress }: { progress: number }) {
           transition={{ duration: 1.6, ease: [0.22, 1, 0.36, 1], delay: 0.6 }}
         />
       </div>
-      { }
       <motion.img
         src={ZOMBIE.walk}
         alt=""
@@ -48,31 +65,64 @@ export function HomeTrack({ progress }: { progress: number }) {
         transition={{ left: { duration: reduce ? 0 : 1.6, ease: [0.22, 1, 0.36, 1], delay: reduce ? 0 : 0.6 }, rotate: { duration: 0.6, repeat: Infinity } }}
       />
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/art/house.png" alt="" className="absolute -top-3 right-0 h-14" />
+      <img src={asset("/art/house.png")} alt="" className="absolute -top-3 right-0 h-14" />
     </div>
   )
 }
 
 export function OverviewView() {
-  const { state, derived } = useStride()
-  const level = derived.prescribed
-  const maya = [...state.messages].reverse().find((message) => message.from === "maya")
-  const done = derived.levels.filter((item) => item.status === "done").length
-  const progress = Math.round(((done + 0.5) / Math.max(derived.levels.length, 1)) * 100)
-  const unlocked = Math.min(COLLECTION.length, done + 1)
+  const { player, walks, latest, demo, loading, running } = useGame()
+  const side = useSideCamera()
+  const mounted = useMounted()
+  const now = new Date(side.now)
+  const week = weekOf(walks, startOfWeekLocal(now), now)
+  const weekMinutes = week.reduce((sum, day) => sum + day.minutes, 0)
+  const streak = streakOf(walks, now)
+  const homes = walks.filter((walk) => walk.home).length
+  const unlocked = Math.min(COLLECTION.length, homes)
+  const progress = walkProgress(latest)
+  const maya = mayaLine(latest)
+  const moments = usePoll(
+    () => (latest && !latest.demo && latest.openable ? api.moments(latest.id) : Promise.resolve([])),
+    20000,
+    Boolean(latest),
+    latest?.id ?? "",
+  )
+  const latestMoments = (moments.data ?? []).slice().reverse().slice(0, 2)
+  const firstName = player.split(" ")[0]
 
   return (
     <div>
       <BlurFade delay={0.05}>
-        <p className="text-[11px] font-bold tracking-[0.2em] text-[#2de2c4]">NIGHT {derived.streak + (derived.practicedToday ? 0 : 1)} · GRANDMA ROSA&apos;S GARDEN</p>
-        <h1 className="font-display mt-1 text-4xl tracking-wide sm:text-5xl">{greeting(derived.now)}, Jordan!</h1>
+        <p className="flex flex-wrap items-center gap-2 text-[11px] font-bold tracking-[0.2em] text-[#2de2c4]">
+          <span>TONIGHT · {player.toUpperCase()}</span>
+          {demo ? <DemoTag /> : null}
+        </p>
+        <h1 className="font-display mt-1 text-4xl tracking-wide sm:text-5xl">{mounted ? greet(now) : "Hello"}, {firstName}!</h1>
         <p className="mt-1 text-lg text-white/70">Tonight&apos;s chapter: help Gus shuffle home before the sun comes up.</p>
       </BlurFade>
+
+      {side.polled && !side.live ? (
+        <BlurFade delay={0.1}>
+          <Link href="/play" className="mt-5 block">
+            <motion.div whileHover={{ y: -2 }} className={sticker("amber", "flex items-center gap-3 rounded-[22px] px-4 py-3")}>
+              <span className="grid size-10 shrink-0 place-items-center rounded-full border-2 border-[#0b1a14] bg-[#ffb21e] text-[#0b1a14]">
+                <Smartphone className="size-5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-semibold text-white">Connect the phone to see your walk live</span>
+                <span className="block text-sm text-white/65">The phone at the side of the pad draws your legs and shows what to fix, in pictures.</span>
+              </span>
+              <ArrowRight className="size-5 shrink-0 text-[#ffd76a]" />
+            </motion.div>
+          </Link>
+        </BlurFade>
+      ) : null}
 
       <div className="mt-6 grid auto-rows-[minmax(150px,auto)] gap-5 md:grid-cols-4">
         <BlurFade delay={0.15} className="md:col-span-3 md:row-span-2">
           <Tilt className="h-full rounded-[30px]" max={3}>
-            <section className={sticker("lime", "relative h-full min-h-[460px] overflow-hidden bg-[#070b10]")}>
+            <section className={sticker("lime", "relative h-full min-h-[520px] overflow-hidden bg-[#070b10]")}>
               <Parallax className="absolute inset-0" strength={16}>
                 <video
                   className="size-full object-cover object-right"
@@ -81,32 +131,46 @@ export function OverviewView() {
                   loop
                   playsInline
                   preload="auto"
-                  poster="/images/hero-night-z.webp"
+                  poster={asset("/images/hero-night-z.webp")}
                   aria-hidden="true"
                 >
-                  <source src="/video/hero-zombie.webm" type="video/webm" />
-                  <source src="/video/hero-zombie.mp4" type="video/mp4" />
+                  <source src={asset("/video/hero-zombie.webm")} type="video/webm" />
+                  <source src={asset("/video/hero-zombie.mp4")} type="video/mp4" />
                 </video>
               </Parallax>
               <Particles className="pointer-events-none absolute inset-0" quantity={30} staticity={30} size={1} color="#ffd76a" />
-              <div className={sticker("ink", "absolute inset-x-4 bottom-4 max-w-lg rotate-[-1.2deg] p-5 sm:right-auto sm:left-5 sm:bottom-5")}>
-                <p className="text-xs font-bold tracking-[0.16em] text-[#ffb21e]">
-                  CHAPTER {formatLevel(level.id)} · {level.minutes} MIN · {level.chip.toUpperCase()}
-                </p>
-                <h2 className="font-display text-outline mt-1 text-[2rem] leading-none tracking-wide text-[#ffd76a] sm:text-[2.6rem]">
-                  <PopTitle text={level.name.toUpperCase()} delay={0.4} />
-                </h2>
-                <p className="mt-2 text-[15px] leading-6 text-white/75">{level.summary}</p>
+              <div className={sticker("ink", "absolute inset-x-4 bottom-4 max-w-xl rotate-[-1.2deg] p-5 sm:right-auto sm:left-5 sm:bottom-5")}>
+                {latest ? (
+                  <>
+                    <p className="text-xs font-bold tracking-[0.16em] text-[#ffb21e]">
+                      LATEST WALK · {whenLabel(latest.at, now).toUpperCase()} {clockLabel(latest.at).toUpperCase()} · {durationLabel(latest.seconds).toUpperCase()}
+                    </p>
+                    <h2 className="font-display text-outline mt-1 text-[2rem] leading-none tracking-wide text-[#ffd76a] sm:text-[2.6rem]">
+                      <PopTitle text={latest.home ? "GUS GOT HOME" : "A SHORT WALK"} delay={0.4} />
+                    </h2>
+                    <WalkWords walk={latest} moments={moments.data ?? []} compact className="mt-3" />
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs font-bold tracking-[0.16em] text-[#ffb21e]">{loading ? "LOOKING FOR YOUR WALKS" : "NO WALK YET"}</p>
+                    <h2 className="font-display text-outline mt-1 text-[2rem] leading-none tracking-wide text-[#ffd76a] sm:text-[2.6rem]">
+                      <PopTitle text="THE GARDEN WAITS" delay={0.4} />
+                    </h2>
+                    <p className="mt-2 text-[15px] leading-6 text-white/75">Step onto the pad; the first walk lands here with Maya&apos;s note.</p>
+                  </>
+                )}
                 <HomeTrack progress={progress} />
                 <div className="mt-3 flex flex-wrap items-center gap-3">
                   <Magnetic>
-                    <Link href={`/play/session?level=${level.id}`} className={GAME_BUTTON}>
-                      <Play className="size-5 fill-current" /> PLAY
+                    <Link href="/play" className={GAME_BUTTON}>
+                      <Play className="size-5 fill-current" /> {running ? "WATCH LIVE" : "LIVE WALK"}
                     </Link>
                   </Magnetic>
-                  <span className="text-sm text-white/65">
-                    {done} of {derived.levels.length} gardens cleared
-                  </span>
+                  {latest?.openable ? (
+                    <Link href={`/play/session?id=${encodeURIComponent(latest.id)}`} className="inline-flex items-center gap-1 text-sm font-semibold text-[#9cff5a] hover:underline">
+                      See the whole walk <ArrowRight className="size-4" />
+                    </Link>
+                  ) : null}
                 </div>
               </div>
             </section>
@@ -116,15 +180,22 @@ export function OverviewView() {
         <BlurFade delay={0.25}>
           <Link href="/progress" className="block h-full">
             <motion.article whileHover={{ rotate: -1.5, y: -4 }} className={sticker("teal", "h-full p-5")}>
-              <p className="text-[11px] font-bold tracking-[0.16em] text-[#2de2c4]">WALKING SCORE</p>
+              <p className="text-[11px] font-bold tracking-[0.16em] text-[#2de2c4]">FLOWERS HIT</p>
               <p className="font-display text-outline text-6xl text-[#9cff5a] tabular-nums">
-                <NumberTicker value={derived.walkingScore} delay={0.4} />
+                {latest?.flowersPct !== null && latest?.flowersPct !== undefined ? (
+                  <>
+                    <NumberTicker value={latest.flowersPct} delay={0.4} />
+                    <span className="text-3xl">%</span>
+                  </>
+                ) : (
+                  "—"
+                )}
               </p>
               <div className="mt-2 flex gap-1" aria-hidden="true">
                 {Array.from({ length: 10 }, (_, index) => (
                   <motion.span
                     key={index}
-                    className={cn("h-2.5 flex-1 origin-bottom rounded-sm", index < Math.round(derived.walkingScore / 10) ? "bg-[#2de2ff]" : "bg-white/10")}
+                    className={cn("h-2.5 flex-1 origin-bottom rounded-sm", index < Math.round((latest?.flowersPct ?? 0) / 10) ? "bg-[#2de2ff]" : "bg-white/10")}
                     initial={{ scaleY: 0 }}
                     animate={{ scaleY: 1 }}
                     transition={{ type: "spring", stiffness: 500, damping: 16, delay: 0.5 + index * 0.05 }}
@@ -132,7 +203,7 @@ export function OverviewView() {
                 ))}
               </div>
               <p className="mt-2 text-sm text-white/65">
-                {derived.scoreDelta >= 0 ? "▲" : "▼"} {Math.abs(derived.scoreDelta)}% this week
+                {walks.length} {walks.length === 1 ? "walk" : "walks"} on record · {homes} home
               </p>
             </motion.article>
           </Link>
@@ -140,13 +211,13 @@ export function OverviewView() {
 
         <BlurFade delay={0.32}>
           <motion.article whileHover={{ rotate: 1.5, y: -4 }} className={sticker("amber", "relative h-full overflow-hidden p-5")}>
-            <Bob src="/art/moon.png" className="absolute -right-2 -top-2 size-16" />
+            <Bob src={asset("/art/moon.png")} className="absolute -right-2 -top-2 size-16" />
             <p className="text-[11px] font-bold tracking-[0.16em] text-[#ffb21e]">NIGHT STREAK</p>
             <p className="font-display text-outline text-6xl text-[#ffd76a] tabular-nums">
-              <NumberTicker value={derived.streak} delay={0.5} />
+              <NumberTicker value={streak} delay={0.5} />
             </p>
             <div className="mt-2 flex gap-1">
-              {derived.week.map((day, index) => (
+              {week.map((day, index) => (
                 <motion.span
                   key={day.key}
                   className={cn(
@@ -156,28 +227,30 @@ export function OverviewView() {
                   initial={{ y: 14, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ type: "spring", stiffness: 400, damping: 14, delay: 0.7 + index * 0.05 }}
-                  aria-label={`${day.label} ${day.hasSession ? "practiced" : day.isToday ? "today, not yet" : "no session"}`}
+                  aria-label={`${day.label} ${day.hasSession ? "walked" : day.isToday ? "today, not yet" : "no walk"}`}
                 >
                   {day.hasSession ? <Moon className="size-3.5 fill-current" /> : day.label}
                 </motion.span>
               ))}
             </div>
-            <p className="mt-2 text-xs leading-5 text-white/65">{streakCopy(state, derived)}</p>
+            <p className="mt-2 text-xs leading-5 text-white/65">
+              {streak === 0 ? "A walk tonight starts a new streak." : week[week.length - 1].hasSession || week.find((day) => day.isToday)?.hasSession ? "Streak held. The next one counts tomorrow." : "Walk today and the streak holds."}
+            </p>
           </motion.article>
         </BlurFade>
 
         <BlurFade delay={0.4} className="md:col-span-2">
-          <motion.article whileHover={{ y: -4 }} className={sticker("violet", "h-full p-5")}>
-            <div className="flex items-end justify-between">
-              <p className="text-[11px] font-bold tracking-[0.16em] text-[#c9a8ff]">MINUTES THIS WEEK</p>
-              <p className="font-display text-outline text-5xl text-white tabular-nums">
-                <NumberTicker value={derived.weekMinutes} delay={0.6} />
-              </p>
+          <article className={sticker("ink", "h-full p-5")}>
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="font-display text-2xl tracking-wide">THE NUMBERS</h2>
+              {latest ? <span className="text-sm text-white/60">{whenLabel(latest.at, now)}</span> : null}
             </div>
-            <div className="mt-3">
-              <SpringBars days={derived.week} barClass="bg-[#a46bff]/40" hotClass="bg-[#ffb21e]" labelClass="text-white/70" />
-            </div>
-          </motion.article>
+            {latest ? (
+              <NumberGrid figures={walkFigures(latest)} className="mt-3" delay={0.5} />
+            ) : (
+              <p className="mt-3 text-sm text-white/60">The first walk fills this in.</p>
+            )}
+          </article>
         </BlurFade>
 
         <BlurFade delay={0.48} className="md:col-span-2">
@@ -192,7 +265,7 @@ export function OverviewView() {
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ type: "spring", stiffness: 280, damping: 16, delay: 0.9 }}
                 >
-                  {maya?.text ?? "Finish a walk and I will have a note waiting."}
+                  {maya ?? "Finish a walk and I will have a note waiting."}
                 </motion.p>
                 <span className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-[#ff8fbf]">
                   Talk to Maya <ArrowRight className="size-4" />
@@ -202,12 +275,46 @@ export function OverviewView() {
           </Link>
         </BlurFade>
 
-        <BlurFade delay={0.55} className="md:col-span-4">
+        <BlurFade delay={0.52} className="md:col-span-2">
+          <motion.article whileHover={{ y: -4 }} className={sticker("violet", "h-full p-5")}>
+            <div className="flex items-end justify-between">
+              <p className="text-[11px] font-bold tracking-[0.16em] text-[#c9a8ff]">MINUTES THIS WEEK</p>
+              <p className="font-display text-outline text-5xl text-white tabular-nums">
+                <NumberTicker value={weekMinutes} delay={0.6} />
+              </p>
+            </div>
+            <div className="mt-3">
+              <SpringBars days={week} barClass="bg-[#a46bff]/40" hotClass="bg-[#ffb21e]" labelClass="text-white/70" />
+            </div>
+          </motion.article>
+        </BlurFade>
+
+        {latestMoments.length && latest ? (
+          <BlurFade delay={0.56} className="md:col-span-2">
+            <article className={sticker("ink", "h-full p-5")}>
+              <div className="flex items-baseline justify-between gap-3">
+                <h2 className="font-display text-2xl tracking-wide">WHAT THE CAMERA SAW</h2>
+                <Link href={`/play/session?id=${encodeURIComponent(latest.id)}`} className="text-sm font-semibold text-[#9cff5a] hover:underline">
+                  All moments
+                </Link>
+              </div>
+              <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+                {latestMoments.map((moment, index) => (
+                  <li key={moment.id}>
+                    <MomentCard moment={moment} href={`/play/session?id=${encodeURIComponent(latest.id)}`} delay={0.6 + index * 0.08} />
+                  </li>
+                ))}
+              </ul>
+            </article>
+          </BlurFade>
+        ) : null}
+
+        <BlurFade delay={0.6} className="md:col-span-4">
           <article className={sticker("ink", "p-5")}>
             <div className="flex items-baseline justify-between gap-3">
               <h2 className="font-display text-2xl tracking-wide">GARDEN STICKER BOOK</h2>
               <span className="text-sm text-white/60">
-                {unlocked} of {COLLECTION.length} friends met
+                {unlocked} of {COLLECTION.length} friends met · one for each walk home
               </span>
             </div>
             <ul className="mt-4 grid grid-cols-3 gap-4 sm:grid-cols-6">
@@ -229,7 +336,7 @@ export function OverviewView() {
                       )}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={item.src} alt="" className={cn("size-14 object-contain", !got && "opacity-25 brightness-0 invert")} />
+                      <img src={asset(item.src)} alt="" className={cn("size-14 object-contain", !got && "opacity-25 brightness-0 invert")} />
                     </span>
                     <span className="text-xs font-semibold text-white/80">{got ? item.name : "???"}</span>
                   </motion.li>
@@ -239,7 +346,7 @@ export function OverviewView() {
           </article>
         </BlurFade>
 
-        <BlurFade delay={0.6} className="md:col-span-4">
+        <BlurFade delay={0.66} className="md:col-span-4">
           <article className={sticker("ink", "p-5")}>
             <div className="flex items-baseline justify-between">
               <h2 className="font-display text-2xl tracking-wide">LAST WALKS</h2>
@@ -247,26 +354,30 @@ export function OverviewView() {
                 View all
               </Link>
             </div>
-            <ul className="mt-3 grid gap-3 sm:grid-cols-3">
-              {derived.recent.slice(0, 3).map((session) => (
-                <motion.li key={session.id} whileHover={{ y: -3 }}>
-                  <Link
-                    href={`/activity?session=${session.id}`}
-                    className="group flex items-center gap-3 rounded-2xl bg-white/[0.05] px-4 py-3 transition hover:bg-[#9cff5a]/10"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={LEVEL_MARKS[session.levelId] ?? "/art/flower-marigold.png"} alt="" className="size-10 object-contain transition group-hover:-rotate-12 group-hover:scale-110" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-semibold">{session.levelName}</span>
-                      <span className="block text-sm text-white/60">
-                        {formatWhen(session.playedAt, derived.now)} · {formatMinutes(session.durationMin)}
+            {walks.length ? (
+              <ul className="mt-3 grid gap-3 sm:grid-cols-3">
+                {walks.slice(0, 3).map((walk) => (
+                  <motion.li key={walk.id} whileHover={{ y: -3 }}>
+                    <Link
+                      href={walk.openable ? `/play/session?id=${encodeURIComponent(walk.id)}` : "/activity"}
+                      className="group flex items-center gap-3 rounded-2xl bg-white/[0.05] px-4 py-3 transition hover:bg-[#9cff5a]/10"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={asset(walk.home ? "/art/house.png" : "/art/pod.png")} alt="" className="size-10 object-contain transition group-hover:-rotate-12 group-hover:scale-110" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-semibold">{walk.home ? "Gus got home" : "A short walk"}</span>
+                        <span className="block text-sm text-white/60">
+                          {whenLabel(walk.at, now)} {clockLabel(walk.at)} · {durationLabel(walk.seconds)}
+                        </span>
                       </span>
-                    </span>
-                    <span className="font-display text-3xl text-[#9cff5a] tabular-nums">{session.walkingScore}</span>
-                  </Link>
-                </motion.li>
-              ))}
-            </ul>
+                      <span className="font-display text-3xl text-[#9cff5a] tabular-nums">{walk.flowersPct !== null ? `${walk.flowersPct}%` : "—"}</span>
+                    </Link>
+                  </motion.li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm text-white/60">{loading ? "Looking for your walks…" : "No walks yet."}</p>
+            )}
           </article>
         </BlurFade>
       </div>

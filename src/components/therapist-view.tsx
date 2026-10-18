@@ -1,37 +1,61 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { Send } from "lucide-react"
 import { Bob } from "@/components/motion"
+import { TherapistSettings } from "@/components/therapist-settings"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { DemoTag } from "@/components/walk-bits"
 import { formatClock, formatWhen, uid } from "@/lib/format"
+import { useMounted } from "@/lib/game"
+import { useGame } from "@/lib/game-data"
 import { mayaReply } from "@/lib/maya"
 import { MAYA_AVATAR, sticker } from "@/lib/sticker"
 import { useStride } from "@/lib/store"
+import type { ChatMessage } from "@/lib/types"
+import { mayaLine, startOfWeekLocal, streakOf, weekOf, whenLabel, workOn } from "@/lib/walks"
 import { cn } from "cn"
 
 const PROMPTS = [
-  "What should I focus on today?",
-  "How is my symmetry this week?",
-  "Why did my pace drop?",
-  "What does my latest score mean?",
+  "What should I work on next?",
+  "How were my knees?",
+  "Were my steps even?",
+  "What does my latest walk mean?",
 ]
+
+/** The StrideBloom seed's chat lines: shown only while the demo walks are. */
+const SEED_IDS = new Set(["m1", "m2", "m3"])
 
 export function TherapistView() {
   const { state, derived, addMessage } = useStride()
+  const { walks, latest, demo, player } = useGame()
+  const mounted = useMounted()
   const [draft, setDraft] = useState("")
   const [typing, setTyping] = useState(false)
   const [error, setError] = useState("")
   const endRef = useRef<HTMLDivElement>(null)
   const timer = useRef<number | null>(null)
+  const now = new Date()
+  const week = weekOf(walks, startOfWeekLocal(now), now)
+  const weekMinutes = week.reduce((sum, day) => sum + day.minutes, 0)
+  const streak = streakOf(walks, now)
+
+  // Maya opens with her real note on the latest walk; the demo's scripted lines show only with the demo walks.
+  const messages = useMemo<ChatMessage[]>(() => {
+    if (demo) return state.messages
+    const own = state.messages.filter((message) => !SEED_IDS.has(message.id))
+    const line = mayaLine(latest)
+    if (!latest || !line) return own
+    return [{ id: `note-${latest.id}`, from: "maya", text: line, at: new Date(latest.at * 1000).toISOString() }, ...own]
+  }, [demo, latest, state.messages])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" })
-  }, [state.messages.length, typing])
+  }, [messages.length, typing])
 
   useEffect(() => {
     return () => {
@@ -44,15 +68,7 @@ export function TherapistView() {
     if (!trimmed || typing) return
     setError("")
     setDraft("")
-    const reply = mayaReply(trimmed, {
-      walkingScore: derived.walkingScore,
-      delta: derived.scoreDelta,
-      latest: derived.latest,
-      weekMinutes: derived.weekMinutes,
-      goal: state.weeklyGoalMin,
-      streak: derived.streak,
-      prescribedName: derived.prescribed.name,
-    })
+    const reply = mayaReply(trimmed, { latest, walks, streak, weekMinutes, goalMinutes: state.weeklyGoalMin, now: new Date() })
     addMessage({ id: uid("jordan"), from: "jordan", text: trimmed, at: new Date().toISOString() })
     setTyping(true)
     timer.current = window.setTimeout(() => {
@@ -61,15 +77,19 @@ export function TherapistView() {
     }, 700)
   }
 
+  const focus = latest ? workOn(latest) : null
+
   return (
     <div>
       <div className="mb-6 flex items-center gap-4">
         <Bob src={MAYA_AVATAR} alt="Maya, the Zombie Walk Home AI therapist" className="size-24 shrink-0 rounded-full bg-[#ffd6e7] object-contain ring-[3px] ring-[#ff3d8b]" />
         <BlurFade delay={0.05}>
-          <p className="text-[11px] font-bold tracking-[0.2em] text-[#ff8fbf]">AI THERAPIST · ONLINE</p>
+          <p className="flex items-center gap-2 text-[11px] font-bold tracking-[0.2em] text-[#ff8fbf]">
+            AI THERAPIST · ONLINE {demo ? <DemoTag /> : null}
+          </p>
           <h1 className="font-display mt-1 text-5xl tracking-wide">Maya</h1>
           <p className="mt-1 max-w-xl text-base leading-6 text-white/70">
-            She reviews every scored walk. She does not assess pain. That note goes to the care team.
+            She reviews every walk from the game&apos;s numbers and the side camera. She does not assess pain. That note goes to the care team.
           </p>
         </BlurFade>
       </div>
@@ -78,7 +98,7 @@ export function TherapistView() {
         <section className={sticker("rose", "flex h-[min(720px,calc(100dvh-12rem))] min-h-[520px] flex-col overflow-hidden")}>
           <div className="flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-6">
             <AnimatePresence initial={false}>
-              {state.messages.map((message) => (
+              {messages.map((message) => (
                 <motion.div
                   key={message.id}
                   layout="position"
@@ -104,7 +124,7 @@ export function TherapistView() {
                         {message.text}
                       </div>
                       <p className={cn("mt-1 text-[11px] text-white/50", message.from === "jordan" && "text-right")}>
-                        {formatWhen(message.at, derived.now)} · {formatClock(message.at)}
+                        {mounted ? `${formatWhen(message.at, derived.now)} · ${formatClock(message.at)}` : ""}
                       </p>
                     </div>
                   </div>
@@ -171,7 +191,7 @@ export function TherapistView() {
                     else send(draft)
                   }
                 }}
-                placeholder="Ask about pace, symmetry, or today's goal."
+                placeholder="Ask about the knees, the pace, the flowers, or what to work on next."
                 className="min-h-12 flex-1 rounded-2xl border-[2.5px] border-[#2c4639] bg-[#0d171c] text-[15px] text-white placeholder:text-white/40"
                 aria-invalid={Boolean(error)}
               />
@@ -191,37 +211,48 @@ export function TherapistView() {
         <aside className="grid gap-5">
           <BlurFade delay={0.2}>
             <article className={sticker("lime", "p-5")}>
-              <p className="text-[11px] font-bold tracking-[0.16em] text-[#9cff5a]">TONIGHT</p>
-              <h2 className="font-display text-outline mt-1 text-3xl leading-none tracking-wide text-[#ffd76a]">{derived.prescribed.name.toUpperCase()}</h2>
-              <p className="mt-2 text-sm leading-6 text-white/75">{derived.prescribed.summary}</p>
+              <p className="text-[11px] font-bold tracking-[0.16em] text-[#9cff5a]">WORK ON NEXT</p>
+              <h2 className="font-display text-outline mt-1 text-3xl leading-none tracking-wide text-[#ffd76a]">{focus ? focus.text.replace(/\.$/, "").toUpperCase() : "THE FIRST WALK"}</h2>
+              <p className="mt-2 text-sm leading-6 text-white/75">{focus?.why ?? "Finish a walk and Maya picks the one thing to work on."}</p>
             </article>
           </BlurFade>
           <BlurFade delay={0.3}>
             <article className={sticker("teal", "p-5")}>
-              <h2 className="font-display text-xl tracking-wide">LATEST SCORED WALK</h2>
-              {derived.latest ? (
-                <dl className="mt-3 grid grid-cols-2 gap-2 text-center">
-                  <Score label="Pace" value={derived.latest.pace} />
-                  <Score label="Symmetry" value={derived.latest.symmetry} />
-                </dl>
+              <h2 className="font-display text-xl tracking-wide">LATEST WALK</h2>
+              {latest ? (
+                <>
+                  <p className="mt-1 text-sm text-white/60">{mounted ? whenLabel(latest.at, now) : ""} · {player}</p>
+                  <dl className="mt-3 grid grid-cols-2 gap-2 text-center">
+                    <Score label="Flowers" value={latest.flowersPct} unit="%" />
+                    <Score label="Even L/R" value={latest.evenPct} unit="%" />
+                    <Score label="Cadence" value={latest.cadence} unit="/min" />
+                    <Score label="Knee L/R" value={latest.kneeDeg.L !== null || latest.kneeDeg.R !== null ? `${latest.kneeDeg.L ?? "–"}/${latest.kneeDeg.R ?? "–"}°` : null} />
+                  </dl>
+                </>
               ) : (
-                <p className="mt-2 text-sm text-white/60">No scored walk yet.</p>
+                <p className="mt-2 text-sm text-white/60">No walk yet.</p>
               )}
-              {derived.latest ? <p className="mt-4 text-sm leading-6 text-white/70">{derived.latest.feedback}</p> : null}
             </article>
           </BlurFade>
         </aside>
+      </div>
+
+      <div className="mt-6">
+        <BlurFade delay={0.35}>
+          <TherapistSettings />
+        </BlurFade>
       </div>
     </div>
   )
 }
 
-function Score({ label, value }: { label: string; value: number }) {
+function Score({ label, value, unit }: { label: string; value: number | string | null; unit?: string }) {
   return (
     <div className="rounded-2xl bg-black/25 px-2 py-3">
       <dt className="text-[11px] font-bold tracking-[0.12em] text-[#2de2c4]">{label.toUpperCase()}</dt>
-      <dd className="font-display text-outline mt-1 text-4xl tabular-nums text-[#9cff5a]">
-        <NumberTicker value={value} delay={0.4} />
+      <dd className="font-display text-outline mt-1 text-3xl tabular-nums text-[#9cff5a]">
+        {value === null ? "—" : typeof value === "number" ? <NumberTicker value={value} delay={0.4} /> : value}
+        {value !== null && unit ? <span className="ml-0.5 text-base text-white/60">{unit}</span> : null}
       </dd>
     </div>
   )
