@@ -1,6 +1,8 @@
 html, body { margin: 0; height: 100%; background: #081e29; overflow: hidden; color: #f0ffe8; font-family: 'Trebuchet MS', system-ui, sans-serif; font-size: 24px; }
 [hidden] { display: none !important; }
 #ambient, #stage { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; }
+/* The walking pad is long and narrow: the game is drawn portrait, 9:16, and the warp fits it to the zone. */
+#stage { width: 720px; height: 1280px; }
 #ambient { pointer-events: none; }
 #stage { overflow: hidden; }
 #stage canvas { width: 100% !important; height: 100% !important; }

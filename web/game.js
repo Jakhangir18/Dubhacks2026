@@ -858,7 +858,6 @@ window.zombieGame = new Phaser.Game({
   backgroundColor: '#000000',
   // RESIZE measures the parent's transformed bounds and would shrink the board twice.
   // Size the source canvas explicitly; Warp alone maps it to the walking zone.
-  scale: { mode: Phaser.Scale.NONE, width: window.innerWidth, height: window.innerHeight },
+  scale: { mode: Phaser.Scale.NONE, width: 720, height: 1280 },   // portrait like the pad; also a 9:16 clip
   scene: [Preload, Boot, ZonePreview, Title, Play, Home],
 });
-window.addEventListener('resize', () => window.zombieGame.scale.resize(innerWidth, innerHeight));
