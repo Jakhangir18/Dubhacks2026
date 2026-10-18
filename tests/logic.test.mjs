@@ -33,11 +33,17 @@ function toGarden(limits = {}) {
   return g;
 }
 
-test('cadence below the minimum does not move the world or fill act 1', () => {
+test('cadence below the minimum slows the world and fills act 1 at half rate; standing still stops it', () => {
   const g = newGame({ walkSeconds: 2 }, 1);
-  walk(g, 6, 1.0);                     // 60 steps per minute < 80
-  assert.equal(g.act, 'walk');
-  assert.equal(g.travelledCm, 0);
+  walk(g, 2.5, 1.0);                   // 60 steps per minute < 80: slow, not stopped
+  assert.equal(g.act, 'walk');         // 2.5 s at half rate is not 2 s of good walking yet
+  assert.ok(g.travelledCm > 0);
+  walk(g, 5, 1.0);
+  assert.equal(g.act, 'garden');       // about 7 s at half rate (the first steps have no cadence yet)
+  for (let i = 0; i < 40; i++) step(g, DT);   // 2 s with no steps: past stopAfterS, the player has stopped
+  const before = g.travelledCm;
+  for (let i = 0; i < 20; i++) step(g, DT);   // another second standing still: nothing moves
+  assert.equal(g.travelledCm, before);
 });
 
 test('a steady pace with both feet finishes act 1', () => {
@@ -259,7 +265,7 @@ test('a seed under a shoe splats, unless a big step came just before; a clear la
   addShoes(g, [{ xFrac: x, nearCm: seed.distCm + 10, farCm: seed.distCm - 10 }]);
   step(g, DT);
   assert.equal(seed.result, 'miss');
-  // the next seed in the same lane: a big step (swing 240 world cm = 32 'cm') right before the foot reaches it: dodged
+  // the next seed in the same lane: a big step (swing 240 world cm = 32, 2x the normal 16) right before the foot reaches it: dodged
   walkUntil(g, () => g.things.some((t) => t !== seed && !t.result && t.lane === seed.lane && t.distCm < -20), 120);
   const next = g.things.find((t) => t !== seed && !t.result && t.lane === seed.lane);
   resetShoes(g);

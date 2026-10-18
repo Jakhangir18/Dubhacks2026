@@ -30,6 +30,10 @@ export const RULES = {
   beforeS: 0.6,                  // the lift may peak up to this long before arrival
   afterS: 0.35,                  // or this long after
   paceHorizonS: 5,               // cadence is measured over this window
+  // The world never freezes while the player walks: below the minimum pace it runs at this share of the minimum
+  // and act 1 fills at this rate; only standing still stops it. The pace shows in the form score and the cues.
+  slowFloor: 0.7,
+  slowFill: 0.5,
   stopAfterS: 1.5,               // no step for this long means the player stopped
   points: { stomp: 10, dodge: 15 },
   // Shoe mode (feet.py boxes on the camera): a flower is smashed when a shoe covers it, a seed splats; a thing
@@ -40,6 +44,7 @@ export const RULES = {
   shoeStepMinS: 0.3,             // one landing per foot at most this often
   swingCmPerLiftCm: 7.5,         // world cm of forward swing on the belt per cm of 'lift': a long or high step swings far
   shoeDodgeS: 1.0,               // a big swing this recently, as the seed reaches the foot, is the dodge
+  dodgeSwingFactor: 1.4,         // the dodge swing must be this much longer than the foot's normal one (camera units are not cm)
   toeCm: 300,                    // how far past the hit line the toes are; the game sets it from its layout
   shoeHoldS: 3,                  // shoes drive the game this long after the last sighting, then the lift rules return
   shoeGapS: 1,                   // a lane unseen this long starts its swing tracking afresh
@@ -186,7 +191,9 @@ export function markHit(g, lane, kind, distCm, f = 1) {
 
 // A seed reaching the foot is dodged only by a big step just before: a swing above the seed's lift target.
 function bigSwing(g, lane) {
-  const need = needCm(g, 'seed', lane);
+  // Relative to this foot's own normal swing: the camera's units depend on the calibration and the lane, not on cm.
+  const base = g.base ? g.base[lane] : RULES.defaultBaseCm;
+  const need = Math.max(base * RULES.dodgeSwingFactor, base + 3);
   return !!takeEvent(g, (e) => e.kind === 'lift' && e.foot === lane && e.liftCm >= need && g.t - e.t <= RULES.shoeDodgeS);
 }
 
@@ -278,13 +285,16 @@ export function step(g, dt) {
   const f = form(p);
   if (g.act !== 'home') { g.formSum += f * dt; g.formN += dt; }   // time-weighted, independent of frame rate
   const scale = speedScale(g);
-  const speed = p.ok ? (p.cadence / 60) * RULES.strideCm * scale : 0;   // the world waits when the pace drops
+  const walking = p.cadence > 0;
+  const cadence = p.ok ? p.cadence : walking ? Math.max(p.cadence, g.limits.minCadence * RULES.slowFloor) : 0;
+  const speed = (cadence / 60) * RULES.strideCm * scale;   // slow walking slows the world a little; standing still stops it
   const moved = speed * dt;
   g.travelledCm += moved;
   const out = { resolved: [], actChanged: false, pace: p, form: f, speed };
 
   if (g.act === 'walk') {
     if (p.ok) g.walkGoodS += dt;
+    else if (walking) g.walkGoodS += dt * RULES.slowFill;   // slow walking still gets there, at half speed
     if (g.walkGoodS >= g.limits.walkSeconds) nextAct(g, out);
     return out;
   }

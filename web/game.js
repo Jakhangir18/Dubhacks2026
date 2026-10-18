@@ -159,7 +159,7 @@ window.addEventListener(MARKS_EVENT, (e) => {
     if (!Number.isFinite(fx) || !Number.isFinite(fy)) continue;
     const lane = fx < L.W / 2 ? 'L' : 'R';
     const th = markHit(play.g, lane, kind, fieldDist(fy, L), play.lastForm ?? 1);
-    if (th) play.resolveFx(th, L);
+    if (th) { play.resolveFx(th, L); logRemote({ what: th.kind, lane: th.lane, result: th.result, at: Math.round(th.distCm), by: 'mark', t: Math.round(play.g.t) }); }
   }
 });
 
