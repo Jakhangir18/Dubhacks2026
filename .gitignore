@@ -8,7 +8,7 @@ node_modules/
 .env
 .claude/
 
-# Next.js (StrideBloom)
+# Next.js (Stride Defense)
 /.next/
 *.tsbuildinfo
 next-env.d.ts

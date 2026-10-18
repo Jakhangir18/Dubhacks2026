@@ -1,6 +1,6 @@
-# StrideBloom
+# Stride Defense
 
-StrideBloom is a walking-recovery clinic you can use in the browser. A floor trackpad reads each step, and a projection puts the same plant lawn underfoot. Patients move through recovery goals the way a language app moves through lessons. After every scored walk, Maya, the AI therapist, reviews pace and symmetry.
+Stride Defense is a walking-recovery clinic you can use in the browser. A floor trackpad reads each step, and a projection puts the same plant lawn underfoot. Patients move through recovery goals the way a language app moves through lessons. After every scored walk, Maya, the AI therapist, reviews pace and symmetry.
 
 This app is the clinic workspace for Jordan Davis: today's goal, the recovery plan, a playable form round, progress, session history, and Maya.
 
@@ -59,10 +59,10 @@ An **AI coach with a therapist's rules** watches through a camera (a laptop webc
 
 ## Two modes
 
-| Mode | Who | Where | Why |
-|---|---|---|---|
-| **Floor** (core) | children | targets projected on a firm floor or a white mat | no moving parts; walking-pad manuals tell children to keep away |
-| **Walking pad** (optional, supervised) | teens and adults within the pad's rated age (14+ on KingSmith manuals) | targets on a screen or wall in front, not on the belt | the treadmill adds continuous walking practice |
+| Mode                                   | Who                                                                    | Where                                                 | Why                                                             |
+| -------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------- |
+| **Floor** (core)                       | children                                                               | targets projected on a firm floor or a white mat      | no moving parts; walking-pad manuals tell children to keep away |
+| **Walking pad** (optional, supervised) | teens and adults within the pad's rated age (14+ on KingSmith manuals) | targets on a screen or wall in front, not on the belt | the treadmill adds continuous walking practice                  |
 
 ## How a session works
 
@@ -73,13 +73,13 @@ An **AI coach with a therapist's rules** watches through a camera (a laptop webc
 
 ## Repository map
 
-| Path | What |
-|---|---|
-| [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md) | mechanics, the coach, rewards, demo |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | hardware decisions, layout, data flow, interfaces |
-| [docs/BUILD_PLAN.md](docs/BUILD_PLAN.md) | roles, first spikes, timeline, risks |
-| [docs/SPONSORS.md](docs/SPONSORS.md) | tracks we enter and how each sponsor's tech is used |
-| [docs/research/](docs/research/) | research briefs in English and Russian (`*.ru.md`) |
+| Path                                         | What                                                |
+| -------------------------------------------- | --------------------------------------------------- |
+| [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)   | mechanics, the coach, rewards, demo                 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | hardware decisions, layout, data flow, interfaces   |
+| [docs/BUILD_PLAN.md](docs/BUILD_PLAN.md)     | roles, first spikes, timeline, risks                |
+| [docs/SPONSORS.md](docs/SPONSORS.md)         | tracks we enter and how each sponsor's tech is used |
+| [docs/research/](docs/research/)             | research briefs in English and Russian (`*.ru.md`)  |
 
 ## Tracks
 

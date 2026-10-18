@@ -1,4 +1,4 @@
-import type { Level, LevelImage } from "@/lib/types"
+import type { Level, LevelImage } from "@/lib/types";
 
 export const LEVELS: Level[] = [
   {
@@ -56,7 +56,8 @@ export const LEVELS: Level[] = [
     image: "garden",
     setting: "Load · shorter steps when the work increases",
     chip: "Shorten both sides",
-    summary: "The plants ask for more effort. The goal is not to lengthen one step to get through it.",
+    summary:
+      "The plants ask for more effort. The goal is not to lengthen one step to get through it.",
     detail:
       "When the walk feels harder, shorten both steps the same amount. Keep the cadence. This goal is even effort, still on the same lawn.",
     focus: ["Shorter even steps", "Same cadence", "Quiet landings"],
@@ -68,7 +69,8 @@ export const LEVELS: Level[] = [
     image: "garden",
     setting: "Balance · a closer base, still even",
     chip: "Place, then place",
-    summary: "Same plants, a narrower base. The goal is balance without quick steps.",
+    summary:
+      "Same plants, a narrower base. The goal is balance without quick steps.",
     detail:
       "The trackpad reads a closer stance. Quick, uneven steps are how this score falls apart. Place one foot, then the other, and let the plants arrive.",
     focus: ["Closer stance", "Unhurried steps", "Same step length"],
@@ -80,7 +82,8 @@ export const LEVELS: Level[] = [
     image: "garden",
     setting: "Endurance · the last third stays even",
     chip: "Still even when tired",
-    summary: "A longer plant walk. The goal is the stride you still have when you are tired.",
+    summary:
+      "A longer plant walk. The goal is the stride you still have when you are tired.",
     detail:
       "This is the first goal long enough to get sloppy near the end. The score you want is the pace and the even stride you can still produce in the last third.",
     focus: ["Late-walk pace", "Late-walk symmetry", "No sprint finish"],
@@ -104,7 +107,8 @@ export const LEVELS: Level[] = [
     image: "garden",
     setting: "Confidence · trust the cadence without watching your feet",
     chip: "Eyes up",
-    summary: "The lawn does not change. The goal is to stop looking down for the next plant.",
+    summary:
+      "The lawn does not change. The goal is to stop looking down for the next plant.",
     detail:
       "People stare at their feet and shorten one side. Keep the eyes up and let the trackpad keep the rhythm. Left and right should still match.",
     focus: ["Eyes on the horizon", "Trusted cadence", "Even stride"],
@@ -116,24 +120,25 @@ export const LEVELS: Level[] = [
     image: "garden",
     setting: "Return to activity · the long walk, symmetry kept",
     chip: "Distance, still even",
-    summary: "The longest plant walk. The goal is distance without giving symmetry back.",
+    summary:
+      "The longest plant walk. The goal is distance without giving symmetry back.",
     detail:
       "This is the goal the earlier ones were building. Twenty minutes, one cadence, and an even left and right when you are ready to be done.",
     focus: ["Long-walk pace", "Symmetry held", "Quiet finish"],
   },
-]
+];
 
 export const LEVEL_IMAGES: Record<LevelImage, string> = {
   garden: "/images/hero-garden.jpg",
   river: "/images/hero-river.jpg",
-}
+};
 
 export const LEVEL_IMAGE_ALT: Record<LevelImage, string> = {
   garden:
     "A person walking a sunlit garden path projected across a physical therapy studio floor",
   river:
     "A person walking a shallow river projected onto a physical therapy studio floor",
-}
+};
 
 export const LEVEL_MARKS: Record<number, string> = {
   1: "/art/seed.png",
@@ -146,27 +151,29 @@ export const LEVEL_MARKS: Record<number, string> = {
   8: "/art/gus-portrait.png",
   9: "/art/moon.png",
   10: "/art/flower-rose.png",
-}
+};
 
 export function levelById(id: number) {
-  return LEVELS.find((level) => level.id === id) ?? LEVELS[0]
+  return LEVELS.find((level) => level.id === id) ?? LEVELS[0];
 }
 
-export const XP_LEVELS = [0, 350, 800, 1300, 1850, 2400, 2800, 3400, 4100, 4900]
+export const XP_LEVELS = [
+  0, 350, 800, 1300, 1850, 2400, 2800, 3400, 4100, 4900,
+];
 
 export function playerLevel(xp: number) {
-  let level = 1
+  let level = 1;
   for (let index = 0; index < XP_LEVELS.length; index += 1) {
-    if (xp >= XP_LEVELS[index]) level = index + 1
+    if (xp >= XP_LEVELS[index]) level = index + 1;
   }
-  return level
+  return level;
 }
 
 export function levelBounds(xp: number) {
-  const level = playerLevel(xp)
-  const floor = XP_LEVELS[level - 1] ?? 0
-  const ceil = XP_LEVELS[level] ?? floor + 800
-  return { level, floor, ceil }
+  const level = playerLevel(xp);
+  const floor = XP_LEVELS[level - 1] ?? 0;
+  const ceil = XP_LEVELS[level] ?? floor + 800;
+  return { level, floor, ceil };
 }
 
 export const PATIENT = {
@@ -175,5 +182,5 @@ export const PATIENT = {
   initials: "JD",
   memberSince: "March 2026",
   goal: "Even stride and a steady cadence after knee recovery.",
-  clinician: "StrideBloom care team",
-}
+  clinician: "Stride Defense care team",
+};

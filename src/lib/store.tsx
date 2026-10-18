@@ -23,7 +23,7 @@ import type {
   SessionSource,
 } from "@/lib/types"
 
-const STORAGE_KEY = "stridebloom-state-v3"
+const STORAGE_KEY = "stridedefense-state-v3"
 
 type StoreValue = {
   state: AppState
