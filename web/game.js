@@ -1350,9 +1350,12 @@ class Home extends Phaser.Scene {
   }
 
   showResult(result) {
-    this.noteText.setText(result.note || '');
+    // Say who wrote the note and picked the reward, so a judge can tell Gemini from the built-in rules.
+    const by = (source) => ({ gemini: 'Gemini', rules: 'built-in rules' })[source];
+    this.noteText.setText(result.note ? `${result.note}${by(result.noteSource) ? `  (by ${by(result.noteSource)})` : ''}` : '');
     if (result.reward && result.receipt) {
-      this.rewardText.setText(`Reward: ${result.reward.name}  ·  ${result.receipt.network}  ·  $${result.receipt.amountUsd}`);
+      const picker = by(result.reward.source) ? `  ·  picked by ${by(result.reward.source)}` : '';
+      this.rewardText.setText(`Reward: ${result.reward.name}  ·  ${result.receipt.network}  ·  $${result.receipt.amountUsd}${picker}`);
       say(result.reward.line || `You earned ${result.reward.name}!`);
     }
     this.layoutCard();

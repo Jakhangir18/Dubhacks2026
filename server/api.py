@@ -13,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
-from server import gait_review, perceive, therapist
+from server import gait_review, gemini, perceive, therapist
 from server.store import Store
 
 router = APIRouter(prefix="/api")
@@ -30,6 +30,21 @@ def status() -> dict[str, Any]:
         "visa": os.environ.get("VISA_MODE", "mock"),
         "perceptron": bool(os.environ.get("PERCEPTRON_API_KEY")),
     }
+
+
+@router.get("/health")
+async def health() -> dict[str, Any]:
+    """Real calls, for the panel's Check button only (the game reads /status, which must stay instant).
+    Each entry: {"ok": bool, "detail": str}. Perceptron is not called: every call is paid."""
+    _, gemini_err = await gemini.generate_json("Reply with JSON only.", 'Return {"ok": true}.', timeout=10, temperature=0)
+    checks = {
+        "gemini": gemini_err,
+        "mongodb": await run_in_threadpool(store.ping),
+        "backboard": await therapist.backboard_ping(),
+        "perceptron": None if os.environ.get("PERCEPTRON_API_KEY") else "no PERCEPTRON_API_KEY",
+    }
+    return {k: {"ok": err is None, "detail": err or ("key set, not called" if k == "perceptron" else "answered")}
+            for k, err in checks.items()}
 
 
 # ---------------------------------------------------------------- players and therapist limits
