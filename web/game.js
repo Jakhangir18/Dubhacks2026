@@ -685,11 +685,11 @@ class Play extends Phaser.Scene {
 
     this.fx = {
       petals: this.add.particles(0, 0, 'petal', { speed: { min: 150, max: 420 }, lifespan: 900, rotate: { min: 0, max: 360 },
-        scale: { start: 1.1, end: 0.2 }, gravityY: 300, maxParticles: 32, maxAliveParticles: 32, emitting: false }).setDepth(20),
+        scale: { start: 1.1, end: 0.2 }, gravityY: 300, maxAliveParticles: 32, emitting: false }).setDepth(20),
       sparks: this.add.particles(0, 0, 'spark', { speed: { min: 120, max: 360 }, lifespan: 600, scale: { start: 1, end: 0 },
-        tint: [C.cyan, C.white, C.green], maxParticles: 28, maxAliveParticles: 28, emitting: false }).setDepth(20),
+        tint: [C.cyan, C.white, C.green], maxAliveParticles: 28, emitting: false }).setDepth(20),
       goo: this.add.particles(0, 0, 'goo', { speed: { min: 60, max: 260 }, lifespan: 700, scale: { start: 1, end: 0.3 },
-        maxParticles: 20, maxAliveParticles: 20, emitting: false }).setDepth(20),
+        maxAliveParticles: 20, emitting: false }).setDepth(20),
     };
 
     this.off = onFoot((ev) => {
