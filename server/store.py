@@ -8,6 +8,7 @@ import math
 import os
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -134,6 +135,31 @@ class Store:
                 db["sessions"].append(doc)
                 self._save(db)
         return doc
+
+    # ---------- gait (side-camera analysis from gait.py) ----------
+    def add_gait(self, name: str, summary: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+        doc = {"id": uuid.uuid4().hex[:12], "player": name, "summary": summary, "rows": rows, "ts": time.time()}
+        if self.mongo is not None:
+            self.mongo.gaits.insert_one(dict(doc))
+        else:
+            with self.lock:
+                db = self._load()
+                db.setdefault("gaits", []).append(doc)
+                self._save(db)
+        return doc
+
+    def gaits(self, name: str, limit: int = 30, with_rows: bool = False) -> list[dict[str, Any]]:
+        """Newest first. Rows (per-frame data) are left out unless asked for: they are the bulk of the size."""
+        if self.mongo is not None:
+            rows = list(self.mongo.gaits.find({"player": name}, {"_id": 0}).sort("ts", -1).limit(limit))
+        else:
+            with self.lock:
+                rows = [g for g in self._load().get("gaits", []) if g["player"] == name]
+            rows = sorted(rows, key=lambda g: g["ts"], reverse=True)[:limit]
+        return rows if with_rows else [{k: v for k, v in g.items() if k != "rows"} for g in rows]
+
+    def gait(self, name: str, gait_id: str) -> dict[str, Any] | None:
+        return next((g for g in self.gaits(name, limit=10_000, with_rows=True) if g["id"] == gait_id), None)
 
     def sessions(self, name: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         if self.mongo is not None:

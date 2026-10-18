@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import os
 import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
@@ -152,6 +153,48 @@ async def session(inp: SessionIn, background: BackgroundTasks) -> dict[str, Any]
 @router.get("/sessions/{name}")
 def sessions(name: str) -> list[dict[str, Any]]:
     return store.sessions(name, limit=30)
+
+
+# ---------------------------------------------------------------- gait (posted by gait.py after a side-camera walk)
+GAIT_SUMMARY_KEYS = ("direction", "cadence", "strikes", "stride", "flexion", "asymmetry")
+GAIT_ROW_KEYS = ("t",) + tuple(f"{s}_{k}" for s in "LR" for k in ("hip_x", "knee", "ankle_x", "heel_x", "toe_x"))
+MAX_GAIT_ROWS = 20_000   # about 11 minutes at 30 fps
+
+
+class GaitIn(BaseModel):
+    player: str = "Player"
+    summary: dict[str, Any]
+    rows: list[dict[str, Any]] = []
+
+
+def clean_gait_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep only known columns, as finite numbers or None, so one bad value cannot poison the stored walk."""
+    def num(v: Any) -> float | None:
+        ok = isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+        return round(float(v), 2) if ok else None
+    return [{k: num(r.get(k)) for k in GAIT_ROW_KEYS} for r in rows[:MAX_GAIT_ROWS]]
+
+
+@router.post("/gait", status_code=201)
+async def post_gait(inp: GaitIn) -> dict[str, Any]:
+    name = inp.player.strip()[:40] or "Player"
+    summary = {k: inp.summary[k] for k in GAIT_SUMMARY_KEYS if k in inp.summary}
+    doc = await run_in_threadpool(store.add_gait, name, summary, clean_gait_rows(inp.rows))
+    return {"id": doc["id"], "ts": doc["ts"], "frames": len(doc["rows"])}
+
+
+@router.get("/gait/{name}")
+def gaits(name: str) -> list[dict[str, Any]]:
+    """Walks for a player, newest first, without the per-frame rows."""
+    return store.gaits(name)
+
+
+@router.get("/gait/{name}/{gait_id}")
+def get_gait(name: str, gait_id: str) -> dict[str, Any]:
+    doc = store.gait(name, gait_id)
+    if doc is None:
+        raise HTTPException(404, "no such walk")
+    return doc
 
 
 @router.get("/limits/{name}")

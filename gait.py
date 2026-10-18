@@ -13,15 +13,18 @@
     g.save_csv("walk.csv")
 
 Demo:  python gait.py --video walk.mp4   |   python gait.py --camera-name iphone     (q to stop)
+Send the result to the dashboard server:  add  --server http://localhost:8000 --player Alex   (or call post_gait)
 Use one GaitTracker per video stream. Check:  python test_gait.py
 """
 import argparse
 import atexit
 import csv
+import json
 import math
 import os
 import statistics
 import time
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
@@ -109,6 +112,20 @@ def report(res):
     print(f"Asymmetry: stride time {f(res['asymmetry']['stride'], '%')}, knee bend {f(res['asymmetry']['flexion'], '%')}")
 
 
+def post_gait(server, player, summary, rows):
+    """Send a finished walk to the game server (POST /api/gait). Returns {id, ts, frames}.
+    Raises RuntimeError if there is nothing to send or the server cannot be reached."""
+    if summary is None:
+        raise RuntimeError("Not enough pose data to send.")
+    body = json.dumps({"player": player, "summary": summary, "rows": rows}).encode()
+    req = urllib.request.Request(server.rstrip("/") + "/api/gait", body, {"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.load(resp)
+    except (urllib.error.URLError, OSError) as e:
+        raise RuntimeError(f"Could not send to {server}: {e}") from e
+
+
 class GaitTracker:
     def __init__(self):
         if not os.path.exists(MODEL):
@@ -169,6 +186,8 @@ def main():
     p.add_argument("--video", help="recorded side-view video")
     p.add_argument("--camera", type=int, help="camera index (overrides --camera-name)")
     p.add_argument("--camera-name", help="substring of camera name, e.g. iphone")
+    p.add_argument("--server", help="game server to send the result to, e.g. http://localhost:8000")
+    p.add_argument("--player", default="Player", help="player name the walk is saved under (with --server)")
     args = p.parse_args()
 
     if args.video:
@@ -208,6 +227,11 @@ def main():
     g.save_csv(f"out/gait_{stamp}.csv")
     print(f"Saved out/gait_{stamp}.csv and out/gait_{stamp}.mp4\n{n} frames")
     report(g.summary())
+    if args.server:
+        try:
+            print("Sent to server:", post_gait(args.server, args.player, g.summary(), g.rows))
+        except RuntimeError as e:
+            print(e)
 
 
 if __name__ == "__main__":
