@@ -255,6 +255,7 @@ export function summary(g) {
     formPct: g.formN ? Math.round((100 * g.formSum) / g.formN) : 0,
     score: g.score,
     liftTargetCm: g.limits.liftCm,
+    spacingCm: g.limits.spacingCm,
     normalStepCm: g.base,
   };
 }

@@ -1,6 +1,6 @@
 // Zombie Walk Home: Phaser scenes, art, HUD and input. Rules live in logic.js.
 // Floor projection, top-down: the bottom band is the walking zone; flowers and seeds come from the top.
-import { newGame, step, addEvent, summary, needCm, startAt, RULES } from './logic.js';
+import { newGame, step, addEvent, summary, needCm, startAt, applyParams, RULES } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
 import { connectBridge } from './bridge.js';
@@ -20,10 +20,33 @@ const txt = (size, color = C.white) => ({ ...TEXT, fontSize: `${size}px`, color:
 const params = new URLSearchParams(location.search);
 const settings = {
   voice: Warp.store.get('zombiewalk.voice', true),
-  limits: Warp.store.get('zombiewalk.limits', {}),   // written by the Therapist panel later
+  limits: {},                                       // the current player's limits from the server (therapist panel)
+  player: Warp.store.get('zombiewalk.player', 'Player'),
+  greeting: null,
 };
-// ?demo=1: a short game for judges and testing
-if (params.get('demo') === '1') Object.assign(settings.limits, { walkSeconds: 8, gardenPlants: 4, stormSeeds: 4 });
+
+// ---------- server calls; every one has an offline fallback ----------
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {});
+  if (!r.ok) throw new Error(`${r.status} ${path}`);
+  return r.json();
+}
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error('timeout')), ms))]);
+
+const DEMO = { walkSeconds: 8, gardenPlants: 4, stormSeeds: 4 };
+// Called before every game, so limits saved in the therapist panel apply to the next walk without a reload.
+async function loadPlayer() {
+  const name = encodeURIComponent(settings.player);
+  const [player, plan] = await Promise.allSettled([
+    withTimeout(api(`/api/player/${name}`), 3000),
+    withTimeout(api(`/api/plan/${name}`), 8000),
+  ]);
+  settings.limits = player.status === 'fulfilled' ? { ...player.value.limits } : {};
+  if (params.get('demo') === '1') Object.assign(settings.limits, DEMO);
+  settings.greeting = plan.status === 'fulfilled' ? plan.value.say : null;
+}
+let playerReady = loadPlayer();
+if (params.get('demo') === '1') Object.assign(settings.limits, DEMO);   // ?demo=1: a short game for judges
 
 function say(text) {
   if (!settings.voice || !window.speechSynthesis) return;
@@ -170,7 +193,7 @@ class Title extends Phaser.Scene {
     this.add.image(W / 2, H * 0.22, 'house').setScale(Math.min(1.2, H / 600));
     this.add.text(W / 2, H * 0.47, 'ZOMBIE WALK HOME', txt(Math.round(Math.min(W / 11, 96)), C.green)).setOrigin(0.5);
     this.add.text(W / 2, H * 0.6, 'Walk in place to start', txt(40, C.yellow)).setOrigin(0.5);
-    this.add.text(W / 2, H * 0.68, 'or press Enter', txt(26)).setOrigin(0.5);
+    this.add.text(W / 2, H * 0.68, `or press Enter · player: ${settings.player}`, txt(26)).setOrigin(0.5);
     const z = this.add.image(W / 2, H * 0.84, 'zombie').setScale(1.4);
     this.tweens.add({ targets: z, y: z.y - 14, duration: 450, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
     const steps = [];
@@ -185,7 +208,11 @@ class Title extends Phaser.Scene {
     this.events.once('shutdown', () => { this.off(); this.scale.off('resize', this.restartOnResize, this); });
   }
   restartOnResize() { if (!this.started) this.scene.restart(); }
-  go() { if (!this.started) { this.started = true; this.scene.start('play'); } }
+  go() {
+    if (this.started) return;
+    this.started = true;
+    playerReady.then(() => this.scene.start('play'));
+  }
 }
 
 // ---------- the walk home ----------
@@ -242,6 +269,7 @@ class Play extends Phaser.Scene {
     });
     this.events.once('shutdown', () => this.off());
     this.input.keyboard.on('keydown-SPACE', () => { this.paused = !this.paused; });
+    if (settings.greeting) { this.coachText.setText(settings.greeting); setTimeout(() => say(settings.greeting), 2600); }
     const jump = params.get('act');
     if (jump) { startAt(this.g, jump); params.delete('act'); }   // development shortcut, first game only
     this.showAct();
@@ -289,6 +317,23 @@ class Play extends Phaser.Scene {
     return 1;
   }
 
+  async askCoach() {
+    const g = this.g;
+    const sum = summary(g);
+    let cue;
+    try {
+      const out = await withTimeout(api('/api/coach', { player: settings.player, summary: sum }), 7000);
+      if (!this.sys.isActive() || this.g !== g) return;   // a new game started meanwhile
+      if (out.params) applyParams(g, out.params);
+      cue = out.say;
+    } catch {
+      cue = this.localCue(sum);
+    }
+    if (!this.sys.isActive() || this.g !== g || !cue) return;
+    this.coachText.setText(cue);
+    say(cue);
+  }
+
   localCue(sum) {
     if (sum.cadence < this.g.limits.minCadence) return 'A little faster, keep stepping';
     if (sum.asymmetryPct !== null && sum.asymmetryPct > 20) return 'Even steps, left and right the same';
@@ -312,12 +357,10 @@ class Play extends Phaser.Scene {
     }
     for (const th of out.resolved) this.resolveFx(th, L);
 
-    // coach cue every 20 s (the server coach replaces this later)
+    // coach cue every 20 s: the server therapist (Gemini inside the therapist's limits), local rules offline
     if (this.g.t - this.lastCue > 20) {
       this.lastCue = this.g.t;
-      const cue = this.localCue(summary(this.g));
-      this.coachText.setText(cue);
-      say(cue);
+      this.askCoach();
     }
 
     this.drawWorld(L, out, dt);
@@ -428,23 +471,39 @@ class Home extends Phaser.Scene {
     this.tweens.add({ targets: house, scale: house.scale * 1.06, duration: 600, yoyo: true, repeat: -1 });
     this.add.particles(W / 2, H * 0.2, 'spark', { speed: { min: 80, max: 260 }, lifespan: 1400, quantity: 2,
       tint: [C.yellow, C.green, C.cyan, C.magenta], scale: { start: 1.2, end: 0 } });
-    this.add.text(W / 2, H * 0.47, 'HOME!', txt(84, C.green)).setOrigin(0.5);
+    this.add.text(W / 2, H * 0.43, 'HOME!', txt(80, C.green)).setOrigin(0.5);
     const lines = [
       `Score ${s.score}   ·   Form ${s.formPct}%`,
       `${s.steps} steps   ·   ${s.cadence} steps/min`,
       `Flowers stomped ${s.stompPct ?? 0}%   ·   Seeds dodged ${s.dodgePct ?? 0}%`,
       `High steps  left ${s.highLiftAvgCm?.L ?? '-'} cm   right ${s.highLiftAvgCm?.R ?? '-'} cm`,
     ];
-    lines.forEach((l, i) => this.add.text(W / 2, H * 0.58 + i * 50, l, txt(32)).setOrigin(0.5));
-    this.add.text(W / 2, H * 0.92, 'Press R to walk again', txt(28, C.yellow)).setOrigin(0.5);
+    lines.forEach((l, i) => this.add.text(W / 2, H * 0.51 + i * 38, l, txt(26)).setOrigin(0.5));
+    this.add.text(W / 2, H * 0.92, 'Press R to walk again', txt(24, C.yellow)).setOrigin(0.5);
+    this.noteText = this.add.text(W / 2, H * 0.74, data.result ? data.result.note : 'The coach is writing your note…', { ...txt(22, C.cyan), wordWrap: { width: W * 0.8 }, align: 'center' }).setOrigin(0.5);
+    this.rewardText = this.add.text(W / 2, H * 0.84, '', txt(26, C.magenta)).setOrigin(0.5);
+    if (data.result) this.showResult(data.result);
     say(`You made it home. ${s.stompPct ?? 0} percent of flowers stomped. Great walking.`);
-    this.input.keyboard.on('keydown-R', () => this.scene.start('title'));
+    this.input.keyboard.on('keydown-R', () => { playerReady = loadPlayer(); this.scene.start('title'); });
     const again = () => this.scene.restart(data);
     this.scale.once('resize', again);
     this.events.once('shutdown', () => this.scale.off('resize', again));
     if (data.replay) return;
     data.replay = true;
     window.dispatchEvent(new CustomEvent('zombiewalk:session', { detail: s }));
+    if (params.get('scene') === 'home') return;   // preview only, nothing to save
+    const verified = (s.formPct ?? 0) >= 40;        // walking was verified for most of the session
+    withTimeout(api('/api/session', { player: settings.player, summary: s, verified }), 25000)
+      .then((result) => { data.result = result; if (this.sys.isActive()) this.showResult(result); })
+      .catch(() => { if (this.sys.isActive()) this.noteText.setText('Not saved: the game server did not answer.'); });
+  }
+
+  showResult(result) {
+    this.noteText.setText(result.note || '');
+    if (result.reward && result.receipt) {
+      this.rewardText.setText(`Reward: ${result.reward.name}  ·  ${result.receipt.network}  ·  $${result.receipt.amountUsd}`);
+      say(result.reward.line || `You earned ${result.reward.name}!`);
+    }
   }
 }
 

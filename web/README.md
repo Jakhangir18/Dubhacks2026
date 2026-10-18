@@ -12,6 +12,27 @@ python3 -m venv .venv && .venv/bin/pip install -r server/requirements.txt     # 
 
 Without the server (keyboard and camera still work): `cd web && python3 -m http.server 8000`.
 
+## Therapist and parent panel
+
+Open http://localhost:8000/therapist.html (with the server running).
+
+- Pick or create a player, set the limits the coach must stay inside (minimum pace, act lengths, lift target and range, flower spacing, session length), add the parent's reward list, write notes for the coach.
+- **Play as this player** makes that player current for the game (limits, greeting, memory, rewards).
+- The session table shows every finished game with the coach's note.
+- Chips at the top show which sponsor integrations are live.
+
+## Keys and sponsor features
+
+Create a file named `.env` in the repo root (it is gitignored; never commit keys):
+
+```
+GEMINI_API_KEY=...        # MLH Best Use of Gemini API: live coach cues, session notes, reward host
+BACKBOARD_API_KEY=...     # MLH Best Use of Backboard: the coach remembers each player across sessions
+MONGODB_URI=mongodb+srv://...   # MLH Best Use of MongoDB Atlas: players and sessions
+```
+
+Restart the server after editing it. Without keys everything still works on rule-based fallbacks and a local file; the Visa checkout stays a labelled mock until Visa sandbox credentials exist.
+
 ## Camera (press V in the game)
 
 1. Connect the phone as a webcam (Mac: Continuity Camera; Windows: an app such as Camo) or plug in a webcam.
