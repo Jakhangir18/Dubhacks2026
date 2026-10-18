@@ -44,6 +44,8 @@ const settings = {
   player: Warp.store.get('zombiewalk.player', 'Player'),
   greeting: null,
   perceptron: false,                                // consent on and a key on the server
+  aiConsent: false,                                 // the player's AI consent: lines about their walk may use Gemini's voice
+  geminiVoice: false,                               // the server can speak with Gemini (/api/status voice)
 };
 
 // ---------- server calls; every one has an offline fallback ----------
@@ -69,6 +71,9 @@ async function loadPlayer() {
   settings.limits = player.status === 'fulfilled' ? { ...player.value.limits } : {};
   settings.perceptron = player.status === 'fulfilled' && player.value.perceptronConsent === true &&
     status.status === 'fulfilled' && status.value.perceptron === true;
+  settings.aiConsent = player.status === 'fulfilled' && player.value.aiReviewConsent === true;
+  settings.geminiVoice = status.status === 'fulfilled' && status.value.voice === true;
+  if (settings.geminiVoice) warmVoice();
   if (params.get('demo') === '1') Object.assign(settings.limits, DEMO);
   const speed = Warp.store.get('zombiewalk.speedScale', null);   // the operator's [ ] setting wins on this laptop
   if (Number.isFinite(speed)) settings.limits.speedScale = speed;
@@ -77,18 +82,67 @@ async function loadPlayer() {
 let playerReady = loadPlayer();
 if (params.get('demo') === '1') Object.assign(settings.limits, DEMO);   // ?demo=1: a short game for judges
 
+// ---------- the coach's voice ----------
+// Gemini's voice through the server (/api/tts, cached there) when it has a key; the browser's own voice otherwise,
+// or when a line does not come back in VOICE_WAIT_MS. Lines about this player's walk (personal) go to Gemini only with
+// their AI consent, and the server takes their name out; the story lines carry nothing personal.
+const VOICE_WAIT_MS = 6000;
 let speechId = 0;
 let currentUtterance = null;   // held so Chrome cannot garbage-collect it before onend fires
+let currentAudio = null;
 let unduckTimer = null;
-function say(text) {
-  if (!settings.voice || !window.speechSynthesis) return;
+
+function say(text, { personal = false } = {}) {
+  if (!settings.voice || !text) return;
   const id = ++speechId;
+  stopVoice();
+  if (settings.geminiVoice && (!personal || settings.aiConsent)) {
+    speakGemini(text, personal, id).catch(() => { if (id === speechId) speakBrowser(text, id); });
+  } else {
+    speakBrowser(text, id);
+  }
+}
+
+function stopVoice() {
+  try { window.speechSynthesis?.cancel(); } catch { /* none */ }
+  if (currentAudio) { currentAudio.pause(); URL.revokeObjectURL(currentAudio.src); currentAudio = null; }
+  sound.duck(false);
+  clearTimeout(unduckTimer);
+}
+
+async function speakGemini(text, personal, id) {
+  const r = await withTimeout(fetch('/api/tts', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text, ...(personal && { player: settings.player }) }) }), VOICE_WAIT_MS);
+  if (!r.ok) throw new Error(`tts ${r.status}`);
+  const blob = await r.blob();
+  if (id !== speechId) return;   // a newer line took over while this one was on its way
+  const audio = new Audio(URL.createObjectURL(blob));
+  const done = () => { if (currentAudio === audio) { URL.revokeObjectURL(audio.src); currentAudio = null; sound.duck(false); } };
+  audio.onended = audio.onerror = done;
+  currentAudio = audio;
+  sound.duck(true);
+  await audio.play();   // a browser that blocks it (no click yet) throws, and the browser voice speaks instead
+}
+
+// The best voice this browser has: a natural or premium English one beats the robotic default.
+let browserVoice;
+function pickVoice() {
+  const voices = window.speechSynthesis?.getVoices() || [];
+  const english = voices.filter((v) => /^en[-_]/i.test(v.lang));
+  const rank = (v) => [/natural/i, /premium/i, /enhanced/i, /google/i, /samantha|ava|allison|zoe/i]
+    .findIndex((re) => re.test(v.name));
+  const ranked = english.map((v) => [rank(v) < 0 ? 99 : rank(v), v]).sort((a, b) => a[0] - b[0]);
+  return ranked[0]?.[1] || null;
+}
+window.speechSynthesis?.addEventListener?.('voiceschanged', () => { browserVoice = pickVoice(); });
+
+function speakBrowser(text, id) {
+  if (!window.speechSynthesis) return;
   try {
-    speechSynthesis.cancel();
-    sound.duck(false);
-    clearTimeout(unduckTimer);
     const u = new SpeechSynthesisUtterance(text);
     currentUtterance = u;
+    browserVoice = browserVoice ?? pickVoice();
+    if (browserVoice) u.voice = browserVoice;
     u.rate = 1.05;
     const unduck = () => { if (id === speechId) { sound.duck(false); currentUtterance = null; clearTimeout(unduckTimer); } };
     // Safety net if onend never arrives: check after an estimated speaking time, and keep checking
@@ -103,6 +157,19 @@ function say(text) {
     unduckTimer = setTimeout(check, (String(text).split(/\s+/).length / 2.5 + 1) * 1000);
     speechSynthesis.speak(u);
   } catch { sound.duck(false); }
+}
+
+// The story lines are the same every game: have the server make them once, ahead of time, one at a time (the free
+// tier counts requests per minute). Already made lines come straight from its cache.
+let warmed = false;
+async function warmVoice() {
+  if (warmed) return;
+  warmed = true;
+  const lines = [...Object.values(ACTS).map((a) => a.intro.join(' ')), ...Object.values(ROUND_LINES)];
+  for (const text of lines) {
+    try { await withTimeout(fetch('/api/tts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) }), 20000); } catch { /* the game speaks with the browser voice */ }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
 }
 
 // ---------- keyboard input (development and fallback) ----------
@@ -311,7 +378,7 @@ window.addEventListener('keydown', (e) => {
     f: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()),
     m: () => {
       settings.voice = !settings.voice; Warp.store.set('zombiewalk.voiceOn', settings.voice);
-      if (!settings.voice) { ++speechId; window.speechSynthesis?.cancel(); sound.duck(false); }
+      if (!settings.voice) { ++speechId; stopVoice(); }
     },
     n: () => sound.toggle(),
     k: () => { const el = document.getElementById('keys'); el.hidden = !el.hidden; },
@@ -762,7 +829,7 @@ class Play extends Phaser.Scene {
     };
     window.addEventListener('resize', onResize);
     this.events.once('shutdown', () => window.removeEventListener('resize', onResize));
-    if (settings.greeting) { this.coachLine = settings.greeting; setTimeout(() => say(settings.greeting), 2600); }
+    if (settings.greeting) { this.coachLine = settings.greeting; setTimeout(() => say(settings.greeting, { personal: true }), 2600); }
     const jump = params.get('act');
     if (jump) { startAt(this.g, jump); params.delete('act'); }   // development shortcut, first game only
     this.nextSegment();
@@ -975,7 +1042,7 @@ class Play extends Phaser.Scene {
     this.coachLine = cue;
     this.nextGardenUpdate = 0;
     logRemote({ what: 'cue', say: cue, act: g.act, round: g.round, t: Math.round(g.t) });
-    if (speak) say(cue);
+    if (speak) say(cue, { personal: true });
   }
 
   localCue(sum) {
@@ -1258,7 +1325,7 @@ class Home extends Phaser.Scene {
     }
     if (data.result) this.showResult(data.result);
     if (data.gaitStatus) this.showGait();
-    say(`${ENDING} ${s.stompPct ?? 0} percent of plants stomped. Great walking.`);
+    say(`${ENDING} ${s.stompPct ?? 0} percent of plants stomped. Great walking.`, { personal: true });
     const playAgain = () => {
       // Once per walk, and not under the zone setup. The flag lives on this walk's data, not on the scene: Phaser
       // reuses the scene for every game, and a flag left on it from the last walk ignored every later restart.
@@ -1409,7 +1476,7 @@ class Home extends Phaser.Scene {
       if (this.sys.isActive()) this.showGait();
       if (review.status === 'done' || review.status === 'failed') {
         const words = review.review?.playerFeedback;
-        if (review.status === 'done' && words && !data.gaitSpoken) { data.gaitSpoken = true; say(words); }
+        if (review.status === 'done' && words && !data.gaitSpoken) { data.gaitSpoken = true; say(words, { personal: true }); }
         if (review.status === 'done' && data.gaitShownAt === undefined) data.gaitShownAt = performance.now();
         if (review.status === 'done' && !data.reportOpened) {
           data.reportOpened = true;
@@ -1447,7 +1514,7 @@ class Home extends Phaser.Scene {
     if (result.reward && result.receipt) {
       const picker = by(result.reward.source) ? `  ·  picked by ${by(result.reward.source)}` : '';
       this.rewardText.setText(`Reward: ${result.reward.name}  ·  ${result.receipt.network}  ·  $${result.receipt.amountUsd}${picker}`);
-      say(result.reward.line || `You earned ${result.reward.name}!`);
+      say(result.reward.line || `You earned ${result.reward.name}!`, { personal: true });
     }
     this.layoutCard();
   }

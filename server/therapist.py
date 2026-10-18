@@ -174,7 +174,9 @@ async def coach(summary: dict[str, Any], limits: dict[str, Any], side: dict[str,
     source = "gemini"
     if not out or not isinstance(out.get("say"), str):
         out, source = rule_cue(summary, limits, side), "rules"
-    say = " ".join(str(out["say"]).split()[:14])
+    # A cue while walking is one short instruction; the rest between rounds says what went well, one fix and to walk
+    # when ready, so it gets room for its two sentences instead of being cut off mid-sentence.
+    say = " ".join(str(out["say"]).split()[: 32 if summary.get("act") == "rest" else 14])
     return {"say": say, "params": clamp_params(out.get("params"), limits), "source": source}
 
 

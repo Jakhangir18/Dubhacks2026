@@ -8,6 +8,8 @@ Environment (.env next to this repo root, never committed):
     GEMINI_API_KEY      coach cues and reports (MLH Best Use of Gemini API); rule-based without it
     GEMINI_MODEL        default gemini-flash-latest
     GEMINI_REVIEW_MODEL the gait review's model (pin one; "-latest" aliases can change); default GEMINI_MODEL
+    GEMINI_TTS_MODEL    the coach's voice (server/tts.py); default gemini-3.8-flash-tts (free tier); GEMINI_TTS_VOICE
+                        (default Sulafat, warm) and GEMINI_TTS_STYLE change how it sounds; spoken lines are cached in data/tts
     BACKBOARD_API_KEY   long-term therapist memory per player (MLH Best Use of Backboard)
     MONGODB_URI         players and sessions in MongoDB Atlas; a local JSON file without it
     VISA_MODE           mock (default) until Visa sandbox credentials exist
