@@ -62,7 +62,7 @@ MAX_SESSION_BYTES = MAX_SESSION_FRAMES * MAX_FRAME_CHARS + 100_000
 @app.middleware("http")
 async def cap_perceive_body(request: Request, call_next):
     """Perception routes relay to a paid API: refuse a huge body before it is read."""
-    limits = {"/api/perceive": MAX_PERCEIVE_BYTES, "/api/perceive/session": MAX_SESSION_BYTES}
+    limits = {"/api/perceive": MAX_PERCEIVE_BYTES, "/api/perceive/session": MAX_SESSION_BYTES, "/api/events": MAX_EVENTS_BYTES}
     if request.method == "POST" and request.url.path in limits:
         size = request.headers.get("content-length")
         if size is None or not size.isdigit() or int(size) > limits[request.url.path]:
@@ -73,7 +73,9 @@ async def cap_perceive_body(request: Request, call_next):
 game_clients: set[WebSocket] = set()
 VALID_KINDS = {"strike", "lift"}
 MAX_SHOES = 4   # boxes per "shoes" sighting from feet.py
-MAX_FRAME_CHARS = 200_000   # a 480 px JPEG data URL from feet.py is about 40 KB
+MAX_FEED_FRAME_CHARS = 200_000   # a feet.py preview JPEG (long side 480 px, quality 60) is well under this
+MAX_EVENTS_PER_BATCH = 50
+MAX_EVENTS_BYTES = 1_000_000
 
 
 def clean_shoes(ev: dict[str, Any]) -> dict[str, Any] | None:
@@ -106,7 +108,7 @@ def clean_event(ev: Any) -> dict[str, Any] | None:
         return clean_shoes(ev)
     if ev.get("kind") == "frame":
         jpeg = ev.get("jpeg")
-        if not isinstance(jpeg, str) or not jpeg.startswith("data:image/jpeg;base64,") or len(jpeg) > MAX_FRAME_CHARS:
+        if not isinstance(jpeg, str) or not jpeg.startswith("data:image/jpeg;base64,") or len(jpeg) > MAX_FEED_FRAME_CHARS:
             return None
         return {"kind": "frame", "jpeg": jpeg, "source": str(ev.get("source", "feet"))[:20]}
     if ev.get("foot") not in {"L", "R"} or ev.get("kind") not in VALID_KINDS:
@@ -164,9 +166,16 @@ async def ws_events(ws: WebSocket) -> None:
             except json.JSONDecodeError:
                 continue  # one garbled frame must not cut the Pi off
             batch = msg if isinstance(msg, list) else [msg]
-            await broadcast([e for e in (clean_event(x) for x in batch) if e])
+            await broadcast(clean_batch(batch))
     except (WebSocketDisconnect, RuntimeError, KeyError):
         return
+
+
+def clean_batch(batch: list[Any]) -> list[dict[str, Any]]:
+    """At most MAX_EVENTS_PER_BATCH events, and one preview frame: the newest."""
+    events = [e for e in (clean_event(x) for x in batch[:MAX_EVENTS_PER_BATCH]) if e]
+    frames = [e for e in events if e["kind"] == "frame"]
+    return [e for e in events if e["kind"] != "frame"] + frames[-1:]
 
 
 class EventsIn(BaseModel):
@@ -175,7 +184,7 @@ class EventsIn(BaseModel):
 
 @app.post("/api/events")
 async def post_events(inp: EventsIn) -> dict[str, Any]:
-    events = [e for e in (clean_event(x) for x in inp.events) if e]
+    events = clean_batch(inp.events)
     listeners = await broadcast(events)
     return {"accepted": len(events), "listeners": listeners}
 

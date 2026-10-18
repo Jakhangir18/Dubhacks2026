@@ -92,5 +92,7 @@
     },
   };
 
-  window.Warp = { homography, mapPoint, matrix3d, apply, defaultCorners, handles, store, CORNERS_KEY: 'zombiewalk.corners' };
+  window.Warp = { homography, mapPoint, matrix3d, apply, defaultCorners, handles, store, CORNERS_KEY: 'zombiewalk.corners',
+    CAM_KEY: 'zombiewalk.camToField',          // camera -> field homography from the camera window's shoe calibration
+    FIELD: { width: 720, height: 1280 } };     // the game field in pixels, portrait like the pad
 })();

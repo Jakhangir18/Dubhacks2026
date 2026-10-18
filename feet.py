@@ -90,11 +90,14 @@ class ShoeSender:
 
     def __init__(self, server, source="feet"):
         u = urllib.parse.urlsplit(server)
+        if u.scheme not in ("http", "https") or not u.hostname:
+            raise SystemExit(f"--server needs a full URL like https://host:8443, got {server!r}")
         self.https = u.scheme == "https"
         self.host, self.port = u.hostname, u.port or (443 if self.https else 80)
         self.source = source
         self.conn = None
         self.pending = None
+        self.frame = None   # the newest preview frame waits in its own slot, so a busy connection never loses it
         self.lock = threading.Condition()
         self.listeners = None
         threading.Thread(target=self._run, daemon=True).start()
@@ -103,15 +106,18 @@ class ShoeSender:
         event = {"kind": "shoes", "source": self.source,
                  "boxes": [[round(f.x1 / w, 4), round(f.y1 / h, 4), round(f.x2 / w, 4), round(f.y2 / h, 4), round(f.conf, 3)]
                            for f in boxes]}
-        events = [event]
+        preview = None
         if frame is not None:   # a small JPEG of what the camera sees, for the calibration clicks in the browser
-            small = cv2.resize(frame, (480, int(480 * h / w)))
+            scale = 480 / max(w, h)   # long side 480 px, portrait or landscape
+            small = cv2.resize(frame, (max(1, round(w * scale)), max(1, round(h * scale))))
             ok, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 60])
             if ok:
-                events.append({"kind": "frame", "source": self.source,
-                               "jpeg": "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()})
+                preview = {"kind": "frame", "source": self.source,
+                           "jpeg": "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()}
         with self.lock:
-            self.pending = {"events": events}
+            self.pending = event
+            if preview is not None:
+                self.frame = preview
             self.lock.notify()
 
     def _run(self):
@@ -119,16 +125,17 @@ class ShoeSender:
             with self.lock:
                 while self.pending is None:
                     self.lock.wait()
-                body, self.pending = json.dumps(self.pending), None
+                events = [self.pending] + ([self.frame] if self.frame is not None else [])
+                body, self.pending, self.frame = json.dumps({"events": events}), None, None
             try:
                 if self.conn is None:
                     cls = http.client.HTTPSConnection if self.https else http.client.HTTPConnection
-                    self.conn = cls(self.host, self.port, timeout=0.5)
+                    self.conn = cls(self.host, self.port, timeout=3)   # a frame batch over Wi-Fi can take a moment
                 self.conn.request("POST", "/api/events", body=body, headers={"Content-Type": "application/json"})
                 r = self.conn.getresponse()
                 data = r.read()
                 self.listeners = json.loads(data).get("listeners") if r.status == 200 else None
-            except (OSError, http.client.HTTPException, ValueError):
+            except Exception:  # noqa: BLE001 - a bad reply must not kill the sender thread; the next frame retries
                 self.listeners = None
                 if self.conn is not None:
                     self.conn.close()
@@ -190,6 +197,8 @@ def main():
     if args.record:
         path = time.strftime("clip_%Y%m%d_%H%M%S.mp4")
         size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+        if args.rotate in (90, 270):
+            size = (size[1], size[0])   # the clip holds the rotated frames
         writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), cap.get(cv2.CAP_PROP_FPS) or 30, size)
         atexit.register(writer.release)
         print("Recording to", path)

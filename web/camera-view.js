@@ -6,8 +6,10 @@ import { onFoot } from './bus.js';
 import { Perceiver } from './perceive.js';
 import { send, listen } from './link.js';
 
-const CAM_KEY = 'zombiewalk.camToField';
+const CAM_KEY = window.Warp.CAM_KEY;
 const CORNERS = ['FRONT-LEFT', 'FRONT-RIGHT', 'BACK-RIGHT', 'BACK-LEFT'];
+// The saved calibration, read once and after each save (this window is the only writer).
+let saved = { points: store.get(CAM_KEY + '.points', null), picture: store.get(CAM_KEY + '.picture', 'local') };
 
 const store = window.Warp.store;
 const $ = (id) => document.getElementById(id);
@@ -52,8 +54,9 @@ function drawShoes(w, h) {
       octx.beginPath(); octx.arc((x1 + x2) / 2 * w, y2 * h, 8, 0, Math.PI * 2); octx.fill();   // the toe tip the game uses
     }
   }
-  const saved = store.get(CAM_KEY + '.points', null);
-  const pts = calib.active ? calib.points : (Array.isArray(saved) ? saved : []);
+  const pts = calib.active ? calib.points : (Array.isArray(saved.points) ? saved.points : []);
+  const picture = feedLive() ? 'feed' : 'local';
+  if (!calib.active && saved.picture !== picture) return;   // clicked on the other camera's picture: not shown over this one
   octx.strokeStyle = '#ff2d95'; octx.fillStyle = '#ff2d95'; octx.lineWidth = 4;
   pts.forEach(([x, y], i) => {
     octx.beginPath(); octx.arc(x * w, y * h, 10, 0, Math.PI * 2); octx.fill();
@@ -62,14 +65,15 @@ function drawShoes(w, h) {
   if (pts.length === 4) { octx.beginPath(); pts.forEach(([x, y], i) => (i ? octx.lineTo(x * w, y * h) : octx.moveTo(x * w, y * h))); octx.closePath(); octx.stroke(); }
 }
 
+const feedLive = () => performance.now() - camFeed.at < 2000;
+
 function drawSkeleton(lm, state) {
-  const live = performance.now() - camFeed.at < 2000;
-  $('feed').hidden = !live; $('feed-note').hidden = !live;
+  const live = feedLive();   // feet.py's picture replaces the local video; the pose skeleton belongs to the local video only
   const w = live ? camFeed.w : (video.videoWidth || 1280), h = live ? camFeed.h : (video.videoHeight || 720);
   if (overlay.width !== w || overlay.height !== h) { overlay.width = w; overlay.height = h; }
   octx.clearRect(0, 0, w, h);
   drawShoes(w, h);
-  if (!lm) return;
+  if (!lm || live) return;
   octx.lineWidth = 6; octx.lineCap = 'round';
   octx.strokeStyle = '#ffffff88';
   octx.beginPath(); octx.moveTo(lm[23].x * w, lm[23].y * h); octx.lineTo(lm[24].x * w, lm[24].y * h); octx.stroke();
@@ -189,7 +193,7 @@ listen((m) => {
   else if (m.type === 'shoes-seen' && Array.isArray(m.boxes)) { shoes = { boxes: m.boxes, at: performance.now() }; }
   else if (m.type === 'frame-seen' && typeof m.jpeg === 'string') {
     const img = $('feed');
-    img.onload = () => { camFeed = { at: performance.now(), w: img.naturalWidth, h: img.naturalHeight }; if (!tracker.running) drawSkeleton(null, tracker.state); };
+    img.onload = () => { camFeed = { at: performance.now(), w: img.naturalWidth, h: img.naturalHeight }; };
     img.src = m.jpeg;
   }
   else if (m.type === 'mirror') { $('mirror').src = m.url; gameSeen = performance.now(); }
@@ -217,7 +221,9 @@ setInterval(() => {
 }, 1000);
 
 // Pose steps off when feet.py shoes drive the game (the game ignores them anyway once shoes arrive).
-$('pose').onchange = () => { tracker.emit = $('pose').checked; };
+$('pose').checked = store.get('zombiewalk.poseSteps', true);
+tracker.emit = $('pose').checked;
+$('pose').onchange = () => { tracker.emit = $('pose').checked; store.set('zombiewalk.poseSteps', tracker.emit); };
 
 // Shoe calibration: click the four projected zone corners in the camera picture, in the zone's own order.
 // The homography maps normalised camera coordinates onto the 720 x 1280 game field; the game reads it from storage.
@@ -226,7 +232,7 @@ const help = $('calib-help');
 $('calib').onclick = () => {
   calib = { points: [], active: true };
   help.hidden = false;
-  help.textContent = `Click the ${CORNERS[0]} corner of the projected zone in the picture (Esc cancels).`;
+  help.textContent = `Press Z in the game so the corner labels are projected on the floor, then click the corner labelled ${CORNERS[0]} here in the picture (Esc cancels).`;
 };
 overlay.parentElement.addEventListener('click', (e) => {
   if (!calib.active) return;
@@ -236,13 +242,21 @@ overlay.parentElement.addEventListener('click', (e) => {
   const h = window.Warp.homography(calib.points.map(([x, y]) => [x, y]), FIELD);
   if (!h.every(Number.isFinite)) { help.textContent = 'Those four points do not make a quad; try again.'; calib.active = false; return; }
   store.set(CAM_KEY, h);
-  store.set(CAM_KEY + '.points', calib.points);
+  saved = { points: calib.points, picture: feedLive() ? 'feed' : 'local' };   // which picture the corners were clicked on
+  store.set(CAM_KEY + '.points', saved.points);
+  store.set(CAM_KEY + '.picture', saved.picture);
   calib.active = false;
   help.textContent = 'Saved. Walk: the game draws a ring under each shoe; if the rings are off, calibrate again.';
 });
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && calib.active) { calib.active = false; help.hidden = true; } });
 setInterval(() => {
   const live = performance.now() - shoes.at < 1500;
-  $('st-shoes').textContent = live ? `shoes ${shoes.boxes.length}` : (store.get(CAM_KEY, null) ? 'shoes: calibrated, none seen' : 'shoes: not calibrated');
+  const picture = feedLive() ? 'feed' : 'local';
+  const calibrated = saved.points ? (saved.picture === picture ? 'calibrated' : 'calibrated on the other camera: calibrate again') : 'not calibrated';
+  $('st-shoes').textContent = live ? `shoes ${shoes.boxes.length} · ${calibrated}` : `shoes: ${calibrated}, none seen`;
   $('st-shoes').classList.toggle('on', live);
+  // feet.py's picture in, the local video out, and the overlay redrawn when no tracker frame will do it.
+  const feed = feedLive();
+  $('feed').hidden = !feed; $('feed-note').hidden = !feed; video.hidden = feed;
+  if (!tracker.running) drawSkeleton(null, tracker.state);
 }, 500);
