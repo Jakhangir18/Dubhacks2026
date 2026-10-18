@@ -29,8 +29,8 @@
     // The phone's camera, as pictures to the game server: ten a second, 480 px on the long side, for the gait
     // analysis on the server and the dashboard's picture. No video is stored.
     const $ = (id) => document.getElementById(id);
-    const FPS = 10, LONG = 480;
-    let timer = null, busy = false, sent = 0;
+    const FPS = 12, LONG = 400, IN_FLIGHT = 3;   // small pictures, a few uploads at once: the round trip over the internet must not set the frame rate
+    let timer = null, busy = 0, sent = 0;
     async function start() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
       $('v').srcObject = stream;
@@ -40,20 +40,20 @@
     }
     async function shot() {
       const v = $('v');
-      if (busy || !v.videoWidth) return;
-      busy = true;
+      if (busy >= IN_FLIGHT || !v.videoWidth) return;
+      busy += 1;
       try {
         const scale = LONG / Math.max(v.videoWidth, v.videoHeight);
         const c = $('c'); c.width = Math.round(v.videoWidth * scale); c.height = Math.round(v.videoHeight * scale);
         c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
-        const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.6));
+        const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.55));
         const r = await fetch('/api/sideframe', { method: 'POST', headers: { 'content-type': 'image/jpeg' }, body: blob });
         sent += 1;
         $('st').textContent = r.ok ? `sending · ${sent}` : `server ${r.status}`;
         $('st').classList.toggle('on', r.ok);
       } catch (e) {
         $('st').textContent = 'no connection'; $('st').classList.remove('on');
-      } finally { busy = false; }
+      } finally { busy -= 1; }
     }
     $('go').onclick = () => start().catch((e) => { $('st').textContent = `camera: ${e.message}`; });
   </script>
