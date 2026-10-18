@@ -286,11 +286,15 @@ function makeTextures(scene) {
   }
 }
 
+// ?floor=1: the whole field lies on a white board in front of the pad (black belt, lit venue), so the hit line
+// sits near the board's rear edge by the pad and nothing is dimmed as "belt".
+const BOARD = params.get('floor') === '1';
 function floorLayout(W, H) {
-  const zoneY = H * 0.54, top = H * 0.085;
+  const zoneY = H * (BOARD ? 0.86 : 0.54), top = H * 0.085;
   return { W, H, zoneY, top, rowH: (zoneY - top) / 6,
     lanes: { L: W * 0.318, R: W * 0.682 }, laneW: W * 0.364, gap: 20,
-    toeY: H - 120, meterBottom: H - 30, meterTop: zoneY + 10 };
+    // On the board the meters stand beside the lanes, ending at the hit line; on the pad they run up the rails.
+    toeY: BOARD ? H - 60 : H - 120, meterBottom: BOARD ? zoneY - 20 : H - 30, meterTop: BOARD ? H * 0.42 : zoneY + 10 };
 }
 
 function makeFloor(scene, L) {
@@ -316,7 +320,7 @@ function drawFloor(scene, L, travelledCm, t, gated = false) {
         .setDisplaySize(L.laneW - L.gap / 2, L.rowH + 1);
     }
     const y = L.top + (row - 1) * L.rowH + offset;
-    tile.setPosition(L.lanes[col ? 'R' : 'L'], y).setAlpha((y > L.zoneY ? 0.4 : 1) * (gated ? 0.4 : 1));
+    tile.setPosition(L.lanes[col ? 'R' : 'L'], y).setAlpha((y > L.zoneY && !BOARD ? 0.4 : 1) * (gated ? 0.4 : 1));
   }
   scene.rowIndex = rowIndex;
   const h = scene.hitLine;
