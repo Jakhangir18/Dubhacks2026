@@ -26,6 +26,15 @@ Send `lift` before the `strike` of the same step. The game stamps the time when 
 
 Run the server on the laptop with `--host 0.0.0.0` so the Pi can reach it, and find the laptop IP on the same Wi-Fi or phone hotspot.
 
+## Side-camera gait summary
+
+A side-view camera (for example `gait.py` on a second laptop or the Pi) can also send its gait summary, which the therapist note and the saved session use:
+
+- `POST http://<laptop-ip>:8000/api/gait` with body `{"player": "Mia", "source": "side-camera", "summary": {...}}`.
+- `summary` is `GaitTracker.summary()` from `gait.py` as JSON: numbers, short strings, booleans and small nested objects (for example `{"cadence": 98.5, "kneeBend": {"L": 52, "R": 47}}`). Anything else is dropped.
+- Send it at the end of the walk (or every 10 to 20 s; the newest one wins). A summary older than 30 minutes is not attached to a session.
+- The session saved at Home then carries it as `summary.sideCamera`, and `therapist.report()` receives it.
+
 ## Test without a camera
 
 ```bash
