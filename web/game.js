@@ -16,6 +16,9 @@ const Phaser = window.Phaser;
 const Warp = window.Warp;
 const sound = new GardenSound(Warp.store);
 const clip = new WalkClip();
+// The lift meters beside the lanes (drawMeter) are off: the owner's concept art (2026-10-18) puts the fence and the
+// garden there instead. True brings them back, in play and in the zone preview.
+const SHOW_METERS = false;
 
 const C = { green: 0x7cff4f, yellow: 0xffe44d, magenta: 0xff2d95, cyan: 0x2de2ff, orange: 0xff9a1f,
   white: 0xffffff, red: 0xff4d4d, violet: 0x9b6bff, path: 0x19352f, zone: 0x295d45,
@@ -322,10 +325,16 @@ window.addEventListener('keydown', (e) => {
 
 // The finished walk review opens in its own tab, always the same one, so walks do not pile up tabs. Opened without a
 // click, the browser may block it (allow pop-ups for this site once); P opens it from a key press, which always works.
+// It opens in the results dashboard when the server has its build (dashboard/, `npm run build`), else in report.html.
 let lastReportId = null;
+let dashboardBuilt = false;
+fetch('/dashboard/', { method: 'HEAD' }).then((r) => { dashboardBuilt = r.ok; }).catch(() => {});
+function reviewUrl(id) {
+  return dashboardBuilt ? `/dashboard/?session=${encodeURIComponent(id)}` : `/report.html?id=${encodeURIComponent(id)}`;
+}
 function openReport(id) {
   lastReportId = id;
-  return window.open(`/report.html?id=${encodeURIComponent(id)}`, 'zombiewalk-report') !== null;
+  return window.open(reviewUrl(id), 'zombiewalk-report') !== null;
 }
 
 // The belt keeps moving after the game, so walking would start the next game before the walk review arrives: a
@@ -338,7 +347,7 @@ function reviewHolds(data) {
 
 // ---------- original local SVG art; procedural art remains the per-file fallback ----------
 const ART = {
-  'gus-idle': [160, 192], 'gus-step': [160, 192], 'gus-celebrate': [160, 192],
+  'gus-idle': [240, 400], 'gus-step': [240, 400], 'gus-celebrate': [240, 400],   // the concept zombie at its own size
   zombie: [80, 80, 'gus-portrait'],
   flower: [128, 128, 'flower-marigold'], 'flower-bell': [128, 128], 'flower-rose': [128, 128],
   pod: [128, 128], seed: [64, 64], 'foot-l': [80, 124], 'foot-r': [80, 124],
@@ -349,13 +358,17 @@ const ART = {
   petal: [24, 20], spark: [24, 24], goo: [24, 24],
 };
 // Generated art (Higgsfield, docs/ART_DIRECTION.md) replaces the SVG of the same name; the SVG stays as the fallback.
-const HD = new Set(['fence', 'flower-bell', 'flower-marigold', 'flower-rose', 'foot-l', 'foot-r', 'gus-celebrate', 'gus-idle', 'gus-portrait', 'gus-step', 'house', 'moon', 'pod', 'seed', 'tile-grass-dark', 'tile-grass-light', 'tile-target', 'tree-lime', 'tree-teal']);
+const HD = new Set(['fence', 'flower-bell', 'flower-marigold', 'flower-rose', 'foot-l', 'foot-r', 'gus-portrait', 'house', 'moon', 'pod', 'seed', 'tile-grass-dark', 'tile-grass-light', 'tile-target', 'tree-lime', 'tree-teal']);
+// Cut from the owner's concept art (docs/ART_DIRECTION.md). One zombie stands in for every Gus pose, so styles never
+// mix; the scenery images are drawn as they are: fence-and-garden strips beside the lanes, the house view on the title.
+const CONCEPT_ART = { 'gus-idle': 'gus-pvz', 'gus-step': 'gus-pvz', 'gus-celebrate': 'gus-pvz' };
+const SCENERY = ['fence-left', 'fence-right', 'home-view'];
 const PLANT_SCALE = 1.7;   // generated plants are drawn larger than the old SVG box
 const POD_SCALE = 1;
 const FILL = new Set(['fence', 'tile-grass-light', 'tile-grass-dark', 'tile-target']);
 function useHdArt(scene) {
   for (const [key, [w, h]] of Object.entries(ART)) {
-    const hd = `${key}@hd`;
+    const hd = CONCEPT_ART[key] ?? `${key}@hd`;
     if (!scene.textures.exists(hd)) continue;
     const img = scene.textures.get(hd).getSourceImage();
     if (scene.textures.exists(key)) scene.textures.remove(key);
@@ -372,8 +385,9 @@ function useHdArt(scene) {
       ctx.globalCompositeOperation = 'source-over';
     }
     canvas.refresh();
-    scene.textures.remove(hd);   // the full-size source is not needed again
+    if (!CONCEPT_ART[key]) scene.textures.remove(hd);   // the full-size source is not needed again
   }
+  for (const src of new Set(Object.values(CONCEPT_ART))) if (scene.textures.exists(src)) scene.textures.remove(src);   // shared by several keys
 }
 function makeTextures(scene) {
   const g = scene.make.graphics({ x: 0, y: 0, add: false });
@@ -388,13 +402,16 @@ function makeTextures(scene) {
         'tile-cracked': 0x93c66b, 'tile-target': C.yellow }[key];
       g.fillStyle(color); g.fillRoundedRect(4, 4, w - 8, h - 8, 14);
       g.lineStyle(6, C.path); g.strokeRoundedRect(4, 4, w - 8, h - 8, 14);
-    } else if (key.startsWith('gus-')) {
+    } else if (key.startsWith('gus-')) {   // drawn for a 160 x 192 box, centred and scaled into this one
+      const s = Math.min(w / 160, h / 192);
+      g.save(); g.translateCanvas((w - 160 * s) / 2, (h - 192 * s) / 2); g.scaleCanvas(s, s);
       g.fillStyle(C.violet); g.fillRoundedRect(38, 90, 84, 65, 16);
       g.fillStyle(C.green); g.fillRoundedRect(26, 10, 108, 96, 25);
       g.fillStyle(C.white); g.fillCircle(57, 48, 15); g.fillCircle(102, 48, 15);
       g.fillStyle(C.path); g.fillCircle(59, 51, 6); g.fillCircle(100, 51, 6);
       g.lineStyle(6, C.path); g.lineBetween(55, 80, 108, 80);
       g.fillStyle(C.yellow); g.fillEllipse(49, 171, 42, 22); g.fillEllipse(110, 171, 42, 22);
+      g.restore();
     } else if (key.startsWith('foot-')) {
       g.fillStyle(C.white); g.fillEllipse(40, 79, 48, 72);
       for (let i = 0; i < 3; i++) g.fillCircle(20 + i * 20, 28, 10);
@@ -439,9 +456,18 @@ function floorLayout(W, H) {
     toeY: BOARD ? H - 75 : H - 120, meterBottom: BOARD ? zoneY - 20 : H - 30, meterTop: BOARD ? H * 0.42 : zoneY + 10 };
 }
 
+// The concept art's fence-and-garden strips, drawn once in the space left and right of the lanes: behind every plant,
+// pad and burst (depth -19), and never over a lane or the hit line, which start where the strips end.
+function makeFence(scene, L) {
+  const inner = { L: L.lanes.L - L.laneW / 2, R: L.lanes.R + L.laneW / 2 };
+  if (scene.textures.exists('fence-left')) scene.add.image(0, 0, 'fence-left').setOrigin(0, 0).setDisplaySize(inner.L, L.H).setDepth(-19);
+  if (scene.textures.exists('fence-right')) scene.add.image(L.W, 0, 'fence-right').setOrigin(1, 0).setDisplaySize(L.W - inner.R, L.H).setDepth(-19);
+}
+
 function makeFloor(scene, L) {
   scene.bg = scene.add.graphics().setDepth(-20);
   scene.bg.fillStyle(0x10241c); scene.bg.fillRect(0, 0, L.W, L.H);
+  makeFence(scene, L);
   const rows = Math.ceil((L.H - L.top) / L.rowH) + 3;
   scene.board = Array.from({ length: rows * 2 }, () => scene.add.image(0, 0, 'tile-grass-light').setDepth(-18));
   scene.hitLine = scene.add.graphics().setDepth(2);
@@ -509,6 +535,7 @@ class Preload extends Phaser.Scene {
       this.load.svg(key, `art/${file}.svg`, { width, height });
       if (HD.has(file)) this.load.image(`${key}@hd`, `art/hd/${file}.png`);
     }
+    for (const file of new Set([...Object.values(CONCEPT_ART), ...SCENERY])) this.load.image(file, `art/${file}.png`);
   }
   create() { useHdArt(this); makeTextures(this); this.scene.start('boot'); }
 }
@@ -535,6 +562,31 @@ function gardenBackdrop(scene, W, H) {
   for (let i = 0; i < 6; i++) {
     const x = W * (i < 3 ? 0.06 + i * 0.08 : 0.78 + (i - 3) * 0.08);
     scene.add.image(x, H * (0.88 + (i % 2) * 0.03), ['flower', 'flower-bell', 'flower-rose'][i % 3]).setScale(S / 1100);
+  }
+}
+
+// The title's night garden from the concept art: the play field's fence strips down the sides, the house view across
+// the top and, on the lawn in front of the house, a bed of the flowers the walk is about to stomp. Without the house
+// view (a file failed to load) it is the storybook backdrop and house as before.
+function titleBackdrop(scene, W, H) {
+  if (!scene.textures.exists('home-view')) {
+    gardenBackdrop(scene, W, H);
+    scene.add.image(W * 0.73, H * 0.14, 'house').setScale(Math.min(1.2, W / 900));
+    return;
+  }
+  scene.add.rectangle(0, 0, W, H, 0x10241c).setOrigin(0, 0).setDepth(-20);   // the field's own ground colour
+  makeFence(scene, floorLayout(W, H));   // the same strips, in the same place, as on the field
+  const view = scene.add.image(W / 2, 0, 'home-view').setOrigin(0.5, 0).setScale(W / 720);   // drawn for the 720 px field
+  scene.add.image(W * 0.13, view.displayHeight * 0.3, 'moon').setScale(W / 1300);
+  const ground = view.displayHeight;   // the lawn in front of the house ends here
+  const kinds = ['flower', 'flower-bell', 'flower-rose'];
+  for (const [row, count, base, size] of [[0, 9, ground - 2, 0.46], [1, 8, ground + 34, 0.54]]) {
+    for (let i = 0; i < count; i++) {
+      const x = W * (0.07 + (i + row * 0.5) * 0.86 / 8);
+      const flower = scene.add.image(x, base, kinds[(i + row * 2) % 3]).setOrigin(0.5, 0.92).setScale(size * W / 720);
+      scene.tweens.add({ targets: flower, angle: { from: -4, to: 4 }, duration: 900 + (i % 3) * 170,
+        delay: (i * 2 + row) * 70, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+    }
   }
 }
 
@@ -575,7 +627,7 @@ class ZonePreview extends Phaser.Scene {
     const L = this.floor, t = this.previewT;
     drawFloor(this, L, t * 83, t);
     this.hud.clear();
-    for (const lane of ['L', 'R']) drawMeter(this.hud, L, lane, 4, 8, C.amber);
+    if (SHOW_METERS) for (const lane of ['L', 'R']) drawMeter(this.hud, L, lane, 4, 8, C.amber);
     this.flowers.forEach((flower, i) => {
       const phase = (t / 6 + i / 3) % 1;
       const y = L.top + phase * (L.H - L.top + 150);
@@ -593,8 +645,7 @@ class Title extends Phaser.Scene {
     publishGarden({ act: 'title', cadence: 0, paceOk: true, paused: false,
       title: 'ZOMBIE WALK HOME', score: '', coach: 'Walk in place or press Enter · Z to mark your zone', pace: '', progress: 0 });
     const { width: W, height: H } = this.scale;
-    gardenBackdrop(this, W, H);
-    this.add.image(W * 0.73, H * 0.14, 'house').setScale(Math.min(1.2, W / 900));
+    titleBackdrop(this, W, H);
     const titleSize = Math.round(Math.max(22, Math.min(W / 11, H * 0.115, 96)));
     const title = this.add.text(W / 2, H * 0.27, 'ZOMBIE', txt(titleSize, C.yellow)).setOrigin(0.5, 0)
       .setShadow(0, 7, '#19352f', 0, true, true);
@@ -612,7 +663,8 @@ class Title extends Phaser.Scene {
     plaque.lineStyle(4, 0xffe2a2); plaque.strokeRoundedRect((W - plaqueW) / 2, prompt.y - 12, plaqueW, plaqueH, 22);
     const gusTop = prompt.y - 12 + plaqueH + 16;
     const gusH = Math.max(0, H - gusTop - 22);
-    const z = this.add.image(W / 2, gusTop + gusH / 2, 'gus-idle').setScale(Math.min(H / 1000, gusH / 192));
+    const z = this.add.image(W / 2, gusTop + gusH / 2, 'gus-idle');
+    z.setScale(Math.min(H * 0.3, gusH) / z.height);   // the hero of the title: under a third of the field's height
     this.tweens.add({ targets: z, y: z.y - 10, angle: 3, duration: 650, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
     const steps = [];
     this.off = onFoot((ev) => {
@@ -685,11 +737,11 @@ class Play extends Phaser.Scene {
 
     this.fx = {
       petals: this.add.particles(0, 0, 'petal', { speed: { min: 150, max: 420 }, lifespan: 900, rotate: { min: 0, max: 360 },
-        scale: { start: 1.1, end: 0.2 }, gravityY: 300, maxParticles: 32, maxAliveParticles: 32, emitting: false }).setDepth(20),
+        scale: { start: 1.1, end: 0.2 }, gravityY: 300, maxAliveParticles: 32, emitting: false }).setDepth(20),
       sparks: this.add.particles(0, 0, 'spark', { speed: { min: 120, max: 360 }, lifespan: 600, scale: { start: 1, end: 0 },
-        tint: [C.cyan, C.white, C.green], maxParticles: 28, maxAliveParticles: 28, emitting: false }).setDepth(20),
+        tint: [C.cyan, C.white, C.green], maxAliveParticles: 28, emitting: false }).setDepth(20),
       goo: this.add.particles(0, 0, 'goo', { speed: { min: 60, max: 260 }, lifespan: 700, scale: { start: 1, end: 0.3 },
-        maxParticles: 20, maxAliveParticles: 20, emitting: false }).setDepth(20),
+        maxAliveParticles: 20, emitting: false }).setDepth(20),
     };
 
     this.off = onFoot((ev) => {
@@ -1096,7 +1148,7 @@ class Play extends Phaser.Scene {
       // Each step lights its footprint briefly, so a working sensor is visible at a glance.
       // Shoe mode: nothing is projected on the feet themselves, so the camera sees socks, not footprints.
       this.feet[lane].setVisible(!shoesLive(g)).setAlpha(Math.max(gated && active ? 0.3 + 0.7 * (1 - beat % 1) : 0.3, this.footFlash[lane]));
-      if (!shoesLive(g)) drawMeter(h, L, lane, this.lift[lane], need, th?.kind === 'flower' ? C.amber : C.pink,
+      if (SHOW_METERS && !shoesLive(g)) drawMeter(h, L, lane, this.lift[lane], need, th?.kind === 'flower' ? C.amber : C.pink,
         this.meterFlash[lane], urgent);   // lift meters mean nothing while shoes drive the game
       this.lift[lane] = Math.max(0, this.lift[lane] - dt * 25);
     }
@@ -1172,8 +1224,10 @@ class Home extends Phaser.Scene {
     if (data.gaitStatus) this.showGait();
     say(`${ENDING} ${s.stompPct ?? 0} percent of flowers stomped. Great walking.`);
     const playAgain = () => {
-      if (this.restarting || zone.active) return;   // once, and not under the zone setup
-      this.restarting = true;
+      // Once per walk, and not under the zone setup. The flag lives on this walk's data, not on the scene: Phaser
+      // reuses the scene for every game, and a flag left on it from the last walk ignored every later restart.
+      if (data.restarting || zone.active) return;
+      data.restarting = true;
       data.cancelled = true; data.uploadAbort?.abort(); clip.cancel();
       playerReady = loadPlayer();
       playerReady.then(() => { if (this.sys.isActive() || this.sys.isPaused()) this.scene.start('play'); });   // the panel's new limits apply
@@ -1254,7 +1308,8 @@ class Home extends Phaser.Scene {
     const artH = Math.max(0, top - 32);
     this.tweens.killTweensOf([this.house, this.gus]);
     this.house.setPosition(W * 0.62, top / 2).setScale(Math.min(0.95, artH / (240 * 1.04)));
-    this.gus.setPosition(W * 0.4, top / 2).setScale(Math.min(1, artH / Math.hypot(160, 192)));
+    // As tall as the old 160 x 192 Gus (rotation included), whatever the texture's resolution.
+    this.gus.setPosition(W * 0.4, top / 2).setScale(192 * Math.min(1, artH / Math.hypot(160, 192)) / this.gus.height);
     this.tweens.add({ targets: this.house, scale: this.house.scale * 1.04, duration: 600, yoyo: true, repeat: -1 });
     this.tweens.add({ targets: this.gus, y: this.gus.y - Math.min(12, top * 0.08), angle: 5,
       duration: 420, yoyo: true, repeat: -1, ease: 'Sine.inOut' });

@@ -182,6 +182,14 @@
       fillSection('game', 'Game results', [table]);
     }
 
+    // The same walk in the results dashboard, when the server has its build.
+    if (id) fetch('/dashboard/', { method: 'HEAD' }).then((r) => {
+      if (!r.ok) return;
+      const a = el('a', 'Open in the dashboard', 'hint');
+      a.href = `/dashboard/?session=${encodeURIComponent(id)}`;
+      $('meta').after(a);
+    }).catch(() => {});
+
     let timer = null;
     async function load() {
       clearTimeout(timer);
