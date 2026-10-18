@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RULES, beatCm, plan, warnGate, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, pace, form, applyParams, summary, needCm, startAt, speedScale } from '../web/logic.js';
+import { RULES, ROUND_TYPES, beatCm, plan, warnGate, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, pace, form, applyParams, summary, needCm, startAt, speedScale } from '../web/logic.js';
+import { ENDING, ROUND_ACTS, ROUND_LINES, endingLine, roundLine } from '../web/lore.js';
 
 const DT = 0.05;
 
@@ -9,15 +10,19 @@ const DT = 0.05;
 function walk(g, seconds, gap = 0.6, lift = 4) {
   if (g._nextStepT === undefined) { g._nextStepT = g.t; g._foot = 'L'; }
   const end = g.t + seconds;
-  while (g.t < end) {
-    if (g.t >= g._nextStepT) {
-      addEvent(g, { foot: g._foot, kind: 'strike' });
-      if (lift !== null) addEvent(g, { foot: g._foot, kind: 'lift', liftCm: lift });
-      g._foot = g._foot === 'L' ? 'R' : 'L';
-      g._nextStepT += gap;
-    }
-    step(g, DT);
+  while (g.t < end) walkFrame(g, gap, lift);
+}
+
+// One frame of that walk: the step that is due lands, then the rules advance; returns what step() reported.
+function walkFrame(g, gap = 0.6, lift = 4) {
+  if (g._nextStepT === undefined) { g._nextStepT = g.t; g._foot = 'L'; }
+  if (g.t >= g._nextStepT) {
+    addEvent(g, { foot: g._foot, kind: 'strike' });
+    if (lift !== null) addEvent(g, { foot: g._foot, kind: 'lift', liftCm: lift });
+    g._foot = g._foot === 'L' ? 'R' : 'L';
+    g._nextStepT += gap;
   }
+  return step(g, DT);
 }
 
 // Walk until cond() holds, with a hard limit so a broken rule fails the test instead of hanging it.
@@ -484,6 +489,210 @@ test('rounds: flowers and seeds repeat before home, and the summary counts them'
   walkUntil(g, () => { if (acts[acts.length - 1] !== g.act) acts.push(g.act); return g.act === 'home'; }, 300);
   assert.deepEqual(acts, ['walk', 'garden', 'storm', 'rest', 'garden', 'storm', 'home']);   // a rest between rounds, walked through
   assert.equal(summary(g).rounds, 2);
+});
+
+// ---------- round types: what each garden round brings (limits.roundPlan) ----------
+test('the round plan: by default limits.rounds rounds of flowers; an explicit plan sets the rounds; unknown names play flowers', () => {
+  assert.deepEqual(plan(newGame()).roundPlan, ['flowers', 'flowers']);
+  assert.deepEqual(plan(newGame({ rounds: 3 })), { rounds: 3, seeds: false, roundPlan: ['flowers', 'flowers', 'flowers'] });
+  const three = plan(newGame({ rounds: 2, roundPlan: ['flowers', 'seedStomp', 'slippers'] }));
+  assert.equal(three.rounds, 3);                       // the plan wins over limits.rounds
+  assert.deepEqual(three.roundPlan, ['flowers', 'seedStomp', 'slippers']);
+  assert.deepEqual(plan(newGame({ roundPlan: 'slippers, seedStomp' })).roundPlan, ['slippers', 'seedStomp']);   // a list typed as text
+  assert.deepEqual(plan(newGame({ roundPlan: ['seedstomp', 'constructor', 'slippers'] })).roundPlan, ['flowers', 'flowers', 'slippers']);
+  assert.deepEqual(plan(newGame({ rounds: 2, roundPlan: [] })).roundPlan, ['flowers', 'flowers']);   // empty: from rounds
+  assert.deepEqual(plan(newGame({ rounds: 3, roundPlan: ' , ' })).roundPlan, ['flowers', 'flowers', 'flowers']);   // blank text too
+  assert.deepEqual(plan(newGame({ roundPlan: 'seedStomp,slippers,' })).roundPlan, ['seedStomp', 'slippers']);   // a trailing comma adds no round
+  assert.deepEqual(plan(newGame({ roundPlan: 'flowers seedStomp;slippers' })).roundPlan, ['flowers', 'seedStomp', 'slippers']);   // a URL '+' is a space
+  assert.deepEqual(ROUND_TYPES, ['flowers', 'seedStomp', 'slippers']);
+});
+
+test('each garden round brings its own type on the same beat: flowers, then Pip’s seeds, then Rosa’s slippers, all to step on', () => {
+  const g = newGame({ walkSeconds: 1, gardenPlants: 3, roundPlan: ['flowers', 'seedStomp', 'slippers'] });
+  const acts = [];
+  walkUntil(g, () => {
+    const key = g.act === 'garden' || g.act === 'rest' ? `${g.act} ${g.round} ${g.roundType}` : g.act;
+    if (acts[acts.length - 1] !== key) acts.push(key);
+    const live = g.things.filter((th) => !th.result);
+    for (let i = 1; i < live.length; i++) assert.ok(Math.abs(live[i].distCm - live[i - 1].distCm - beatCm(g)) < 1e-6, 'one beat apart');
+    return g.act === 'home';
+  }, 200);
+  assert.deepEqual(acts, ['walk', 'garden 1 flowers', 'rest 2 seedStomp', 'garden 2 seedStomp', 'rest 3 slippers', 'garden 3 slippers', 'home']);   // a rest knows what comes next
+  assert.deepEqual(g.log.map((r) => r.kind), ['flower', 'flower', 'flower', 'seed', 'seed', 'seed', 'slipper', 'slipper', 'slipper']);
+  assert.deepEqual(g.log.map((r) => r.roundType), ['flowers', 'flowers', 'flowers', 'seedStomp', 'seedStomp', 'seedStomp', 'slippers', 'slippers', 'slippers']);
+  assert.ok(g.log.every((r) => r.target === true));
+  for (let i = 1; i < g.log.length; i++) {   // lanes alternate inside a round (a round's first thing follows the foot)
+    if (g.log[i].roundType === g.log[i - 1].roundType) assert.notEqual(g.log[i].lane, g.log[i - 1].lane, 'lanes alternate');
+  }
+});
+
+test('seed stomp: a shoe on Pip’s seed at the line squishes it (hit); a seed nobody steps on rolls past (miss)', () => {
+  const g = toGarden({ roundPlan: ['seedStomp'] });
+  walkUntil(g, () => g.things.length > 0);
+  const seed = g.things[0];
+  assert.equal(seed.kind, 'seed');
+  assert.equal(seed.target, true);
+  const keep = () => addShoes(g, [{ xFrac: seed.lane === 'L' ? 0.7 : 0.3, nearCm: 600, farCm: 580 }]);   // shoe mode live, touching nothing
+  walkUntil(g, () => { keep(); return seed.distCm < 30; });
+  const x = seed.lane === 'L' ? 0.3 : 0.7;
+  walkUntil(g, () => { addShoes(g, [{ xFrac: x, nearCm: seed.distCm + 15, farCm: seed.distCm - 15 }]); return seed.result !== null; }, 10);
+  assert.equal(seed.result, 'hit');
+  walkUntil(g, () => { keep(); return g.things.some((t) => t !== seed && !t.result); });
+  const next = g.things.find((t) => t !== seed && !t.result);
+  walkUntil(g, () => { keep(); return next.result !== null; }, 60);
+  assert.equal(next.result, 'miss');
+  assert.deepEqual(g.stats.stomp, [1, 2]);   // counted with the stomps, not the dodges
+  assert.deepEqual(g.stats.dodge, [0, 0]);
+  assert.equal(g.stats.petals, 1);           // a squished seed banks a petal like a flower
+});
+
+test('seed stomp scores like flowers: the same points for one hit, and every fourth seed is golden', () => {
+  const oneHit = (roundPlan) => {
+    const g = toGarden({ gardenPlants: 1, roundPlan });
+    walkUntil(g, () => g.things.length > 0);
+    const th = g.things[0];
+    const x = th.lane === 'L' ? 0.3 : 0.7;
+    walkUntil(g, () => { addShoes(g, [{ xFrac: x, nearCm: th.distCm + 10, farCm: th.distCm - 10 }]); return th.result !== null; }, 30);
+    assert.equal(th.result, 'hit');
+    return g.score;
+  };
+  assert.ok(oneHit(['flowers']) > 0);
+  assert.equal(oneHit(['seedStomp']), oneHit(['flowers']));
+  assert.equal(oneHit(['seedStomp']), RULES.points.stomp);   // full form, no streak: a stomp's points, not a dodge's
+  const g = toGarden({ gardenPlants: 4, roundPlan: ['seedStomp'] });
+  walkUntil(g, () => g.act === 'home', 120);
+  assert.deepEqual(g.log.map((r) => [r.kind, !!r.golden]), [['seed', false], ['seed', false], ['seed', false], ['seed', true]]);
+});
+
+test('the storm act still dodges: after a seed-stomp round its seeds are the ones to keep clear of', () => {
+  const g = toGarden({ roundPlan: ['seedStomp'], stormSeeds: 2 });
+  startAt(g, 'storm');
+  assert.equal(g.act, 'storm');
+  assert.equal(g.roundType, 'seedStomp');
+  walkUntil(g, () => g.things.length > 0);
+  const seed = g.things[0];
+  assert.equal(seed.kind, 'seed');
+  assert.equal(seed.target, false);
+  const keep = () => addShoes(g, [{ xFrac: seed.lane === 'L' ? 0.7 : 0.3, nearCm: 600, farCm: 580 }]);
+  walkUntil(g, () => { keep(); return seed.distCm < 30; });
+  const x = seed.lane === 'L' ? 0.3 : 0.7;
+  walkUntil(g, () => { addShoes(g, [{ xFrac: x, nearCm: seed.distCm + 15, farCm: seed.distCm - 15 }]); return seed.result !== null; }, 10);
+  assert.equal(seed.result, 'miss');         // stepped on: splat
+  walkUntil(g, () => { keep(); return g.things.some((t) => t !== seed && !t.result); });
+  const clear = g.things.find((t) => t !== seed && !t.result);
+  walkUntil(g, () => { keep(); return clear.result !== null; }, 60);
+  assert.equal(clear.result, 'hit');         // kept clear: dodged
+  assert.deepEqual(g.stats.dodge, [1, 2]);
+  assert.deepEqual(g.stats.stomp, [0, 0]);
+  assert.equal(g.stats.petals, 0);           // a dodge banks no petal
+  assert.ok(g.log.every((r) => r.target === false && r.roundType === undefined));
+});
+
+test('lift rules: a seed to squish asks for a stomp-high step on time, not the storm’s higher dodge', () => {
+  const g = toGarden({ gardenPlants: 1, roundPlan: ['seedStomp'], liftCm: 10 });
+  walkUntil(g, () => g.things.length > 0);
+  const seed = g.things[0];
+  const stomp = needCm(g, 'flower', seed.lane);
+  assert.equal(needCm(g, seed, seed.lane), stomp);           // a thing answers for itself
+  assert.ok(needCm(g, 'seed', seed.lane) > stomp);           // the kind name alone still means the storm's dodge
+  assert.equal(needCm(g, 'slipper', seed.lane), stomp);
+  assert.equal(needCm(g, undefined, seed.lane), needCm(g, 'seed', seed.lane));   // no thing: the dodge, as before, never a throw
+  walkUntil(g, () => seed.arriveT !== null);
+  addEvent(g, { foot: seed.lane, kind: 'lift', liftCm: stomp, t: seed.arriveT });
+  walkUntil(g, () => seed.result !== null);
+  assert.equal(seed.result, 'hit');
+});
+
+test('Rosa’s slippers come in pairs, one in each lane: both stepped on make a pair and a bonus; a missed one breaks its pair', () => {
+  const g = toGarden({ gardenPlants: 5, roundPlan: ['slippers'] });
+  const judged = [];   // per judged slipper: the points it brought, whether the step reported a pair, the form then
+  for (const end = g.t + 120; g.act === 'garden' && g.t < end;) {
+    const th = g.things.find((t) => !t.result);
+    const on = th && th.distCm < 30 && g.log.length !== 3;   // the fourth slipper gets away
+    addShoes(g, [on ? { xFrac: th.lane === 'L' ? 0.3 : 0.7, nearCm: th.distCm + 10, farCm: th.distCm - 10 } : { xFrac: 0.5, nearCm: 600, farCm: 580 }]);
+    const before = g.score, n = g.log.length;
+    const out = walkFrame(g);
+    if (g.log.length > n) judged.push({ gained: g.score - before, pair: !!out.pair, form: out.form });
+  }
+  assert.equal(g.act, 'home');
+  assert.deepEqual(g.log.map((r) => [r.kind, r.result]),
+    [['slipper', 'hit'], ['slipper', 'hit'], ['slipper', 'hit'], ['slipper', 'miss'], ['slipper', 'hit']]);
+  assert.deepEqual(g.log.map((r) => r.pair), [1, 1, 2, 2, 3]);   // the fifth has no partner
+  for (const [a, b] of [[0, 1], [2, 3]]) assert.notEqual(g.log[a].lane, g.log[b].lane, 'a pair is one slipper in each lane');
+  assert.deepEqual(judged.map((j) => j.pair), [false, true, false, false, false]);   // once, as the pair's second slipper is judged
+  assert.deepEqual(g.stats.pairs, [1, 2]);          // two pairs decided, one made
+  assert.deepEqual([judged[0].form, judged[1].form], [1, 1], 'full form for the made pair');
+  assert.equal(judged[0].gained, RULES.points.stomp);                       // the first of a pair is a plain stomp
+  assert.equal(judged[1].gained, RULES.points.stomp + RULES.points.pair);   // the second brings the pair bonus too
+  assert.equal(judged[3].gained, 0);                                        // a missed slipper breaks its pair: no bonus
+  assert.equal(g.stats.petals, 0);                  // slippers pair up instead of banking petals
+  assert.ok(g.log.every((r) => !r.golden));
+  assert.equal(summary(g).placementCm, null);       // shoe-to-flower distance: no flowers, no value (the report labels it so)
+});
+
+test('the summary keeps the round plan, the hit share of each round type and the slipper pairs; flower numbers stay flower numbers', () => {
+  const g = toGarden({ gardenPlants: 2, roundPlan: ['flowers', 'seedStomp', 'slippers'] });
+  for (const end = g.t + 200; g.act !== 'home' && g.t < end;) {   // step on everything but the first seed
+    const th = g.things.find((t) => !t.result);
+    const on = th && th.distCm < 30 && !(th.kind === 'seed' && !g.log.some((r) => r.kind === 'seed'));
+    addShoes(g, [on ? { xFrac: th.lane === 'L' ? 0.3 : 0.7, nearCm: th.distCm + 10, farCm: th.distCm - 10 } : { xFrac: 0.5, nearCm: 600, farCm: 580 }]);
+    walkFrame(g);
+  }
+  const s = summary(g);
+  assert.equal(s.act, 'home');
+  assert.deepEqual(s.roundPlan, ['flowers', 'seedStomp', 'slippers']);
+  assert.equal(s.rounds, 3);
+  assert.deepEqual(s.roundTypePct, { flowers: 100, seedStomp: 50, slippers: 100 });
+  assert.deepEqual(s.slipperPairs, [1, 1]);
+  assert.equal(s.targetPct, 83);                    // 5 of the 6 things to step on, whatever their kind
+  assert.equal(s.stompPct, 100);                    // the flowers alone: the server and the report label it so
+  assert.equal(s.dodgePct, null);                   // nothing to keep clear of in this walk
+  assert.deepEqual(s.byLane.seed, { L: [0, 0], R: [0, 0] });   // per-lane dodges: a squished seed is not one
+  const sides = (lanes) => lanes.L[1] + lanes.R[1];
+  assert.deepEqual([sides(s.byLane.flower), sides(s.byLane.seedStomp), sides(s.byLane.slippers)], [2, 2, 2]);
+  assert.equal(s.byLane.seedStomp.L[0] + s.byLane.seedStomp.R[0], 1);   // one seed squished, one rolled past
+  const flowersOnly = summary(newGame());
+  assert.deepEqual(flowersOnly.roundPlan, ['flowers', 'flowers']);
+  assert.deepEqual(flowersOnly.roundTypePct, { flowers: null, seedStomp: null, slippers: null });   // nothing played yet
+  assert.deepEqual(flowersOnly.slipperPairs, [0, 0]);
+});
+
+test('camera marks follow the rule, not the kind: the cyan mark touches what is stepped on, the magenta one what is kept clear of', () => {
+  const g = toGarden({ roundPlan: ['seedStomp'] });
+  walkUntil(g, () => g.things.length > 0);
+  const seed = g.things[0];
+  const keep = () => addShoes(g, [{ xFrac: seed.lane === 'L' ? 0.7 : 0.3, nearCm: 600, farCm: 580 }]);
+  walkUntil(g, () => { keep(); return seed.distCm < 20; });
+  assert.equal(markHit(g, seed.lane, 'seed', seed.distCm), null);     // magenta: only under the storm's seeds
+  assert.equal(markHit(g, seed.lane, 'flower', seed.distCm), seed);   // cyan: under everything to step on
+  walkUntil(g, () => { keep(); return seed.result !== null; }, 10);
+  assert.equal(seed.result, 'hit');
+  const storm = toGarden({ stormSeeds: 1 });
+  startAt(storm, 'storm');
+  walkUntil(storm, () => storm.things.length > 0);
+  const dodge = storm.things[0];
+  walkUntil(storm, () => dodge.distCm < 20);
+  for (const other of ['magenta', 'slipper', undefined]) assert.equal(markHit(storm, dodge.lane, other, dodge.distCm), null);   // not a mark name
+  assert.equal(dodge.touchedT, undefined);
+  assert.equal(markHit(storm, dodge.lane, 'flower', dodge.distCm), null);
+  assert.equal(markHit(storm, dodge.lane, 'seed', dodge.distCm), dodge);
+});
+
+test('the tale covers every round type, and the home card counts the slipper pairs Rosa got back', () => {
+  for (const type of ROUND_TYPES) {
+    const a = ROUND_ACTS[type];
+    assert.ok(a?.title.split(' · ')[1] && a.intro.length && a.hint && a.how, `act lines for ${type}`);   // the HUD shows the part after the dot
+    assert.match(a.hint, /high step/i, `the lift rules' hint for ${type}: every target asks for a stomp-high step`);
+    assert.ok(ROUND_LINES[type], `round line for ${type}`);
+  }
+  assert.match(roundLine(4, 'nonsense'), /^Round 4! .*Golden flowers/);   // past the written rounds, and an unknown type
+  assert.equal(endingLine({}), ENDING);                                 // a summary from before round types
+  assert.equal(endingLine({ slipperPairs: [0, 0] }), ENDING);           // no slipper round
+  assert.match(endingLine({ slipperPairs: [0, 2] }), /still wants her slippers/);
+  assert.match(endingLine({ slipperPairs: [0, 0], roundTypePct: { slippers: 100 } }), /got some of her slippers/);   // found, never paired
+  assert.match(endingLine({ slipperPairs: [0, 0], roundTypePct: { slippers: 0 } }), /still wants her slippers/);
+  assert.match(endingLine({ slipperPairs: [1, 2] }), /got 1 pair of slippers/);
+  assert.match(endingLine({ slipperPairs: [3, 3] }), /got 3 pairs of slippers/);
 });
 
 

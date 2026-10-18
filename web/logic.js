@@ -2,10 +2,12 @@
 // Floor mode: the player steps in place in the walking zone; the world moves towards them at a
 // speed set by their cadence. Units: cm, seconds, steps per minute.
 //
-// Acts: 'walk' (keep a steady pace for walkSeconds) -> 'garden' (stomp flowers with the matching foot)
+// Acts: 'walk' (keep a steady pace for walkSeconds) -> 'garden' (step on the round's things with the matching foot)
 //       -> 'storm' (lift the targeted foot over seed balls; only when stormSeeds > 0) -> 'home'.
-// Flowers come on a beat: lanes alternate and each flower is an odd number of steps after the last, so a player
-// who keeps a steady cadence meets every flower with the other foot.
+// Rounds: the garden act (and the storm act after it) repeats once per entry of the round plan (limits.roundPlan); the
+// round type decides what the garden act brings: flowers to stomp, Pip's seeds to squish, Rosa's slippers to collect.
+// Things come on a beat: lanes alternate and each thing is an odd number of steps after the last, so a player
+// who keeps a steady cadence meets every one with the other foot.
 
 export const LIMITS = {          // set by the therapist (Therapist panel); the coach adapts inside them
   minCadence: 80,                // steps per minute needed to move forward
@@ -17,8 +19,15 @@ export const LIMITS = {          // set by the therapist (Therapist panel); the 
   spacingCm: 140,                // distance between plants, snapped to an odd number of steps (3 at the default plant speed)
   spacingRange: [90, 220],
   speedScale: 0.7,               // how fast plants come, times the walking speed (0.3 to 2); 1 felt too fast on the pad
-  rounds: 2,                     // flowers then seeds, this many times, before home
+  rounds: 2,                     // flowers then seeds, this many times, before home (when there is no roundPlan)
+  roundPlan: null,               // the round types in order, e.g. ['flowers', 'seedStomp', 'slippers']: see ROUND_KINDS
 };
+
+// Round types: what the garden act brings in each round of limits.roundPlan, all of it stepped on (the storm act's
+// seeds are the ones to keep clear of). Flowers and Pip's seeds can be golden and bank petals; Rosa's slippers come
+// in pairs instead, one in each lane, and both of a pair make a bonus.
+export const ROUND_KINDS = { flowers: 'flower', seedStomp: 'seed', slippers: 'slipper' };
+export const ROUND_TYPES = Object.keys(ROUND_KINDS);
 
 export const RULES = {
   strideCm: 50,                  // nominal distance per step used to turn cadence into world speed
@@ -54,10 +63,10 @@ export const RULES = {
   paceWarnOn: 0.8,
   paceWarnOff: 0.3,
   paceGraceS: 3,
-  points: { stomp: 10, dodge: 15 },
-  // Rounds stay interesting: every goldenEvery-th flower is golden (goldenX points, same beat), every flower hit is a
-  // petal and bouquetPetals petals make a bouquet (petals never burn on a miss), and each round after the first adds
-  // roundSpeedUp to the plant speed.
+  points: { stomp: 10, dodge: 15, pair: 20 },   // pair: both slippers of a pair, on top of their own stomps
+  // Rounds stay interesting: every goldenEvery-th flower or seed to squish is golden (goldenX points, same beat), every
+  // such hit is a petal and bouquetPetals petals make a bouquet (petals never burn on a miss), and each round after the
+  // first adds roundSpeedUp to the plant speed. Slippers are never golden and bank no petals: they pair up (points.pair).
   goldenEvery: 4,
   goldenX: 3,
   bouquetPetals: 4,
@@ -67,8 +76,8 @@ export const RULES = {
   restStepsN: 4,
   restWindowS: 3,
   restGraceS: 1,
-  // Shoe mode (feet.py boxes on the camera): a flower is smashed when a shoe covers it, a seed splats; a thing
-  // that passes the toes resolves the other way. Distances are world cm on the field.
+  // Shoe mode (feet.py boxes on the camera): a target (flower, seed to squish, slipper) is hit when a shoe covers it, a
+  // seed to keep clear of splats; a thing that passes the toes resolves the other way. Distances are world cm on the field.
   shoeReachCm: 30,               // margin around the shoe's span when matching a thing
   shoeFreshS: 0.5,               // a shoe sighting older than this is gone (the camera gives about 8 a second, with gaps)
   shoeSwingCm: 40,               // a shoe must travel this far forward, then back, to count as one step (box jitter is under 20)
@@ -79,7 +88,7 @@ export const RULES = {
   shoeGapS: 2,                   // a lane unseen this long starts its swing tracking afresh (a quarter of frames see no sock)
   stanceS: 6,                    // the toe line follows where the shoes have stood over this window
   stanceMarginCm: 30,            // a thing is gone only this far behind the standing feet
-  markReachCm: 90,               // a camera-seen foot-on-mark touches the nearest thing of that kind within this (the sock's centre is not the flower's)
+  markReachCm: 90,               // a camera-seen foot-on-mark touches the nearest thing under that mark within this (the sock's centre is not the flower's)
   markShowCm: 90,                // the coloured mark shows under a thing from this far before the hit line
   timelineS: 15,                 // the report samples the pace this often (game seconds)
   timelineMax: 120,              // and keeps at most this many samples, the newest
@@ -90,7 +99,8 @@ export function newGame(limits = {}) {
     limits: { ...LIMITS, ...limits },
     t: 0,
     act: 'walk',
-    round: 1,                    // which flowers-and-seeds round (1 to limits.rounds)
+    round: 1,                    // which garden-and-seeds round (1 to plan(g).rounds)
+    roundType: null,             // what this round's garden act brings (see ROUND_KINDS), set as each act begins
     actT: 0,                     // seconds spent in the current act
     walkGoodS: 0,                // act 1 seconds at a good pace
     speed: 0,                    // world speed in cm/s, eased towards the cadence
@@ -101,17 +111,18 @@ export function newGame(limits = {}) {
     spawnDist: RULES.aheadCm,    // where a thing due exactly now appears, from the hit line
     spawned: 0,
     nextId: 1,
-    things: [],                  // flowers and seeds on the floor
+    things: [],                  // flowers, seeds and slippers on the floor
     lastLane: null,              // the lane of the last thing spawned; the next takes the other
     events: [],                  // foot events, newest last; each may be used once
     strikes: [],                 // {t, foot} for cadence and symmetry
     score: 0,
     streak: 0,
     formSum: 0, formN: 0,
-    stats: { stomp: [0, 0], dodge: [0, 0], golden: [0, 0], petals: 0, bouquets: 0, lifts: { L: [], R: [] }, steps: 0, stepsByFoot: { L: 0, R: 0 } },
-    flowerN: 0,                  // flowers spawned so far: every goldenEvery-th is golden
+    stats: { stomp: [0, 0], dodge: [0, 0], golden: [0, 0], petals: 0, bouquets: 0, pairs: [0, 0], lifts: { L: [], R: [] }, steps: 0, stepsByFoot: { L: 0, R: 0 } },
+    goldenN: 0,                  // flowers and seeds to squish spawned so far: every goldenEvery-th of them is golden
+    pairN: 0,                    // slipper pairs begun so far: a slipper's pair number
     restT: null,                 // when the current rest between rounds began
-    roundStats: [0, 0],          // [hit, judged] flowers in the current round, for the coach's word between rounds
+    roundStats: [0, 0],          // [hit, judged] things stepped on in the current round, for the coach's word between rounds
     walkLifts: { L: [], R: [] },   // act 1 lifts: the player's normal step height
     base: null,                    // {L, R} normal step height, set when act 1 ends
     shoeMode: false,               // shoes were seen in this game (for the report); shoesLive() says whether they drive it now
@@ -218,14 +229,24 @@ export function resetShoes(g) {
   for (const lane of ['L', 'R']) g.shoeTrack[lane] = { phase: 'back', max: -Infinity, min: Infinity, lastStrikeT: -Infinity };
 }
 
-// The camera saw a foot on a coloured mark the game draws under a thing near the hit line: cyan under flowers, magenta
-// under seeds. The nearest unresolved thing of that kind in the lane is marked as touched; the line decides the result.
-export function markHit(g, lane, kind, distCm) {
-  const near = g.things.filter((th) => !th.result && th.kind === kind && th.lane === lane && th.distCm < RULES.markShowCm &&
+// The camera saw a foot on a coloured mark the game draws under a thing near the hit line: cyan under things to step on
+// (flowers, seeds to squish, slippers), magenta under seeds to keep clear of. `mark` keeps the names from before round
+// types: 'flower' for cyan, 'seed' for magenta. The nearest unresolved thing under that mark in the lane is marked as
+// touched; the line decides the result.
+export function markHit(g, lane, mark, distCm) {
+  if (mark !== 'flower' && mark !== 'seed') return null;   // not one of the two marks
+  const target = mark === 'flower';
+  const near = g.things.filter((th) => !th.result && isTarget(th) === target && th.lane === lane && th.distCm < RULES.markShowCm &&
     Math.abs(th.distCm - distCm) <= RULES.markReachCm).sort((a, b) => Math.abs(a.distCm - distCm) - Math.abs(b.distCm - distCm))[0];
   if (!near) return null;
   near.touchedT = g.t;
   return near;
+}
+
+// Step on it (true) or keep clear of it (false). Spawned things carry the flag; one made without it (by hand, in a
+// test) takes it from its kind as before round types: seeds are kept clear of, everything else is stepped on.
+export function isTarget(th) {
+  return typeof th.target === 'boolean' ? th.target : th.kind !== 'seed';
 }
 
 function shoeOn(g, th) {
@@ -272,11 +293,16 @@ export function form(p) {
 }
 
 // ---------- spawning ----------
+// The garden act brings its round type's things, all to step on (target); the storm act brings seeds to keep clear of.
 function spawnThing(g, lane, distCm) {
   g.lastLane = lane;
-  const kind = g.act === 'garden' ? 'flower' : 'seed';
-  const golden = kind === 'flower' && ++g.flowerN % RULES.goldenEvery === 0;
-  const th = { id: g.nextId++, kind, lane, distCm, arriveT: null, result: null, ...(golden && { golden: true }) };
+  const roundType = g.act === 'garden' ? (ROUND_TYPES.includes(g.roundType) ? g.roundType : 'flowers') : null;
+  const kind = roundType ? ROUND_KINDS[roundType] : 'seed';
+  const golden = roundType !== null && kind !== 'slipper' && ++g.goldenN % RULES.goldenEvery === 0;
+  // Slippers pair up two by two on the beat, so a pair is one slipper in each lane; a round never splits a pair.
+  if (kind === 'slipper' && g.spawned % 2 === 0) g.pairN += 1;
+  const th = { id: g.nextId++, kind, target: roundType !== null, lane, distCm, arriveT: null, result: null,
+    ...(roundType && { roundType }), ...(golden && { golden: true }), ...(kind === 'slipper' && { pair: g.pairN }) };
   g.things.push(th);
   g.spawned += 1;
   return th;
@@ -304,9 +330,16 @@ function quota(g) {
   return g.act === 'garden' ? g.limits.gardenPlants : g.act === 'storm' ? g.limits.stormSeeds : 0;
 }
 
-// The act plan: how many rounds, and whether a round has a seed act after the flowers.
+// The act plan: the round types in order (limits.roundPlan, an array or a list in text split at commas, semicolons or
+// spaces; without one, limits.rounds rounds of flowers), how many rounds that is, and whether a round has a seed act
+// after its garden act. A blank name is no round; a name that is not a round type plays flowers, so a typo never
+// shortens the walk.
 export function plan(g) {
-  return { rounds: Math.max(1, Math.round(Number(g.limits.rounds) || 1)), seeds: Number(g.limits.stormSeeds) > 0 };
+  const asked = typeof g.limits.roundPlan === 'string' ? g.limits.roundPlan.split(/[\s,;]+/) : g.limits.roundPlan;
+  const names = Array.isArray(asked) ? asked.map((type) => String(type ?? '').trim()).filter(Boolean) : [];
+  const roundPlan = names.length ? names.map((name) => (ROUND_TYPES.includes(name) ? name : 'flowers'))
+    : Array.from({ length: Math.max(1, Math.round(Number(g.limits.rounds) || 1)) }, () => 'flowers');
+  return { rounds: roundPlan.length, seeds: Number(g.limits.stormSeeds) > 0, roundPlan };
 }
 
 // ---------- judging ----------
@@ -322,7 +355,6 @@ function median(a) {
   return s[Math.floor(s.length / 2)];
 }
 
-// Height a lift must reach on this foot for this kind of thing.
 // Plant speed as step() applies it: the limit, clamped to 0.3-2, the default when missing.
 export const SPEED_RANGE = [0.3, 2];
 export function speedScale(g) {
@@ -332,14 +364,18 @@ export function speedScale(g) {
   return Math.min(SPEED_RANGE[1], base + Math.max(0, (g.round || 1) - 1) * RULES.roundSpeedUp);
 }
 
-export function needCm(g, kind, foot) {
+// Height a lift must reach on this foot: a stomp onto a thing to step on, a higher dodge over one to keep clear of.
+// `what` is the thing itself, or a kind name as before round types: 'flower' and 'slipper' ask for a stomp, anything
+// else (a 'seed') for the storm's dodge.
+export function needCm(g, what, foot) {
   const base = g.base ? g.base[foot] : RULES.defaultBaseCm;
   const max = g.limits.liftRange[1];     // never ask for more than the therapist allows
-  return kind === 'flower' ? Math.min(max, base + RULES.stompExtraCm) : Math.min(max, Math.max(g.limits.liftCm, base + RULES.dodgeExtraCm));
+  const stomp = what !== null && typeof what === 'object' ? isTarget(what) : what === 'flower' || what === 'slipper';
+  return stomp ? Math.min(max, base + RULES.stompExtraCm) : Math.min(max, Math.max(g.limits.liftCm, base + RULES.dodgeExtraCm));
 }
 
 function judge(g, th) {
-  const need = needCm(g, th.kind, th.lane);
+  const need = needCm(g, th, th.lane);
   return takeEvent(g, (e) => e.kind === 'lift' && e.foot === th.lane && e.liftCm >= need &&
     e.t >= th.arriveT - RULES.beforeS && e.t <= th.arriveT + RULES.afterS);
 }
@@ -401,14 +437,15 @@ export function step(g, dt) {
     if (th.arriveT === null && th.distCm <= 0) th.arriveT = g.t;
     if (shoesLive(g)) {
       // Everything is decided at the hit line: a shoe on the thing while it crosses (the timing window around arrival)
-      // smashes a flower and splats on a seed; nothing on it means the flower got away and the seed was dodged.
+      // is a hit on a target (a smashed flower, a squished seed, a slipper) and a splat on a seed to keep clear of;
+      // nothing on it means the target got away and the seed was dodged.
       if (shoeOn(g, th)) th.touchedT = g.t;
       // The report: the closest a shoe came to the thing inside its timing window (the window the UI shows).
       const gap = th.arriveT !== null || th.distCm <= speed * RULES.shoeBeforeS ? shoeGapCm(g, th) : null;
       if (gap !== null && (th.placeCm === undefined || gap < th.placeCm)) th.placeCm = gap;
       if (th.arriveT !== null && g.t - th.arriveT > RULES.shoeAfterS) {
         const touched = th.touchedT !== undefined && th.touchedT >= th.arriveT - RULES.shoeBeforeS;
-        resolve(g, th, (th.kind === 'flower') === touched ? 'hit' : 'miss', f, out);
+        resolve(g, th, isTarget(th) === touched ? 'hit' : 'miss', f, out);
       }
     } else if (th.arriveT !== null && g.t - th.arriveT > RULES.afterS) {
       const e = judge(g, th);
@@ -432,7 +469,7 @@ export function step(g, dt) {
 function resolve(g, th, result, f, out, extra = null) {
   th.result = result;
   th.resolvedT = g.t;
-  const key = th.kind === 'flower' ? 'stomp' : 'dodge';
+  const key = isTarget(th) ? 'stomp' : 'dodge';   // every target is a stomp, whatever its kind
   g.stats[key][1] += 1;
   if (th.golden) g.stats.golden[1] += 1;
   if (key === 'stomp') g.roundStats[1] += 1;
@@ -442,17 +479,31 @@ function resolve(g, th, result, f, out, extra = null) {
     g.streak += 1;
     g.score += Math.round(RULES.points[key] * (0.5 + 0.5 * f) * (g.streak >= 5 ? 2 : 1) * (th.golden ? RULES.goldenX : 1));
     if (th.golden) g.stats.golden[0] += 1;
-    if (th.kind === 'flower') {   // a petal for the bank; a full bouquet is announced once
+    if (key === 'stomp' && th.kind !== 'slipper') {   // a petal for the bank (slippers pair up instead); a full bouquet is announced once
       g.stats.petals += 1;
       if (g.stats.petals % RULES.bouquetPetals === 0) { g.stats.bouquets += 1; out.bouquet = true; }
     }
   } else {
     g.streak = 0;
   }
-  g.log.push({ id: th.id, kind: th.kind, lane: th.lane, result, t: g.t, ...(th.golden && { golden: true }),
+  g.log.push({ id: th.id, kind: th.kind, target: isTarget(th), lane: th.lane, result, t: g.t,
+    ...(th.roundType && { roundType: th.roundType }), ...(th.golden && { golden: true }), ...(th.pair && { pair: th.pair }),
     ...(th.placeCm !== undefined && { placementCm: Math.round(th.placeCm) }), ...extra });
+  if (th.pair) pairUp(g, th, f, out);
   g.actResolved += 1;
   out.resolved.push(th);
+}
+
+// Once both slippers of a pair are judged (the second decides): both stepped on make a pair for Rosa, worth
+// points.pair on top of their own points, and the step reports it once.
+function pairUp(g, th, f, out) {
+  const mate = g.log.find((r) => r.pair === th.pair && r.id !== th.id);
+  if (!mate) return;
+  g.stats.pairs[1] += 1;
+  if (mate.result !== 'hit' || th.result !== 'hit') return;
+  g.stats.pairs[0] += 1;
+  g.score += Math.round(RULES.points.pair * (0.5 + 0.5 * f));
+  out.pair = true;
 }
 
 function nextAct(g, out) {
@@ -473,13 +524,15 @@ function nextAct(g, out) {
   resetAct(g, out);
 }
 
-// The next round of flowers begins (after a rest): the coach has spoken, the player walks again.
+// The next round begins (after a rest): the coach has spoken, the player walks again.
 function beginRound(g, out) {
   g.act = 'garden';
   resetAct(g, out);
 }
 
 function resetAct(g, out) {
+  // The round's type, from the plan; a rest already holds the next round's, the storm and home keep theirs.
+  g.roundType = plan(g).roundPlan[g.round - 1];
   g.actT = 0;
   g.actResolved = 0;
   g.spawned = 0;
@@ -519,17 +572,27 @@ export function summary(g) {
     };
     return { L: mean('L'), R: mean('R') };
   };
-  const lanes = (kind) => Object.fromEntries(['L', 'R'].map((lane) => {
-    const rows = g.log.filter((r) => r.kind === kind && r.lane === lane);
+  const share = (rows) => pct([rows.filter((r) => r.result === 'hit').length, rows.length]);
+  const lanes = (keep) => Object.fromEntries(['L', 'R'].map((lane) => {   // [hits, judged] per lane
+    const rows = g.log.filter((r) => keep(r) && r.lane === lane);
     return [lane, [rows.filter((r) => r.result === 'hit').length, rows.length]];
   }));
+  const flowers = (r) => r.kind === 'flower';
+  const { roundPlan } = plan(g);
   return {
     seconds: Math.round(g.t),
     act: g.act,
     steps: g.stats.steps,
     cadence: p.cadence,
     asymmetryPct: p.asym === null ? null : Math.round(p.asym * 100),
-    stompPct: pct(g.stats.stomp),
+    // Flower numbers stay flower numbers (the report, the coach and the gait review label them so); targetPct and
+    // roundTypePct cover the other round types.
+    stompPct: share(g.log.filter(flowers)),
+    targetPct: pct(g.stats.stomp),                      // every thing stepped on: flowers, seeds to squish, slippers
+    roundPlan,                                          // the round types in order (see ROUND_KINDS)
+    // Hit share of each round type's things, null for a type this walk did not play (the storm's seeds are in dodgePct).
+    roundTypePct: Object.fromEntries(ROUND_TYPES.map((type) => [type, share(g.log.filter((r) => r.roundType === type))])),
+    slipperPairs: [...g.stats.pairs],                   // [made, offered]: both slippers of a pair stepped on
     goldenPct: pct(g.stats.golden),
     petals: g.stats.petals,
     bouquets: g.stats.bouquets,
@@ -552,8 +615,11 @@ export function summary(g) {
     shoeMode: g.shoeMode,
     rounds: g.round,
     stepsByFoot: { ...g.stats.stepsByFoot },
-    byLane: { flower: lanes('flower'), seed: lanes('seed') },
-    placementCm: perLane(g.log.filter((r) => r.kind === 'flower' && r.placementCm !== undefined).map((r) => ({ lane: r.lane, v: r.placementCm }))),
+    // flower and seed as before (seed: the storm's seeds kept clear of; a squished seed is not a dodge), then the other
+    // round types' things by type.
+    byLane: { flower: lanes(flowers), seed: lanes((r) => r.kind === 'seed' && !r.target),
+      seedStomp: lanes((r) => r.roundType === 'seedStomp'), slippers: lanes((r) => r.roundType === 'slippers') },
+    placementCm: perLane(g.log.filter((r) => flowers(r) && r.placementCm !== undefined).map((r) => ({ lane: r.lane, v: r.placementCm }))),
     timingS: perLane(g.log.filter((r) => r.offsetS !== undefined).map((r) => ({ lane: r.lane, v: r.offsetS })), 2),
     swingCm: perLane(['L', 'R'].flatMap((lane) => g.swings[lane].map((v) => ({ lane, v })))),
     timeline: [...g.timeline],
