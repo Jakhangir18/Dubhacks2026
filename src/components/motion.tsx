@@ -32,23 +32,31 @@ export function Parallax({ children, className, strength = 14 }: { children: Rea
   )
 }
 
-/** Letters drop in one by one with a springy overshoot. */
+/** Letters drop in one by one with a springy overshoot; words never break mid-word. */
 export function PopTitle({ text, className, delay = 0 }: { text: string; className?: string; delay?: number }) {
   const reduce = useReducedMotion()
+  let order = 0
   return (
     <span className={className} aria-label={text}>
-      {text.split("").map((char, index) => (
-        <motion.span
-          key={`${char}-${index}`}
-          aria-hidden="true"
-          className="inline-block whitespace-pre"
-          initial={reduce ? false : { y: 28, opacity: 0, scale: 0.6, rotate: -8 }}
-          animate={{ y: 0, opacity: 1, scale: 1, rotate: 0 }}
-          transition={{ type: "spring", stiffness: 520, damping: 18, delay: delay + index * 0.035 }}
-        >
-          {char}
-        </motion.span>
-      ))}
+      {text.split(" ").map((word, wordIndex) => [
+        wordIndex > 0 ? " " : null,
+        <span key={`${word}-${wordIndex}`} aria-hidden="true" className="inline-block whitespace-nowrap">
+          {word.split("").map((char, charIndex) => {
+            const index = order++
+            return (
+              <motion.span
+                key={`${char}-${charIndex}`}
+                className="inline-block"
+                initial={reduce ? false : { y: 28, opacity: 0, scale: 0.6, rotate: -8 }}
+                animate={{ y: 0, opacity: 1, scale: 1, rotate: 0 }}
+                transition={{ type: "spring", stiffness: 520, damping: 18, delay: delay + index * 0.035 }}
+              >
+                {char}
+              </motion.span>
+            )
+          })}
+        </span>,
+      ])}
     </span>
   )
 }

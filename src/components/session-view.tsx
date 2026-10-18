@@ -3,8 +3,11 @@
 import Link from "next/link"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { ArrowLeft, Pause, Volume2, VolumeX } from "lucide-react"
+import confetti from "canvas-confetti"
+import { motion, useReducedMotion } from "motion/react"
+import { ArrowLeft, Pause, Play, Volume2, VolumeX } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { NumberTicker } from "@/components/ui/number-ticker"
 import { formatLevel } from "@/lib/format"
 import { GardenStage } from "@/components/garden-stage"
 import { levelById } from "@/lib/levels"
@@ -19,6 +22,7 @@ import {
   takeStep,
   tick,
 } from "@/lib/scoring"
+import { GAME_BUTTON, ZOMBIE, sticker } from "@/lib/sticker"
 import { useStride } from "@/lib/store"
 import type { Foot, LiveState, Outcome, RoundMetrics } from "@/lib/types"
 import { cn } from "cn"
@@ -204,7 +208,7 @@ export function SessionView() {
               </button>
             </div>
           ) : (
-            <span className="rounded-full bg-[#10281d]/70 px-3 py-1 text-[11px] font-semibold tracking-[0.14em]">
+            <span className="font-display rounded-full border-2 border-[#9cff5a] bg-[#12261a]/80 px-3 py-1 text-sm tracking-wide text-[#9cff5a]">
               LEVEL {formatLevel(level.id)}
             </span>
           )}
@@ -228,8 +232,16 @@ export function SessionView() {
 
         {phase === "count" ? (
           <div className="flex flex-1 flex-col items-center justify-center text-center">
-            <p className="text-sm font-semibold tracking-[0.16em] text-white/75">FIND YOUR CADENCE</p>
-            <p className="mt-3 text-8xl font-semibold tabular-nums">{count}</p>
+            <p className="text-sm font-bold tracking-[0.2em] text-[#2de2c4]">FIND YOUR CADENCE</p>
+            <motion.p
+              key={count}
+              className="font-display text-outline mt-3 text-[10rem] leading-none text-[#ffd76a] tabular-nums"
+              initial={{ scale: 2.2, opacity: 0, rotate: -12 }}
+              animate={{ scale: 1, opacity: 1, rotate: 0 }}
+              transition={{ type: "spring", stiffness: 420, damping: 14 }}
+            >
+              {count}
+            </motion.p>
           </div>
         ) : null}
 
@@ -280,45 +292,45 @@ function Brief({
 }) {
   return (
     <div className="flex flex-1 items-end py-6 sm:items-center">
-      <section className="w-full rounded-[28px] bg-white p-6 text-ink shadow-2xl sm:p-8">
-        <p className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground">FORM ROUND · ABOUT A MINUTE</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">{levelName}</h1>
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">{summary}</p>
-        <p className="mt-3 text-sm leading-6 text-[#2c4036]">
-          In the clinic this goal is {minutes} minutes of the same plant walk, projected onto the trackpad. The floor scores pace and symmetry.
+      <motion.section
+        initial={{ opacity: 0, y: 30, rotate: -1 }}
+        animate={{ opacity: 1, y: 0, rotate: 0 }}
+        transition={{ type: "spring", stiffness: 220, damping: 22 }}
+        className={sticker("ink", "w-full bg-[#0d171c]/95 p-6 backdrop-blur sm:p-8")}
+      >
+        <p className="text-[11px] font-bold tracking-[0.16em] text-[#2de2c4]">FORM ROUND · ABOUT A MINUTE</p>
+        <h1 className="font-display text-outline mt-2 text-4xl leading-none tracking-wide text-[#ffd76a] sm:text-5xl">{levelName.toUpperCase()}</h1>
+        <p className="mt-3 text-[15px] leading-6 text-white/80">{summary}</p>
+        <p className="mt-3 text-sm leading-6 text-white/65">
+          On the projected floor this goal is {minutes} minutes of the same plant walk. The floor scores pace and symmetry.
           This round uses that goal&apos;s cues. Two waves, {WAVE_STEPS} steps each.
         </p>
         <ol className="mt-4 flex flex-wrap gap-2">
           {focus.map((item, index) => (
-            <li key={item} className="rounded-full bg-mint px-3 py-1 text-sm font-medium text-forest">
+            <li key={item} className="rounded-full border-2 border-[#9cff5a]/60 bg-[#12261a] px-3 py-1 text-sm font-semibold text-[#9cff5a]">
               {index + 1}. {item}
             </li>
           ))}
         </ol>
-        <ul className="mt-4 grid gap-1 text-sm text-muted-foreground">
+        <ul className="mt-4 grid gap-1 text-sm text-white/60">
           <li>Left foot: A or the left arrow. Right foot: D or the right arrow.</li>
           <li>Keep the same time between steps, and switch feet each time.</li>
           <li>Stop if anything hurts. A form round is not worth a sore knee.</li>
         </ul>
         {locked ? (
-          <p className="mt-4 rounded-2xl bg-peach px-4 py-3 text-sm text-[#6d533c]">
+          <p className={sticker("amber", "mt-4 rounded-2xl px-4 py-3 text-sm text-white/85 shadow-none")}>
             This goal is still locked. Score 80 on the current goal of your plan to open it.
           </p>
         ) : null}
         {!sensorsReady ? (
-          <p className="mt-4 rounded-2xl bg-peach px-4 py-3 text-sm text-[#6d533c]">
+          <p className={sticker("amber", "mt-4 rounded-2xl px-4 py-3 text-sm text-white/85 shadow-none")}>
             The camera and trackpad both need to answer before a scored walk. Open the movement kit from the path and run a connection check.
           </p>
         ) : null}
-        <Button
-          type="button"
-          className="mt-6 h-11 rounded-full bg-orange px-5 text-white hover:bg-[#d9772b]"
-          disabled={locked || !sensorsReady}
-          onClick={onStart}
-        >
-          Start form round
-        </Button>
-      </section>
+        <button type="button" className={cn(GAME_BUTTON, "mt-6 disabled:opacity-40")} disabled={locked || !sensorsReady} onClick={onStart}>
+          <Play className="size-5 fill-current" /> START FORM ROUND
+        </button>
+      </motion.section>
     </div>
   )
 }
@@ -353,10 +365,10 @@ function LiveHud({
       <div>
         <p className="text-sm text-white/75">{levelName}</p>
         <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
-          <h1 className="text-3xl font-semibold tracking-tight">
-            Wave {live.wave} of {WAVE_COUNT}
+          <h1 className="font-display text-outline text-5xl tracking-wide text-[#ffd76a]">
+            WAVE {live.wave} OF {WAVE_COUNT}
           </h1>
-          <p className="text-2xl font-semibold tabular-nums">{clock}</p>
+          <p className="font-display text-3xl tabular-nums text-white">{clock}</p>
         </div>
         <p className="mt-2 text-sm text-white/80" aria-live="polite">
           {live.lastCue}
@@ -367,7 +379,7 @@ function LiveHud({
               key={chip.label}
               className={cn(
                 "rounded-full px-3 py-1 text-xs font-semibold",
-                chip.on ? "bg-white text-forest" : "bg-white/15 text-white/80",
+                chip.on ? "border-2 border-[#0b1a14] bg-[#9cff5a] text-[#0b1a14]" : "border-2 border-white/15 bg-white/10 text-white/80",
               )}
             >
               {chip.label}
@@ -379,8 +391,8 @@ function LiveHud({
             <span>Wave pressure</span>
             <span>{Math.round(live.pressure)}</span>
           </div>
-          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/20">
-            <div className="h-full rounded-full bg-orange" style={{ width: `${live.pressure}%` }} />
+          <div className="mt-1 h-3 overflow-hidden rounded-full border-2 border-[#0b1a14] bg-[#14242a]">
+            <div className="h-full rounded-full bg-[linear-gradient(90deg,#ffb21e,#ff3d8b)] transition-[width] duration-300" style={{ width: `${live.pressure}%` }} />
           </div>
           <p className="mt-2 text-xs text-white/70">
             Step {Math.min(live.stepsThisWave + 1, WAVE_STEPS)} of {WAVE_STEPS}
@@ -397,20 +409,20 @@ function LiveHud({
 
       {paused ? (
         <div className="absolute inset-0 z-20 grid place-items-center bg-[#0c2418]/70 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-[28px] bg-white p-6 text-ink shadow-2xl">
-            <h2 className="text-2xl font-semibold">Paused</h2>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          <div className={sticker("amber", "w-full max-w-sm p-6")}>
+            <h2 className="font-display text-outline text-4xl tracking-wide text-[#ffd76a]">PAUSED</h2>
+            <p className="mt-2 text-sm leading-6 text-white/75">
               The round is stopped. End it once you have at least {MIN_SCORED_STEPS} steps, or leave without a score.
             </p>
             {earlyNote ? <p className="mt-3 text-sm text-destructive">{earlyNote}</p> : null}
             <div className="mt-5 grid gap-2">
-              <Button type="button" className="h-11 rounded-full bg-orange text-white hover:bg-[#d9772b]" onClick={onResume}>
-                Resume
-              </Button>
+              <button type="button" className={cn(GAME_BUTTON, "justify-center")} onClick={onResume}>
+                <Play className="size-5 fill-current" /> RESUME
+              </button>
               <Button type="button" variant="outline" className="h-11 rounded-full" onClick={onEnd}>
                 End and score
               </Button>
-              <Link href="/play" className="py-2 text-center text-sm font-semibold text-muted-foreground">
+              <Link href="/play" className="py-2 text-center text-sm font-semibold text-white/60 hover:text-white">
                 Leave without scoring
               </Link>
             </div>
@@ -439,13 +451,13 @@ function FootButton({
       className={cn(
         "h-20 rounded-[24px] border text-left transition",
         active
-          ? "step-pulse border-orange bg-white text-ink"
-          : "border-white/20 bg-white/15 text-white hover:bg-white/25",
+          ? "step-pulse border-[2.5px] border-[#0b1a14] bg-[#ffb21e] text-[#0b1a14] shadow-[0_5px_0_#a8690b]"
+          : "border-[2.5px] border-white/20 bg-white/10 text-white hover:bg-white/20",
       )}
     >
       <span className="block px-4">
-        <span className="block text-lg font-semibold">{label}</span>
-        <span className={cn("text-xs", active ? "text-muted-foreground" : "text-white/70")}>{hint}</span>
+        <span className="font-display block text-2xl tracking-wide">{label}</span>
+        <span className={cn("text-xs", active ? "text-[#0b1a14]/70" : "text-white/70")}>{hint}</span>
       </span>
     </button>
   )
@@ -462,63 +474,105 @@ function Results({
 }) {
   const { outcome, metrics, partial } = result
   const nextName = outcome.openedLevelId ? levelById(outcome.openedLevelId).name : null
+  const reduce = useReducedMotion()
+  const great = !partial && metrics.walkingScore >= 80
+
+  useEffect(() => {
+    if (reduce) return
+    const colors = ["#9cff5a", "#ffb21e", "#ff3d8b", "#a46bff", "#2de2c4", "#ffd76a"]
+    const burst = (x: number, angle: number) =>
+      confetti({ particleCount: great ? 90 : 40, spread: 70, angle, startVelocity: 48, origin: { x, y: 0.75 }, colors, disableForReducedMotion: true })
+    burst(0.15, 60)
+    burst(0.85, 120)
+    const late = window.setTimeout(() => great && confetti({ particleCount: 120, spread: 120, origin: { y: 0.35 }, colors, disableForReducedMotion: true }), 450)
+    return () => window.clearTimeout(late)
+  }, [great, reduce])
+
   return (
     <div className="flex flex-1 items-end py-6 sm:items-center">
-      <section className="w-full rounded-[28px] bg-white p-6 text-ink shadow-2xl sm:p-8">
-        <p className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground">
-          {partial ? "FORM ROUND ENDED EARLY" : "FORM ROUND COMPLETE"}
+      <motion.section
+        initial={{ opacity: 0, y: 40, scale: 0.94 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ type: "spring", stiffness: 220, damping: 20 }}
+        className={sticker(great ? "lime" : "amber", "relative w-full overflow-visible bg-[#0d171c]/95 p-6 backdrop-blur sm:p-8")}
+      >
+        { }
+        <motion.img
+          src={great ? ZOMBIE.cheer : ZOMBIE.idle}
+          alt=""
+          className="absolute -top-28 right-4 w-32 drop-shadow-[0_8px_14px_rgba(0,0,0,0.6)] sm:-top-36 sm:w-40"
+          initial={reduce ? false : { y: 60, opacity: 0, rotate: -10 }}
+          animate={reduce ? { opacity: 1 } : { y: [60, -18, 0, -10, 0], opacity: 1, rotate: [-10, 6, 0] }}
+          transition={{ duration: 1.1, delay: 0.25 }}
+        />
+        <p className="text-[11px] font-bold tracking-[0.16em] text-[#2de2c4]">
+          {partial ? "FORM ROUND ENDED EARLY" : great ? "HOME BEFORE SUNRISE!" : "FORM ROUND COMPLETE"}
         </p>
-        <h1 className="mt-2 text-5xl font-semibold tracking-tight tabular-nums">
-          {metrics.walkingScore}
-          <span className="ml-1 text-xl font-medium text-muted-foreground">/100</span>
+        <h1 className="font-display text-outline mt-1 text-7xl leading-none tabular-nums text-[#ffd76a]">
+          <NumberTicker value={metrics.walkingScore} delay={0.3} />
+          <span className="ml-2 text-2xl text-white/60">/100</span>
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">{levelName}</p>
+        <p className="mt-1 text-sm text-white/65">{levelName}</p>
         <dl className="mt-5 grid grid-cols-2 gap-2 text-center">
           <Mini label="Pace" value={metrics.pace} />
           <Mini label="Symmetry" value={metrics.symmetry} />
         </dl>
-        <p className="mt-4 rounded-2xl bg-mint px-4 py-3 text-sm leading-6">{outcome.session.feedback}</p>
-        <ul className="mt-4 grid gap-1 text-sm text-[#2c4036]">
-          <li>+{outcome.xpGain} XP · streak {outcome.streak} {outcome.streak === 1 ? "day" : "days"}</li>
+        <motion.p
+          className="mt-4 rounded-2xl rounded-tl-sm border-[2.5px] border-[#0b1a14] bg-white px-4 py-3 text-[15px] font-medium leading-6 text-[#0b1a14] shadow-[3px_3px_0_#9c2457]"
+          initial={{ opacity: 0, scale: 0.9, originX: 0 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ type: "spring", stiffness: 260, damping: 18, delay: 0.8 }}
+        >
+          {outcome.session.feedback}
+        </motion.p>
+        <ul className="mt-4 grid gap-1.5 text-sm text-white/80">
+          <motion.li initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 1 }}>
+            <span className="font-display text-lg text-[#9cff5a]">+{outcome.xpGain} XP</span> · streak {outcome.streak}{" "}
+            {outcome.streak === 1 ? "night" : "nights"}
+          </motion.li>
           {outcome.beatStreak ? <li>You beat your best streak.</li> : null}
-          {outcome.playerLevelAfter > outcome.playerLevelBefore ? (
-            <li>You reached player level {outcome.playerLevelAfter}.</li>
+          {outcome.playerLevelAfter > outcome.playerLevelBefore ? <li>You reached player level {outcome.playerLevelAfter}.</li> : null}
+          {nextName ? (
+            <li>
+              Level {outcome.openedLevelId} is open. {nextName} is on your path.
+            </li>
           ) : null}
-          {nextName ? <li>Level {outcome.openedLevelId} is open. {nextName} is on your path.</li> : null}
-          {!nextName && metrics.walkingScore < 80 ? <li>An 80 on the planned stage opens the next one.</li> : null}
+          {!nextName && metrics.walkingScore < 80 ? <li>An 80 on the planned garden opens the next one.</li> : null}
         </ul>
         <div className="mt-6 flex flex-wrap gap-2">
-          <Button render={<Link href="/therapist" />} className="h-11 rounded-full bg-forest px-4 text-white">
-            Read Maya&apos;s note
-          </Button>
-          <Button render={<Link href="/progress" />} variant="outline" className="h-11 rounded-full px-4">
+          <Link href="/therapist" className={GAME_BUTTON}>
+            READ MAYA&apos;S NOTE
+          </Link>
+          <Link href="/progress" className="inline-flex h-12 items-center rounded-2xl border-[2.5px] border-[#2c4639] px-4 text-sm font-medium text-white transition hover:bg-white/10">
             Review progress
-          </Button>
-          <Button type="button" variant="outline" className="h-11 rounded-full px-4" onClick={onAgain}>
+          </Link>
+          <Button type="button" variant="outline" className="h-12 rounded-2xl border-[2.5px] border-[#2c4639] bg-transparent px-4 text-white hover:bg-white/10" onClick={onAgain}>
             Walk it again
           </Button>
         </div>
-      </section>
+      </motion.section>
     </div>
   )
 }
 
 function Mini({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-2xl bg-[#f6faf6] px-2 py-3">
-      <dt className="text-[11px] text-muted-foreground">{label}</dt>
-      <dd className="mt-1 text-xl font-semibold tabular-nums">{value}</dd>
+    <div className="rounded-2xl bg-black/25 px-2 py-3">
+      <dt className="text-[11px] font-bold tracking-[0.12em] text-[#2de2c4]">{label.toUpperCase()}</dt>
+      <dd className="font-display text-outline mt-1 text-4xl tabular-nums text-[#9cff5a]">
+        <NumberTicker value={value} delay={0.6} />
+      </dd>
     </div>
   )
 }
 
 function CenterNote({ title, body }: { title: string; body: string }) {
   return (
-    <div className="grid min-h-dvh place-items-center bg-[#0e2419] px-6 text-white">
+    <div className="grid min-h-dvh place-items-center bg-[#070b10] px-6 text-white">
       <div className="max-w-md text-center">
-        <h1 className="text-3xl font-semibold">{title}</h1>
+        <h1 className="font-display text-4xl tracking-wide text-[#ffd76a]">{title}</h1>
         <p className="mt-2 text-sm text-white/75">{body}</p>
-        <Link href="/play" className="mt-6 inline-flex h-11 items-center rounded-full bg-white px-5 text-sm font-semibold text-ink">
+        <Link href="/play" className={cn(GAME_BUTTON, "mt-6")}>
           Back to the path
         </Link>
       </div>

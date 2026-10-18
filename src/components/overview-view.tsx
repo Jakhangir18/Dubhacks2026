@@ -37,7 +37,7 @@ export function HomeTrack({ progress }: { progress: number }) {
           transition={{ duration: 1.6, ease: [0.22, 1, 0.36, 1], delay: 0.6 }}
         />
       </div>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
+      { }
       <motion.img
         src={ZOMBIE.walk}
         alt=""
@@ -92,7 +92,7 @@ export function OverviewView() {
                 <p className="text-xs font-bold tracking-[0.16em] text-[#ffb21e]">
                   CHAPTER {formatLevel(level.id)} · {level.minutes} MIN · {level.chip.toUpperCase()}
                 </p>
-                <h2 className="font-display text-outline mt-1 text-[2.6rem] leading-none tracking-wide text-[#ffd76a]">
+                <h2 className="font-display text-outline mt-1 text-[2rem] leading-none tracking-wide text-[#ffd76a] sm:text-[2.6rem]">
                   <PopTitle text={level.name.toUpperCase()} delay={0.4} />
                 </h2>
                 <p className="mt-2 text-[15px] leading-6 text-white/75">{level.summary}</p>

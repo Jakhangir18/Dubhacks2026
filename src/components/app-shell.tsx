@@ -181,7 +181,7 @@ function MobileNav() {
                 )}
               >
                 <Icon className="size-4" />
-                {item.label === "Walk home" ? "Practice" : item.label === "AI therapist" ? "Therapist" : item.label === "My progress" ? "Progress" : item.label}
+                {item.label === "My progress" ? "Progress" : item.label}
               </Link>
             </li>
           )
