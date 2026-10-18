@@ -29,7 +29,7 @@
     // The phone's camera, as pictures to the game server: ten a second, 480 px on the long side, for the gait
     // analysis on the server and the dashboard's picture. No video is stored.
     const $ = (id) => document.getElementById(id);
-    const FPS = 12, LONG = 400, IN_FLIGHT = 3;   // small pictures, a few uploads at once: the round trip over the internet must not set the frame rate
+    const FPS = 12, LONG = 400, IN_FLIGHT = 8;   // small pictures, several uploads at once: a 600 ms round trip over the internet must not set the frame rate
     let timer = null, busy = 0, sent = 0;
     async function start() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
