@@ -6,7 +6,7 @@
   <title>Zombie Walk Home</title>
   <link rel="icon" href="data:,">
   <style>
-    html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
+    html, body { margin: 0; height: 100%; background: #245b67; overflow: hidden; font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
     #stage { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; }
     #handles { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
     .warp-handle { position: absolute; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%;
@@ -16,9 +16,8 @@
       background: rgba(0,0,0,.6); padding: 6px 10px; border-radius: 8px; }
     #keys b { color: #7CFF4F; }
   </style>
-  <!-- Phaser 3.80.1 (MIT) is vendored so the game runs with no Wi-Fi; the CDN is only a fallback -->
+  <!-- Phaser 3.80.1 (MIT) and all game art are served locally for the projector. -->
   <script src="vendor/phaser.min.js"></script>
-  <script>window.Phaser || document.write('<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"><\/script>')</script>
   <script src="warp.js"></script>
 </head>
 <body>
