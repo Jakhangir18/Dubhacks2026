@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RULES, beatCm, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, pace, form, applyParams, summary, needCm, startAt, speedScale } from '../web/logic.js';
+import { RULES, beatCm, plan, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, pace, form, applyParams, summary, needCm, startAt, speedScale } from '../web/logic.js';
 
 const DT = 0.05;
 
@@ -28,13 +28,13 @@ function walkUntil(g, cond, limitS = 60) {
 }
 
 function toGarden(limits = {}) {
-  const g = newGame({ walkSeconds: 2, ...limits }, 3);
+  const g = newGame({ walkSeconds: 2, ...limits });
   walkUntil(g, () => g.act === 'garden');
   return g;
 }
 
 test('cadence below the minimum slows the world and fills act 1 at half rate; standing still stops it', () => {
-  const g = newGame({ walkSeconds: 2 }, 1);
+  const g = newGame({ walkSeconds: 2 });
   walk(g, 2.5, 1.0);                   // 60 steps per minute < 80: slow, not stopped
   assert.equal(g.act, 'walk');         // 2.5 s at half rate is not 2 s of good walking yet
   assert.ok(g.travelledCm > 0);
@@ -47,7 +47,7 @@ test('cadence below the minimum slows the world and fills act 1 at half rate; st
 });
 
 test('the world speed glides: no jump when the pace starts, flips or stops', () => {
-  const g = newGame({ walkSeconds: 60 }, 1);
+  const g = newGame({ walkSeconds: 60 });
   const speeds = [];
   const go = (seconds, gap) => { const end = g.t + seconds; while (g.t < end) { walk(g, DT, gap); speeds.push(g.speed); } };
   go(1.15, 0.6);                       // two steps (at 0 and 0.6 s): no cadence yet
@@ -71,7 +71,7 @@ test('the world speed glides: no jump when the pace starts, flips or stops', () 
 });
 
 test('the pace warning holds: it comes after a sustained bad pace and leaves after a sustained good one', () => {
-  const g = newGame({ walkSeconds: 60 }, 1);
+  const g = newGame({ walkSeconds: 60 });
   walk(g, 6, 0.6);                        // 100 steps per minute, past the grace period
   assert.equal(step(g, DT).pace.gated, false);
   const until = (cond, limitS = 20) => { const end = g.t + limitS; while (g.t < end) { walk(g, DT, g._gap); if (cond(pace(g))) return; } assert.fail('not reached'); };
@@ -79,48 +79,71 @@ test('the pace warning holds: it comes after a sustained bad pace and leaves aft
   until((p) => !p.ok);
   const badT = g.t;
   assert.equal(step(g, DT).pace.gated, false, 'not at once');
-  until(() => g.t >= badT + RULES.paceWarnS + 2 * DT);
+  until(() => g.t >= badT + 2 * RULES.paceWarnS);
   assert.equal(step(g, DT).pace.gated, true, 'after the hold');
   g._gap = 0.6;
   until((p) => p.ok);
   const okT = g.t;
   assert.equal(step(g, DT).pace.gated, true, 'still shown right after the pace recovers');
-  until(() => g.t >= okT + RULES.paceWarnS + 2 * DT);
+  until(() => g.t >= okT + 2 * RULES.paceWarnS);
   assert.equal(step(g, DT).pace.gated, false, 'gone after the hold');
 });
 
+test('the beat snaps the spacing to the nearest odd number of steps, ties down, monotonic', () => {
+  const beat = (spacingCm, speedScale = 0.7) => beatCm(newGame({ spacingCm, speedScale }));
+  assert.equal(beat(140), 3 * 35);          // 4 steps is a tie: 3
+  assert.equal(beat(120, 1), 3 * 50);       // 2.4 steps: 3, never 1
+  assert.equal(beat(100, 1), 1 * 50);       // 2 steps is a tie: 1
+  assert.equal(beat(220), 7 * 35);          // 6.3 steps: 7
+  assert.equal(beat(90, 2), 1 * 100);       // under one step: 1
+  let last = 0;
+  for (let cm = 90; cm <= 220; cm += 5) { assert.ok(beat(cm) >= last); last = beat(cm); }
+});
+
+test('the first flower of an act appears on a landing, a whole number of steps out, in the lane of the foot that lands there', () => {
+  const g = toGarden();
+  assert.equal(g.spawned, 0);
+  walkUntil(g, () => g.spawned === 1);
+  const first = g.things[0];
+  const foot = g.strikes[g.strikes.length - 1].foot;   // the landing that placed it
+  const steps = Math.round(RULES.aheadCm / 35);          // 12 at the defaults: even, so the same foot lands on it
+  assert.equal(first.lane, steps % 2 === 0 ? foot : foot === 'L' ? 'R' : 'L');
+  assert.ok(Math.abs(first.distCm - steps * 35) < 8, `placed ${first.distCm} cm out`);   // minus up to two frames of travel
+});
+
 test('with no seeds the rounds are flowers only, lanes alternate, and each flower comes an odd number of steps after the last', () => {
-  const g = newGame({ walkSeconds: 1, gardenPlants: 4, rounds: 2 }, 2);   // stormSeeds defaults to 0
-  const acts = [g.act], spawns = [];
-  let ids = g.nextId;
+  const g = newGame({ walkSeconds: 1, gardenPlants: 4, rounds: 2 });   // stormSeeds defaults to 0
+  const acts = [g.act];
+  const beat = beatCm(g);
+  assert.equal(beat, 3 * RULES.strideCm * 0.7);   // 140 cm at the default plant speed snaps to 3 steps
+  let gaps = 0;
   walkUntil(g, () => {
     const key = g.act === 'garden' ? `garden ${g.round}` : g.act;
     if (key !== acts[acts.length - 1]) acts.push(key);
-    if (g.nextId !== ids) { ids = g.nextId; spawns.push({ round: g.round, cm: g.travelledCm }); }
+    const live = g.things.filter((th) => !th.result);
+    for (let i = 1; i < live.length; i++) {   // things on the floor sit exactly one beat apart, whatever the frame
+      assert.ok(Math.abs(live[i].distCm - live[i - 1].distCm - beat) < 1e-6, `gap ${live[i].distCm - live[i - 1].distCm}`);
+      gaps += 1;
+    }
     return g.act === 'home';
   }, 120);
+  assert.ok(gaps > 0);
   assert.deepEqual(acts, ['walk', 'garden 1', 'garden 2', 'home']);
   assert.equal(g.log.length, 8);
   assert.ok(g.log.every((l) => l.kind === 'flower'));
   for (let i = 1; i < g.log.length; i++) assert.notEqual(g.log[i].lane, g.log[i - 1].lane, 'lanes alternate');
-  const beat = beatCm(g);
-  assert.equal(beat, 3 * RULES.strideCm * 0.7);   // 140 cm at the default plant speed snaps to 3 steps
-  for (let i = 1; i < spawns.length; i++) {
-    if (spawns[i].round !== spawns[i - 1].round) continue;
-    const gap = spawns[i].cm - spawns[i - 1].cm;
-    assert.ok(Math.abs(gap - beat) < 10, `spawn gap ${gap} cm, beat ${beat}`);
-  }
+  assert.equal(summary(g).spacingCm, 105);   // the spacing as played
 });
 
 test('a steady pace with both feet finishes act 1', () => {
-  const g = newGame({ walkSeconds: 2 }, 1);
+  const g = newGame({ walkSeconds: 2 });
   walk(g, 4, 0.6);                     // 100 steps per minute; pace is valid from the third step
   assert.equal(g.act, 'garden');
   assert.ok(g.travelledCm > 0);
 });
 
 test('one foot only is not a valid pace', () => {
-  const g = newGame({}, 1);
+  const g = newGame({});
   for (let i = 0; i < 20; i++) { addEvent(g, { foot: 'L', kind: 'strike' }); step(g, 0.3); }
   assert.equal(pace(g).ok, false);
   assert.equal(form(pace(g)), 0);
@@ -165,7 +188,7 @@ test('one high step cannot stomp two flowers', () => {
 });
 
 test('act 1 measures the normal step height and sets the thresholds from it', () => {
-  const g = newGame({ walkSeconds: 1, liftCm: 6 }, 2);
+  const g = newGame({ walkSeconds: 1, liftCm: 6 });
   walk(g, 3, 0.6, 5);
   assert.equal(g.act, 'garden');
   assert.deepEqual(g.base, { L: 5, R: 5 });
@@ -174,7 +197,7 @@ test('act 1 measures the normal step height and sets the thresholds from it', ()
 });
 
 function toStorm() {
-  const g = newGame({ walkSeconds: 1, gardenPlants: 1, stormSeeds: 1, liftCm: 10 }, 9);
+  const g = newGame({ walkSeconds: 1, gardenPlants: 1, stormSeeds: 1, liftCm: 10 });
   walkUntil(g, () => g.act === 'storm');
   walkUntil(g, () => g.things.some((th) => th.kind === 'seed'));
   return { g, seed: g.things.find((th) => th.kind === 'seed') };
@@ -197,7 +220,7 @@ test('a high lift dodges the seed', () => {
 });
 
 test('the game reaches home after all three acts', () => {
-  const g = newGame({ walkSeconds: 1, gardenPlants: 2, stormSeeds: 2 }, 5);
+  const g = newGame({ walkSeconds: 1, gardenPlants: 2, stormSeeds: 2 });
   walk(g, 60, 0.55, 4);                // steady pace with normal steps
   assert.equal(g.act, 'home');
   const s = summary(g);
@@ -206,7 +229,7 @@ test('the game reaches home after all three acts', () => {
 });
 
 test('coach parameters stay inside the therapist ranges', () => {
-  const g = newGame({}, 1);
+  const g = newGame({});
   applyParams(g, { liftCm: 40, spacingCm: 10 });
   assert.equal(g.limits.liftCm, g.limits.liftRange[1]);
   assert.equal(g.limits.spacingCm, g.limits.spacingRange[0]);
@@ -218,13 +241,13 @@ test('form rewards a symmetric good pace', () => {
 });
 
 test('events from an unknown foot are ignored', () => {
-  const g = newGame({}, 1);
+  const g = newGame({});
   assert.equal(addEvent(g, { foot: 'X', kind: 'strike' }), null);
   assert.equal(g.stats.steps, 0);
 });
 
 test('lift targets never exceed the therapist maximum', () => {
-  const g = newGame({ walkSeconds: 1, liftRange: [6, 18] }, 4);
+  const g = newGame({ walkSeconds: 1, liftRange: [6, 18] });
   walk(g, 3, 0.6, 12);                 // high marching in act 1: normal step 12 cm
   assert.equal(g.act, 'garden');
   assert.equal(needCm(g, 'seed', 'L'), 18);
@@ -232,7 +255,10 @@ test('lift targets never exceed the therapist maximum', () => {
 });
 
 test('startAt jumps to an act through the normal transition', () => {
-  const g = newGame({ stormSeeds: 2 }, 1);
+  const none = newGame();
+  startAt(none, 'storm');
+  assert.equal(none.act, 'garden');   // no seed act in a flowers-only game
+  const g = newGame({ stormSeeds: 2 });
   startAt(g, 'storm');
   assert.equal(g.act, 'storm');
   assert.equal(g.actResolved, 0);
@@ -240,7 +266,7 @@ test('startAt jumps to an act through the normal transition', () => {
 });
 
 test('equal step times on one foot still give an asymmetry value', () => {
-  const g = newGame({}, 1);
+  const g = newGame({});
   for (const [t, f] of [[0, 'L'], [0.6, 'R'], [0.6, 'L'], [1.2, 'R'], [1.2, 'L']]) addEvent(g, { foot: f, kind: 'strike', t });
   g.t = 1.3;
   assert.notEqual(pace(g).asym, null);
@@ -248,7 +274,7 @@ test('equal step times on one foot still give an asymmetry value', () => {
 
 test('plant speed scales the world speed inside its limits', () => {
   const at = (speedScale) => {
-    const g = newGame({ speedScale }, 1);
+    const g = newGame({ speedScale });
     let out;
     for (let i = 0; i < 40; i++) {           // a steady 100 steps per minute, both feet
       addEvent(g, { foot: i % 2 ? 'R' : 'L', kind: 'strike', t: g.t });
@@ -264,8 +290,8 @@ test('plant speed scales the world speed inside its limits', () => {
 });
 
 test('a zero or missing plant speed never stops the world', () => {
-  assert.equal(speedScale(newGame({ speedScale: 0 }, 1)), 0.3);
-  assert.equal(speedScale(newGame({ speedScale: 'x' }, 1)), 0.7);   // the default
+  assert.equal(speedScale(newGame({ speedScale: 0 })), 0.3);
+  assert.equal(speedScale(newGame({ speedScale: 'x' })), 0.7);   // the default
 });
 
 // ---------- shoe mode: feet.py boxes mapped onto the field ----------
@@ -287,7 +313,7 @@ function shoeWalk(g, seconds, gap = 0.6) {
 }
 
 test('shoe swings on the belt count as steps and keep the pace gate open', () => {
-  const g = newGame({ walkSeconds: 2 }, 1);
+  const g = newGame({ walkSeconds: 2 });
   shoeWalk(g, 6, 0.6);                    // 100 steps per minute, alternating feet
   assert.equal(g.shoeMode, true);
   assert.ok(g.stats.steps >= 8 && g.stats.steps <= 12, `steps ${g.stats.steps}`);   // one per swing, no jitter steps
@@ -359,7 +385,7 @@ test('shoe mode needs a real sighting, lapses when the shoes stop coming, and re
 });
 
 test('one shoe takes its lane from the last two-shoe midpoint', () => {
-  const g = newGame({}, 1);
+  const g = newGame({});
   addShoes(g, [{ xFrac: 0.2, nearCm: -40, farCm: -70 }, { xFrac: 0.4, nearCm: -40, farCm: -70 }]);   // both feet left of centre
   assert.deepEqual(g.shoes.map((s) => s.lane), ['L', 'R']);
   addShoes(g, [{ xFrac: 0.4, nearCm: -40, farCm: -70 }]);
@@ -369,7 +395,7 @@ test('one shoe takes its lane from the last two-shoe midpoint', () => {
 });
 
 test('rounds: flowers and seeds repeat before home, and the summary counts them', () => {
-  const g = newGame({ walkSeconds: 2, gardenPlants: 2, stormSeeds: 2, rounds: 2 }, 5);
+  const g = newGame({ walkSeconds: 2, gardenPlants: 2, stormSeeds: 2, rounds: 2 });
   const acts = [];
   walkUntil(g, () => { if (acts[acts.length - 1] !== g.act) acts.push(g.act); return g.act === 'home'; }, 300);
   assert.deepEqual(acts, ['walk', 'garden', 'storm', 'garden', 'storm', 'home']);

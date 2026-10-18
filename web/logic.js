@@ -42,9 +42,12 @@ export const RULES = {
   speedUpS: 0.6,
   slowDownS: 1.0,
   restCmS: 1,
-  // The pace warning holds: it turns on after this long of a bad pace and off after this long of a good one, so one
-  // missed step never flashes the floor and a cadence hovering at the minimum does not flicker. Not before graceS.
+  // The pace warning follows a leaky share of recent time at a bad pace (time constant paceWarnS): it comes on above
+  // paceWarnOn and goes off below paceWarnOff, so one missed step never flashes the floor, a cadence hovering at the
+  // minimum neither flickers nor sticks, and a sustained drop shows within about 1.5 s. Not before paceGraceS.
   paceWarnS: 1.2,
+  paceWarnOn: 0.7,
+  paceWarnOff: 0.45,
   paceGraceS: 3,
   points: { stomp: 10, dodge: 15 },
   // Shoe mode (feet.py boxes on the camera): a flower is smashed when a shoe covers it, a seed splats; a thing
@@ -63,25 +66,20 @@ export const RULES = {
   markShowCm: 90,                // the coloured mark shows under a thing from this far before the hit line
 };
 
-export function rng(seed = 1) {
-  let s = seed >>> 0;
-  return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
-}
-
-export function newGame(limits = {}, seed = 1) {
+export function newGame(limits = {}) {
   return {
     limits: { ...LIMITS, ...limits },
-    rand: rng(seed),
     t: 0,
     act: 'walk',
     round: 1,                    // which flowers-and-seeds round (1 to limits.rounds)
     actT: 0,                     // seconds spent in the current act
     walkGoodS: 0,                // act 1 seconds at a good pace
     speed: 0,                    // world speed in cm/s, eased towards the cadence
-    paceGated: false,            // the pace warning, held (see RULES.paceWarnS)
-    paceFlipT: null,             // when the pace last started disagreeing with the warning
+    paceGated: false,            // the pace warning (see RULES.paceWarnS)
+    paceBad: 0,                  // leaky share of recent time at a bad pace, 0..1
     travelledCm: 0,
-    nextSpawnCm: 0,
+    nextSpawnCm: 0,              // travelledCm at which the next thing is due: the first on a step, then every beat
+    spawnDist: RULES.aheadCm,    // where a thing due exactly now appears, from the hit line
     spawned: 0,
     nextId: 1,
     things: [],                  // flowers and seeds on the floor
@@ -118,6 +116,7 @@ export function addEvent(g, ev) {
     g.strikes.push({ t: e.t, foot: e.foot });
     g.stats.steps += 1;
     if (g.strikes.length > 60) g.strikes.shift();
+    if (g.spawned === 0 && quota(g) > 0 && g.travelledCm >= g.nextSpawnCm) spawnOnStep(g, e.foot);
   }
   if (e.kind === 'lift' && Number.isFinite(e.liftCm)) {
     const arr = g.stats.lifts[e.foot];
@@ -234,27 +233,41 @@ export function form(p) {
 }
 
 // ---------- spawning ----------
-function spawnThing(g) {
-  const lane = g.lastLane === 'L' ? 'R' : 'L';   // the feet alternate, so do the lanes
+function spawnThing(g, lane, distCm) {
   g.lastLane = lane;
   const kind = g.act === 'garden' ? 'flower' : 'seed';
-  const th = { id: g.nextId++, kind, lane, distCm: RULES.aheadCm, arriveT: null, result: null };
+  const th = { id: g.nextId++, kind, lane, distCm, arriveT: null, result: null };
   g.things.push(th);
   g.spawned += 1;
   return th;
 }
 
-// The beat: the therapist's spacing in world cm, snapped to an odd number of steps (the world moves one stride
-// times the plant speed per step), so a steady walker meets each thing with the other foot.
+// The first thing of an act appears on a landing, a whole number of steps from the hit line, in the lane of the
+// foot that lands when it gets there; the rest follow on the beat, so a steady walker meets each with the other foot.
+function spawnOnStep(g, foot) {
+  const stepCm = RULES.strideCm * speedScale(g);
+  const steps = Math.max(1, Math.round(RULES.aheadCm / stepCm));
+  g.nextSpawnCm = g.travelledCm;
+  g.spawnDist = steps * stepCm;
+  spawnThing(g, steps % 2 === 0 ? foot : foot === 'L' ? 'R' : 'L', g.spawnDist);
+  g.nextSpawnCm += beatCm(g);
+}
+
+// The beat: the therapist's spacing in world cm, snapped to the nearest odd number of steps (ties go down; the world
+// moves one stride times the plant speed per step): 3 steps at the defaults.
 export function beatCm(g) {
   const stepCm = RULES.strideCm * speedScale(g);
-  let steps = Math.max(1, Math.round(g.limits.spacingCm / stepCm));
-  if (steps % 2 === 0) steps -= 1;
+  const steps = Math.max(1, 2 * Math.ceil(g.limits.spacingCm / stepCm / 2 - 1) + 1);
   return steps * stepCm;
 }
 
 function quota(g) {
   return g.act === 'garden' ? g.limits.gardenPlants : g.act === 'storm' ? g.limits.stormSeeds : 0;
+}
+
+// The act plan: how many rounds, and whether a round has a seed act after the flowers.
+export function plan(g) {
+  return { rounds: Math.max(1, Math.round(Number(g.limits.rounds) || 1)), seeds: Number(g.limits.stormSeeds) > 0 };
 }
 
 // ---------- judging ----------
@@ -300,10 +313,10 @@ export function step(g, dt) {
   g.actT += dt;
   const p = pace(g);
   const f = form(p);
-  const bad = !p.ok && g.t > RULES.paceGraceS;
-  if (bad === g.paceGated) g.paceFlipT = null;
-  else if (g.paceFlipT === null) g.paceFlipT = g.t;
-  else if (g.t - g.paceFlipT >= RULES.paceWarnS) { g.paceGated = bad; g.paceFlipT = null; }
+  const bad = !p.ok && g.t > RULES.paceGraceS ? 1 : 0;
+  g.paceBad += (bad - g.paceBad) * ease(dt, RULES.paceWarnS);
+  if (g.paceBad > RULES.paceWarnOn) g.paceGated = true;
+  else if (g.paceBad < RULES.paceWarnOff) g.paceGated = false;
   p.gated = g.paceGated;
   if (g.act !== 'home') { g.formSum += f * dt; g.formN += dt; }   // time-weighted, independent of frame rate
   const scale = speedScale(g);
@@ -327,10 +340,6 @@ export function step(g, dt) {
   }
   if (g.act === 'home') return out;
 
-  while (g.spawned < quota(g) && g.travelledCm >= g.nextSpawnCm) {
-    spawnThing(g);
-    g.nextSpawnCm = g.travelledCm + beatCm(g);
-  }
   for (const th of g.things) {
     if (th.result) continue;
     th.distCm -= moved;
@@ -346,6 +355,13 @@ export function step(g, dt) {
     } else if (th.arriveT !== null && g.t - th.arriveT > RULES.afterS) {
       resolve(g, th, judge(g, th) ? 'hit' : 'miss', f, out);
     }
+  }
+  // After the first (which waits for a landing, see spawnOnStep), each thing is due one beat further along and
+  // appears exactly one beat behind the last, whatever the frame's overshoot: placed after this frame's move,
+  // like the things already on the floor.
+  while (g.spawned > 0 && g.spawned < quota(g) && g.travelledCm >= g.nextSpawnCm) {
+    spawnThing(g, g.lastLane === 'L' ? 'R' : 'L', g.spawnDist - (g.travelledCm - g.nextSpawnCm));
+    g.nextSpawnCm += beatCm(g);
   }
   g.things = g.things.filter((th) => !th.result || g.t - th.resolvedT < 1.5);
   const done = g.spawned >= quota(g) && g.things.every((th) => th.result);
@@ -377,8 +393,7 @@ function nextAct(g, out) {
       R: median(g.walkLifts.R) ?? RULES.defaultBaseCm,
     };
   }
-  const rounds = Math.max(1, Math.round(Number(g.limits.rounds) || 1));
-  const seeds = Number(g.limits.stormSeeds) > 0;
+  const { rounds, seeds } = plan(g);
   const roundEnd = seeds ? 'storm' : 'garden';
   if (g.act === roundEnd && g.round < rounds) { g.round += 1; g.act = 'garden'; }   // another round
   else g.act = { walk: 'garden', garden: seeds ? 'storm' : 'home', storm: 'home' }[g.act];
@@ -393,6 +408,7 @@ function nextAct(g, out) {
 // Development and demo shortcut: start at an act as if the earlier acts were done with normal steps.
 export function startAt(g, act) {
   if (act !== 'garden' && act !== 'storm') return;
+  if (act === 'storm' && !plan(g).seeds) act = 'garden';   // no seed act in this game
   g.base = { L: RULES.defaultBaseCm, R: RULES.defaultBaseCm };
   g.act = 'walk';
   if (act === 'storm') g.act = 'garden';
@@ -427,7 +443,7 @@ export function summary(g) {
     formPct: g.formN ? Math.round((100 * g.formSum) / g.formN) : 0,
     score: g.score,
     liftTargetCm: g.limits.liftCm,
-    spacingCm: g.limits.spacingCm,
+    spacingCm: Math.round(beatCm(g)),   // the spacing as played: the therapist's setting snapped to the beat
     normalStepCm: g.base,
     shoeMode: g.shoeMode,
     rounds: g.round,

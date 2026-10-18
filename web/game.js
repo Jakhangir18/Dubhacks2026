@@ -1,6 +1,6 @@
 // Zombie Walk Home: Phaser scenes, art, HUD and input. Rules live in logic.js.
 // Floor projection: things arrive at the pad's front edge; ghost feet mark the toes below.
-import { ease, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
+import { ease, plan, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
 import { connectBridge, SHOES_EVENT, FRAME_EVENT, MARKS_EVENT } from './bridge.js';
@@ -616,7 +616,7 @@ class Play extends Phaser.Scene {
     sound.setMusic(true);
     this.paused = false;
     this.highSound = { L: false, R: false };
-    this.g = newGame(settings.limits, Date.now() % 100000);
+    this.g = newGame(settings.limits);
     this.g.toeBaseCm = this.g.toeCm = -fieldDist(this.layout().toeY, this.layout());   // world cm from the hit line to the toes
     this.shoeRings = ['L', 'R'].map(() => this.add.ellipse(0, 0, 150, 80).setStrokeStyle(10, C.cyan, 0.8).setVisible(false).setDepth(11));
     this.lastShoes = 0;
@@ -716,7 +716,8 @@ class Play extends Phaser.Scene {
     const a = ACTS[this.g.act];
     if (!a) return;
     sound.play('act');
-    if (this.g.act === 'storm' && SHARE) clip.start(this.game.canvas, sound.capture?.stream);
+    const { rounds, seeds } = plan(this.g);   // the clip records the last act of the last round
+    if (SHARE && this.g.round === rounds && this.g.act === (seeds ? 'storm' : 'garden')) clip.start(this.game.canvas, sound.capture?.stream);
     this.actIntroUntil = this.g.t + 4.4;
     this.coachLine = shoesLive(this.g) ? a.how : a.hint;   // shoe mode: say what to do with the foot, plainly
     this.nextGardenUpdate = 0;
@@ -806,8 +807,8 @@ class Play extends Phaser.Scene {
 
   progress() {
     const g = this.g;
-    const rounds = Math.max(1, Math.round(Number(g.limits.rounds) || 1));
-    const perRound = Number(g.limits.stormSeeds) > 0 ? 2 : 1;   // flowers, and seeds when there are any
+    const { rounds, seeds } = plan(g);
+    const perRound = seeds ? 2 : 1;   // flowers, and seeds when there are any
     const total = 1 + perRound * rounds;   // the walk, then the acts of each round
     let done, within;
     if (g.act === 'walk') { done = 0; within = Math.min(1, g.walkGoodS / g.limits.walkSeconds); }
@@ -1194,6 +1195,8 @@ window.zombieGame = new Phaser.Game({
   // RESIZE measures the parent's transformed bounds and would shrink the board twice.
   // Size the source canvas explicitly; Warp alone maps it to the walking zone.
   scale: { mode: Phaser.Scale.NONE, ...FIELD },
+  // A stalled frame is bounded here (Phaser's defaults, pinned): the rules get at most 200 ms per step, never a leap.
+  fps: { min: 5, smoothStep: true },
   scene: [Preload, Boot, ZonePreview, Title, Play, Home],
 });
 
