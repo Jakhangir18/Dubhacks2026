@@ -1,6 +1,6 @@
 // Zombie Walk Home: Phaser scenes, art, HUD and input. Rules live in logic.js.
 // Floor projection: things arrive at the pad's front edge; ghost feet mark the toes below.
-import { newGame, step, addEvent, summary, needCm, startAt, applyParams, RULES } from './logic.js';
+import { newGame, step, addEvent, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
 import { connectBridge } from './bridge.js';
@@ -103,7 +103,7 @@ let autoFoot = 'L';
 function nudgeSpeed(delta) {
   const play = window.zombieGame?.scene.getScene('play');
   const now = Number(play?.g?.limits.speedScale ?? settings.limits.speedScale ?? 1);
-  const next = Math.round(Math.min(2, Math.max(0.3, now + delta)) * 10) / 10;
+  const next = Math.round(Math.min(SPEED_RANGE[1], Math.max(SPEED_RANGE[0], now + delta)) * 10) / 10;
   settings.limits.speedScale = next;
   if (play?.g) play.g.limits.speedScale = next;
   Warp.store.set('zombiewalk.speedScale', next);
@@ -294,7 +294,7 @@ function floorLayout(W, H) {
   return { W, H, zoneY, top, rowH: (zoneY - top) / 6,
     lanes: { L: W * 0.318, R: W * 0.682 }, laneW: W * 0.364, gap: 20,
     // On the board the meters stand beside the lanes, ending at the hit line; on the pad they run up the rails.
-    toeY: BOARD ? H - 60 : H - 120, meterBottom: BOARD ? zoneY - 20 : H - 30, meterTop: BOARD ? H * 0.42 : zoneY + 10 };
+    toeY: BOARD ? H - 75 : H - 120, meterBottom: BOARD ? zoneY - 20 : H - 30, meterTop: BOARD ? H * 0.42 : zoneY + 10 };
 }
 
 function makeFloor(scene, L) {
@@ -304,7 +304,8 @@ function makeFloor(scene, L) {
   scene.board = Array.from({ length: rows * 2 }, () => scene.add.image(0, 0, 'tile-grass-light').setDepth(-18));
   scene.hitLine = scene.add.graphics().setDepth(2);
   scene.feet = Object.fromEntries(['L', 'R'].map(lane => [lane,
-    scene.add.image(L.lanes[lane], L.toeY, `foot-ghost-${lane.toLowerCase()}`).setAlpha(0.3).setDepth(12)]));
+    scene.add.image(L.lanes[lane], L.toeY, `foot-ghost-${lane.toLowerCase()}`).setAlpha(0.3).setDepth(12)
+      .setScale(BOARD ? 0.5 : 1)]));   // on the board the feet are a small metronome under the hit line
   scene.hud = scene.add.graphics().setDepth(30);
 }
 
@@ -432,7 +433,7 @@ class ZonePreview extends Phaser.Scene {
     this.flowers.forEach((flower, i) => {
       const phase = (t / 6 + i / 3) % 1;
       const y = L.top + phase * (L.H - L.top + 150);
-      flower.setPosition(L.lanes[i % 2 ? 'R' : 'L'], y).setAlpha(y > L.zoneY ? 0.4 : 1);
+      flower.setPosition(L.lanes[i % 2 ? 'R' : 'L'], y).setAlpha(y > L.zoneY && !BOARD ? 0.4 : 1);
     });
   }
 
@@ -805,7 +806,7 @@ class Play extends Phaser.Scene {
       const act = ACTS[g.act];
       publishGarden({ cadence: out.pace.cadence, act: g.act, paceOk: out.pace.ok || g.t <= 3,
         paused: this.paused, title: act?.title || '', score: `${g.score} pts${g.streak >= 5 ? '  x2' : ''}`,
-        progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · speed x${(g.limits.speedScale ?? 1).toFixed(1)} · form ${Math.round(out.form * 100)}%${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
+        progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · speed x${speedScale(g).toFixed(1)} · form ${Math.round(out.form * 100)}%${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
         coachColor: g.t < this.feedbackUntil ? this.feedbackColor : '',
         coach: g.t < this.feedbackUntil ? this.feedback : g.t < this.actIntroUntil ? act.intro.join(' ') : this.coachLine });
     }

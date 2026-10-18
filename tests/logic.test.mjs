@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newGame, step, addEvent, pace, form, applyParams, summary, needCm, startAt } from '../web/logic.js';
+import { newGame, step, addEvent, pace, form, applyParams, summary, needCm, startAt, speedScale } from '../web/logic.js';
 
 const DT = 0.05;
 
@@ -189,4 +189,9 @@ test('plant speed scales the world speed inside its limits', () => {
   assert.ok(Math.abs(at(0.5) - normal / 2) < 1e-9);
   assert.ok(Math.abs(at(5) - normal * 2) < 1e-9);      // capped at 2
   assert.ok(Math.abs(at(0.1) - normal * 0.3) < 1e-9);  // floor at 0.3
+});
+
+test('a zero or missing plant speed never stops the world', () => {
+  assert.equal(speedScale(newGame({ speedScale: 0 }, 1)), 0.3);
+  assert.equal(speedScale(newGame({ speedScale: 'x' }, 1)), 1);
 });

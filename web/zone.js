@@ -39,6 +39,7 @@ export class WalkingZone {
     document.getElementById('save-zone').onclick = () => this.finish();
     document.getElementById('reset-zone').onclick = () => {
       this.corners = WalkingZone.defaults();
+      this.help.textContent = '';
       this.mountHandles(); this.apply();
     };
     window.addEventListener('resize', () => {
@@ -74,7 +75,8 @@ export class WalkingZone {
     this.active = true; this.onDone = onDone;
     this.help.textContent = '';
     // A corner dragged off screen, or saved on another display, comes back inside so it can be grabbed.
-    this.corners = this.corners.map(([x, y]) => [Math.max(30, Math.min(innerWidth - 30, x)), Math.max(30, Math.min(innerHeight - 30, y))]);
+    const inside = this.corners.map(([x, y]) => [Math.max(30, Math.min(innerWidth - 30, x)), Math.max(30, Math.min(innerHeight - 30, y))]);
+    if (valid(inside)) this.corners = inside;
     this.setup.hidden = false;
     document.body.classList.add('setting-zone');
     this.mountHandles(); this.apply();
@@ -99,7 +101,8 @@ export class WalkingZone {
       const position = () => {
         const p = this.corners[index];
         handle.style.left = `${p[0]}px`; handle.style.top = `${p[1]}px`;
-        handle.classList.toggle('label-left', index === 0 || index === 3);   // left corners label to the left, so labels never overlap
+        const midX = this.corners.reduce((sum, c) => sum + c[0], 0) / 4;
+        handle.classList.toggle('label-left', p[0] < midX);   // labels point away from the zone, so they never overlap
         handle.classList.toggle('label-above', p[1] > innerHeight * .7);
       };
       const move = (x, y) => {

@@ -140,6 +140,13 @@ function median(a) {
 }
 
 // Height a lift must reach on this foot for this kind of thing.
+// Plant speed as step() applies it: the limit, clamped to 0.3-2, 1 when missing.
+export const SPEED_RANGE = [0.3, 2];
+export function speedScale(g) {
+  const v = Number(g.limits.speedScale);
+  return Number.isFinite(v) ? Math.min(SPEED_RANGE[1], Math.max(SPEED_RANGE[0], v)) : 1;
+}
+
 export function needCm(g, kind, foot) {
   const base = g.base ? g.base[foot] : RULES.defaultBaseCm;
   const max = g.limits.liftRange[1];     // never ask for more than the therapist allows
@@ -160,7 +167,7 @@ export function step(g, dt) {
   const p = pace(g);
   const f = form(p);
   if (g.act !== 'home') { g.formSum += f * dt; g.formN += dt; }   // time-weighted, independent of frame rate
-  const scale = Math.min(2, Math.max(0.3, Number(g.limits.speedScale) || 1));
+  const scale = speedScale(g);
   const speed = p.ok ? (p.cadence / 60) * RULES.strideCm * scale : 0;   // the world waits when the pace drops
   const moved = speed * dt;
   g.travelledCm += moved;
