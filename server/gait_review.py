@@ -110,7 +110,9 @@ def data_quality(gait: dict[str, Any]) -> tuple[str, list[str], str | None, bool
     q = gait.get("quality") or {}
     issues, severe = [], False
     if strides < 5:
-        issues.append(f"Only {strides} strides of the {NAME[near]} leg were seen; a minute or more of steady walking gives steadier numbers.")
+        issues.append(f"Only {strides} {'stride' if strides == 1 else 'strides'} of the {NAME[near]} leg "
+                      f"{'was' if strides == 1 else 'were'} seen; "
+                      "a minute or more of steady walking gives steadier numbers.")
         severe = True
     fps = _get(s, "fps") or _get(q, "fps")
     if fps is not None and fps < 15:

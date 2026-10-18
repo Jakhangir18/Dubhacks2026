@@ -325,6 +325,14 @@ function openReport(id) {
   return window.open(`/report.html?id=${encodeURIComponent(id)}`, 'zombiewalk-report') !== null;
 }
 
+// The belt keeps moving after the game, so walking would start the next game before the walk review arrives: a
+// review on its way holds that restart, and a finished one gets REVIEW_READ_MS on screen. R always plays at once.
+const REVIEW_READ_MS = 12000;
+function reviewHolds(data) {
+  if (data.gaitStatus === 'waiting' || data.gaitStatus === 'reviewing') return true;
+  return data.gaitShownAt !== undefined && performance.now() - data.gaitShownAt < REVIEW_READ_MS;
+}
+
 // ---------- original local SVG art; procedural art remains the per-file fallback ----------
 const ART = {
   'gus-idle': [160, 192], 'gus-step': [160, 192], 'gus-celebrate': [160, 192],
@@ -1137,7 +1145,7 @@ class Home extends Phaser.Scene {
     const steps = [];
     const shownAt = performance.now();
     this.offFoot = onFoot((ev) => {
-      if (doubleCamera(ev) || ev.kind !== 'strike' || performance.now() - shownAt < 8000) return;
+      if (doubleCamera(ev) || ev.kind !== 'strike' || performance.now() - shownAt < 8000 || reviewHolds(data)) return;
       steps.push(performance.now());
       while (steps.length && performance.now() - steps[0] > 3000) steps.shift();
       if (steps.length >= 4) playAgain();
@@ -1273,6 +1281,7 @@ class Home extends Phaser.Scene {
       if (review.status === 'done' || review.status === 'failed') {
         const words = review.review?.playerFeedback;
         if (review.status === 'done' && words && !data.gaitSpoken) { data.gaitSpoken = true; say(words); }
+        if (review.status === 'done' && data.gaitShownAt === undefined) data.gaitShownAt = performance.now();
         if (review.status === 'done' && !data.reportOpened) {
           data.reportOpened = true;
           data.reportBlocked = !openReport(id);
@@ -1292,6 +1301,9 @@ class Home extends Phaser.Scene {
     const report = d.reportOpened && (d.reportBlocked ? 'Pop-up blocked: press P for the full report' : 'Full report opened in a new tab · P opens it again');
     const focus = r?.focus?.text, said = (r?.playerFeedback || '').toLowerCase();
     const next = focus && !said.includes(focus.toLowerCase().replace(/[.!]+$/, '')) && `Next time: ${focus}`;   // once, not twice
+    const holding = d.gaitStatus === 'waiting' || d.gaitStatus === 'reviewing';
+    this.footer.setText(holding ? 'Your walk review is coming · R plays now' : 'Walk to play again · R');
+    if (this.sys.isActive()) publishGarden({ coach: `Welcome home, Gus! · ${holding ? 'Your walk review is coming' : 'Walk to play again'}` });
     this.gaitText.setText(d.gaitStatus === 'done' && r ? [r.playerFeedback, next, report].filter(Boolean).join('\n')
       : d.gaitStatus === 'waiting' || d.gaitStatus === 'reviewing' ? 'The coach is reviewing your walk…'
         : d.gaitStatus === 'late' ? 'Your walk review will be in the therapist panel.'

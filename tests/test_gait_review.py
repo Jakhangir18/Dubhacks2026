@@ -121,7 +121,7 @@ def test_rules_review_of_a_poor_walk_makes_no_gait_findings():
     r = gait_review.rules_review(v, LIMITS)
     assert all(not ids(v)[e]["group"].startswith("gait") for f in r["findings"] for e in f["evidence"])
     assert "too little" in r["overview"]
-    assert "strides" in r["nextRecording"]
+    assert "Only 1 stride of the left leg was seen" in r["nextRecording"]
 
 
 def test_rules_flag_a_game_with_few_hits_and_name_a_target_focus():
