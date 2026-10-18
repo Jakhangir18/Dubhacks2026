@@ -67,8 +67,7 @@ async def cap_perceive_body(request: Request, call_next):
     limits = {"/api/perceive": MAX_PERCEIVE_BYTES, "/api/perceive/session": MAX_SESSION_BYTES, "/api/events": MAX_EVENTS_BYTES}
     if request.method == "POST" and request.url.path in limits:
         size = request.headers.get("content-length")
-        strict = request.url.path != "/api/events"   # a chunked event sender has no length; the paid routes must declare one
-        if (size is None and strict) or (size is not None and (not size.isdigit() or int(size) > limits[request.url.path])):
+        if size is None or not size.isdigit() or int(size) > limits[request.url.path]:   # every sender declares a length
             return Response(status_code=413)
     return await call_next(request)
 
@@ -115,7 +114,9 @@ def clean_event(ev: Any) -> dict[str, Any] | None:
             return None
         kept: list[Any] = []
         for m in marks[:8]:
-            if not isinstance(m, list) or len(m) != 5 or m[0] not in {"cyan", "magenta"}:
+            if not isinstance(m, list) or len(m) != 5 or not isinstance(m[0], str) or m[0] not in {"cyan", "magenta"}:
+                continue
+            if any(isinstance(v, bool) for v in m[1:]):
                 continue
             try:
                 nums = [float(v) for v in m[1:]]

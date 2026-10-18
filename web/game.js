@@ -616,7 +616,7 @@ class Play extends Phaser.Scene {
     this.paused = false;
     this.highSound = { L: false, R: false };
     this.g = newGame(settings.limits, Date.now() % 100000);
-    this.g.toeCm = -fieldDist(this.layout().toeY, this.layout());   // world cm from the hit line to the toes
+    this.g.toeBaseCm = this.g.toeCm = -fieldDist(this.layout().toeY, this.layout());   // world cm from the hit line to the toes
     this.shoeRings = ['L', 'R'].map(() => this.add.ellipse(0, 0, 150, 80).setStrokeStyle(10, C.cyan, 0.8).setVisible(false).setDepth(11));
     this.lastShoes = 0;
     perceiver = cameraWindowAlive() ? remotePerceiver : localPerceiver;
@@ -1019,7 +1019,8 @@ class Home extends Phaser.Scene {
       `Score ${s.score}   ·   Form ${s.formPct}%`,
       `${s.steps} steps   ·   ${s.cadence} steps/min`,
       `Flowers stomped ${s.stompPct ?? 0}%   ·   Seeds dodged ${s.dodgePct ?? 0}%`,
-      `High steps  left ${s.highLiftAvgCm?.L ?? '-'} cm   right ${s.highLiftAvgCm?.R ?? '-'} cm`,
+      s.shoeMode ? `Long steps  left ${s.highLiftAvgCm?.L ?? '-'}   right ${s.highLiftAvgCm?.R ?? '-'}  (swing, camera)`
+        : `High steps  left ${s.highLiftAvgCm?.L ?? '-'} cm   right ${s.highLiftAvgCm?.R ?? '-'} cm`,
     ];
     if (s.perceptron?.checked) lines.push(`Perceptron double-check agreed on ${s.perceptron.agree} of ${s.perceptron.checked} steps`);
     this.stats = lines.map((line) => text(line, bodySize));
@@ -1042,8 +1043,11 @@ class Home extends Phaser.Scene {
     if (data.result) this.showResult(data.result);
     say(`${ENDING} ${s.stompPct ?? 0} percent of flowers stomped. Great walking.`);
     const playAgain = () => {
+      if (this.restarting || zone.active) return;   // once, and not under the zone setup
+      this.restarting = true;
       data.cancelled = true; data.uploadAbort?.abort(); clip.cancel();
-      playerReady = loadPlayer(); this.scene.start('play');
+      playerReady = loadPlayer();
+      playerReady.then(() => { if (this.sys.isActive() || this.sys.isPaused()) this.scene.start('play'); });   // the panel's new limits apply
     };
     this.input.keyboard.on('keydown-R', playAgain);
     // Walking again starts the next game by itself, once the card has been on screen for a moment.

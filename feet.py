@@ -97,11 +97,11 @@ class BlobDetector:
 
     def __call__(self, frame):
         import numpy as np
+        self.marks = []
         if self.zone is None:
             return []   # without the calibrated zone the console and the walls would count as feet
         gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (7, 7), 0)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        self.marks = []
         if self.zone is not None:
             h, w = gray.shape
             keep = np.zeros_like(gray)
@@ -306,6 +306,10 @@ def main():
     times = []
     last_frame_sent = 0.0
     last_zone_check = 0.0
+    zone_thread = None
+    zone_thread_alive = lambda: zone_thread is not None and zone_thread.is_alive()
+    if blobs and not sender:
+        print("--blobs needs --server: the blob detector works inside the zone calibrated in the camera window")
     while True:
         ok, frame = cap.read()
         if not ok:
@@ -315,9 +319,10 @@ def main():
         if gamma_table is not None:
             frame = cv2.LUT(frame, gamma_table)
         t0 = time.perf_counter()
-        if blobs and sender and time.time() - last_zone_check > 5:   # the calibrated zone limits where blobs may be
+        if blobs and sender and time.time() - last_zone_check > 5 and not zone_thread_alive():   # off the capture loop
             last_zone_check = time.time()
-            blobs.zone = sender.zone()
+            zone_thread = threading.Thread(target=lambda: setattr(blobs, "zone", sender.zone()), daemon=True)
+            zone_thread.start()
         feet = det(frame) if det else []
         marks = []
         if blobs:

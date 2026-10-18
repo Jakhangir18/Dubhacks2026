@@ -45,7 +45,7 @@ export const RULES = {
   shoeGapS: 1,                   // a lane unseen this long starts its swing tracking afresh
   stanceS: 6,                    // the toe line follows where the shoes have stood over this window
   stanceMarginCm: 30,            // a thing is gone only this far behind the standing feet
-  markReachCm: 120,              // a camera-seen foot-on-mark resolves the nearest thing of that kind within this
+  markReachCm: 60,               // a camera-seen foot-on-mark resolves the nearest thing of that kind within this
 };
 
 export function rng(seed = 1) {
@@ -82,6 +82,7 @@ export function newGame(limits = {}, seed = 1) {
     stance: [],                    // recent {t, nearCm} of every sighting: where the feet really stand
     shoeTrack: { L: { phase: 'back', max: -Infinity, min: Infinity, lastStrikeT: -Infinity }, R: { phase: 'back', max: -Infinity, min: Infinity, lastStrikeT: -Infinity } },
     toeCm: RULES.toeCm,
+    toeBaseCm: null,               // the game's own toe line from its layout; the stance can only push it further
     log: [],                     // resolved things for the report and the UI
     actResolved: 0,              // things resolved in the current act (progress bar)
   };
@@ -103,7 +104,7 @@ export function addEvent(g, ev) {
     const arr = g.stats.lifts[e.foot];
     arr.push(e.liftCm);
     if (arr.length > 200) arr.shift();
-    if (g.act === 'walk') g.walkLifts[e.foot].push(e.liftCm);
+    if (g.act === 'walk') { g.walkLifts[e.foot].push(e.liftCm); if (g.walkLifts[e.foot].length > 200) g.walkLifts[e.foot].shift(); }
   }
   return e;
 }
@@ -116,7 +117,7 @@ export function addEvent(g, ev) {
 export function addShoes(g, shoes, t = g.t) {
   const seen = shoes.filter((s) => [s.xFrac, s.nearCm, s.farCm].every(Number.isFinite)).slice(0, 2)
     .sort((a, b) => a.xFrac - b.xFrac);
-  if (!seen.length) { g.shoes = []; return []; }   // the feet left the picture: no mode switch, but no stale shoes either
+  if (!seen.length) return [];   // a missed frame changes nothing; a sighting stays valid for shoeFreshS anyway
   if (g.lastShoeT !== null && t - g.lastShoeT > RULES.shoeGapS) resetShoes(g);   // the feet were out of view
   g.shoeMode = true;
   g.lastShoeT = t;
@@ -126,7 +127,7 @@ export function addShoes(g, shoes, t = g.t) {
   if (g.stance.length >= 10) {
     const sorted = g.stance.map((s) => s.nearCm).sort((a, b) => a - b);
     const rest = sorted[Math.floor(sorted.length * 0.25)];   // the feet at rest, not mid-swing
-    g.toeCm = Math.max(g.toeCm, -rest + RULES.stanceMarginCm);
+    g.toeCm = Math.max(g.toeBaseCm ?? RULES.toeCm, -rest + RULES.stanceMarginCm);   // follows the feet both ways
   }
   if (seen.length === 2) g.shoeMidX = (seen[0].xFrac + seen[1].xFrac) / 2;
   g.shoes = seen.map((s, i) => ({
@@ -166,6 +167,7 @@ export function shoesLive(g) {
 export function resetShoes(g) {
   g.shoes = [];
   g.stance = [];
+  g.toeCm = g.toeBaseCm ?? RULES.toeCm;
   g.lastShoeT = null;   // shoes drive the game again only from the next sighting
   for (const lane of ['L', 'R']) g.shoeTrack[lane] = { phase: 'back', max: -Infinity, min: Infinity, lastStrikeT: -Infinity };
 }
@@ -173,7 +175,8 @@ export function resetShoes(g) {
 // The camera saw a foot on a coloured mark the game draws under a thing on the belt: cyan under flowers, magenta under
 // seeds. The nearest unresolved thing of that kind in the lane, on the belt or within reach, resolves at once.
 export function markHit(g, lane, kind, distCm, f = 1) {
-  const near = g.things.filter((th) => !th.result && th.kind === kind && th.lane === lane &&
+  // Only things whose mark is on the belt (the game shows it from distCm 20 down) can be stood on.
+  const near = g.things.filter((th) => !th.result && th.kind === kind && th.lane === lane && th.distCm < 20 &&
     Math.abs(th.distCm - distCm) <= RULES.markReachCm).sort((a, b) => Math.abs(a.distCm - distCm) - Math.abs(b.distCm - distCm))[0];
   if (!near) return null;
   const out = { resolved: [] };
