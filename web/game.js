@@ -99,7 +99,8 @@ function say(text, { personal = false } = {}) {
   const id = ++speechId;
   return new Promise(resolve => {
     const timer = setTimeout(() => { if (id === speechId) { ++speechId; stopVoice(); } },
-      Math.max(4000, Math.min(14000, String(text).trim().split(/\s+/).length * 400)));
+      // a safety net only: Gemini needs ~4 s to answer, then speaks ~0.55 s a word; the audio's end finishes the line
+      Math.min(45000, 9000 + String(text).trim().split(/\s+/).length * 700));
     finishSpeech = () => { clearTimeout(timer); finishSpeech = null; resolve(); };
     if (settings.geminiVoice && (!personal || settings.aiConsent)) {
       speakGemini(text, personal, id).catch(() => { if (id === speechId) speakBrowser(text, id); });
