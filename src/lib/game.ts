@@ -202,6 +202,30 @@ export type PoseKey = (typeof POSE_KEYS)[number]
 export type PosePoint = [number, number, number]
 export type Pose = { kind: "pose"; source: string; t: number; pts: Partial<Record<PoseKey, PosePoint>>; knee: Sides }
 
+// ---------------------------------------------------------------- the game screen: its state, and the commands to it
+export type GameScene = "title" | "intro" | "ready" | "play" | "home" | "zone"
+export type GameAct = "walk" | "garden" | "rest" | null
+/** What the game page sends once a second and on every change; the server keeps the newest. */
+export type GameState = {
+  kind: "gamestate"
+  scene: GameScene
+  act: GameAct
+  round: number | null
+  rounds: number | null
+  paused: boolean
+  score: number
+  stompPct: number | null
+  t: number
+  sessionId: string | null
+  voice: boolean
+  speed: number | null
+}
+export type GameStatus = { state: GameState | null; ageS: number | null; connected: boolean }
+export const CONTROL_CMDS = ["start", "pause", "resume", "next", "end", "restart", "voice", "faster", "slower", "autowalk"] as const
+export type ControlCmd = (typeof CONTROL_CMDS)[number]
+export type ControlAnswer = { ok: boolean; id: string; gameConnected: boolean }
+export type ControlEvent = { kind: "control"; cmd: ControlCmd; id: string; t: number }
+
 export type GameEvent = { kind: string } & Record<string, unknown>
 export type FrameEvent = { kind: "frame"; source: string; jpeg: string }
 
@@ -213,6 +237,12 @@ export function isPose(ev: GameEvent): ev is Pose {
 }
 export function isMoment(ev: GameEvent): ev is Moment & { kind: "moment" } {
   return ev.kind === "moment" && typeof ev.id === "string" && typeof ev.img === "string"
+}
+export function isGameState(ev: GameEvent): ev is GameState {
+  return ev.kind === "gamestate" && typeof ev.scene === "string"
+}
+export function isControl(ev: GameEvent): ev is ControlEvent {
+  return ev.kind === "control" && typeof ev.cmd === "string"
 }
 
 // ---------------------------------------------------------------- fetchers
@@ -266,6 +296,9 @@ export const api = {
   log: (n = 120) => getJson<LogRow[]>(`/api/log?n=${n}`),
   cues: async (n = 60) => (await api.log(n)).filter((row) => row.what === "cue"),
   sideframeStatus: () => optional<SideframeStatus>("/api/sideframe/status"),
+  /** null while the server has no game routes yet. */
+  gameState: () => optional<GameStatus>("/api/game/state"),
+  control: (cmd: ControlCmd) => sendJson<ControlAnswer>("/api/game/control", "POST", { cmd }),
   qrUrl: (url: string) => `/api/qr?url=${enc(url)}`,
 }
 

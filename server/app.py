@@ -36,7 +36,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
@@ -71,7 +71,7 @@ MAX_GAIT_BYTES = 2_000_000   # a whole-session gait summary with per-act parts i
 async def cap_perceive_body(request: Request, call_next):
     """Perception routes relay to a paid API: refuse a huge body before it is read."""
     limits = {"/api/perceive": MAX_PERCEIVE_BYTES, "/api/perceive/session": MAX_SESSION_BYTES, "/api/events": MAX_EVENTS_BYTES,
-              "/api/gait/final": MAX_GAIT_BYTES, "/api/gait/moment": MAX_MOMENT_BODY_BYTES}
+              "/api/gait/final": MAX_GAIT_BYTES, "/api/gait/moment": MAX_MOMENT_BODY_BYTES, "/api/game/control": MAX_CONTROL_BYTES}
     if request.method == "POST" and request.url.path in limits:
         size = request.headers.get("content-length")
         if size is None or not size.isdigit() or int(size) > limits[request.url.path]:   # every sender declares a length
@@ -142,6 +142,81 @@ def clean_pose(ev: dict[str, Any]) -> dict[str, Any] | None:
             "pts": kept, "knee": deg}
 
 
+# ---------------------------------------------------------------- the game's state (game -> dashboard) and control (dashboard -> game)
+# The game page posts a "gamestate" event once a second and on every change; the newest is kept here with its arrival
+# time, so the dashboard knows whether a game screen is connected before it sends a control command.
+GAME_SCENES = {"title", "intro", "ready", "play", "home", "zone"}
+GAME_ACTS = {"walk", "garden", "rest"}
+CONTROL_CMDS = {"start", "pause", "resume", "next", "end", "restart", "voice", "faster", "slower", "autowalk"}
+GAME_LIVE_S = 3.0           # a state this fresh means the game screen is connected
+CONTROL_PER_S = 5           # commands a second, from everyone together: the Funnel link is public
+MAX_CONTROL_BYTES = 200
+GAME_SESSION_ID = re.compile(r"[0-9a-f]{8,40}")
+game_state: dict[str, Any] = {"state": None, "ts": 0.0}
+control_times: deque[float] = deque(maxlen=CONTROL_PER_S)
+
+
+def clean_gamestate(ev: dict[str, Any]) -> dict[str, Any] | None:
+    """The game's state as the dashboard may trust it: the scene must be known; every other field is kept when it
+    has the right type and a sensible value, and is null (or false, or 0) otherwise."""
+    scene = ev.get("scene")
+    if scene not in GAME_SCENES:
+        return None
+    act = ev.get("act")
+    count = lambda v, hi: int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and 0 <= v <= hi else None
+    number = lambda v, lo, hi: None if (f := finite(v)) is None else max(lo, min(hi, f))
+    sid = ev.get("sessionId")
+    return {
+        "kind": "gamestate",
+        "scene": scene,
+        "act": act if act in GAME_ACTS else None,
+        "round": count(ev.get("round"), 100),
+        "rounds": count(ev.get("rounds"), 100),
+        "paused": ev.get("paused") is True,
+        "score": count(ev.get("score"), 1_000_000) or 0,
+        "stompPct": number(ev.get("stompPct"), 0.0, 100.0),
+        "t": number(ev.get("t"), 0.0, 86_400.0) or 0.0,
+        "sessionId": sid if isinstance(sid, str) and GAME_SESSION_ID.fullmatch(sid) else None,
+        "voice": ev.get("voice") is True,
+        "speed": number(ev.get("speed"), 0.1, 5.0),
+    }
+
+
+def remember_gamestate(state: dict[str, Any], now: float | None = None) -> None:
+    game_state.update(state=state, ts=time.time() if now is None else now)
+
+
+def game_status(now: float | None = None) -> dict[str, Any]:
+    """The newest game state, how old it is, and whether that counts as a connected game screen."""
+    now = time.time() if now is None else now
+    state = game_state["state"]
+    age = None if state is None else max(0.0, now - game_state["ts"])
+    return {"state": state, "ageS": None if age is None else round(age, 2), "connected": age is not None and age <= GAME_LIVE_S}
+
+
+@app.get("/api/game/state")
+def get_game_state() -> dict[str, Any]:
+    return game_status()
+
+
+class ControlIn(BaseModel):
+    cmd: str = Field(min_length=1, max_length=20)
+
+
+@app.post("/api/game/control")
+async def game_control(inp: ControlIn) -> dict[str, Any]:
+    """One command for the game screen, relayed on the game socket; the answer says whether a screen is listening."""
+    if inp.cmd not in CONTROL_CMDS:
+        raise HTTPException(422, f"cmd must be one of {', '.join(sorted(CONTROL_CMDS))}")
+    now = time.time()
+    if len(control_times) == CONTROL_PER_S and now - control_times[0] < 1.0:
+        raise HTTPException(429, f"at most {CONTROL_PER_S} commands a second")
+    control_times.append(now)
+    command_id = uuid.uuid4().hex[:8]
+    await broadcast([{"kind": "control", "cmd": inp.cmd, "id": command_id, "t": round(now, 3)}])
+    return {"ok": True, "id": command_id, "gameConnected": game_status(now)["connected"]}
+
+
 def clean_event(ev: Any) -> dict[str, Any] | None:
     if not isinstance(ev, dict):
         return None
@@ -149,6 +224,8 @@ def clean_event(ev: Any) -> dict[str, Any] | None:
         return clean_shoes(ev)
     if ev.get("kind") == "pose":
         return clean_pose(ev)
+    if ev.get("kind") == "gamestate":
+        return clean_gamestate(ev)
     if ev.get("kind") == "marks":
         marks = ev.get("marks")
         if not isinstance(marks, list):
@@ -232,10 +309,13 @@ async def ws_events(ws: WebSocket) -> None:
 
 
 def clean_batch(batch: list[Any]) -> list[dict[str, Any]]:
-    """At most MAX_EVENTS_PER_BATCH events, and one preview frame: the newest."""
+    """At most MAX_EVENTS_PER_BATCH events, one preview frame (the newest) and one game state (the newest, kept)."""
     events = [e for e in (clean_event(x) for x in batch[:MAX_EVENTS_PER_BATCH]) if e]
     frames = [e for e in events if e["kind"] == "frame"]
-    return [e for e in events if e["kind"] != "frame"] + frames[-1:]
+    states = [e for e in events if e["kind"] == "gamestate"]
+    if states:
+        remember_gamestate(states[-1])
+    return [e for e in events if e["kind"] not in ("frame", "gamestate")] + states[-1:] + frames[-1:]
 
 
 # ---------------------------------------------------------------- run log (what the game judged), kept in memory

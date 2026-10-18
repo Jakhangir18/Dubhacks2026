@@ -6,15 +6,20 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
+  ApiError,
   api,
   isFrame,
+  isGameState,
   isMoment,
   isPose,
   useGameSocket,
   usePoll,
   useTicker,
   type ActiveSession,
+  type ControlCmd,
   type GameEvent,
+  type GameState,
+  type GameStatus,
   type LogRow,
   type Moment,
   type Pose,
@@ -25,20 +30,90 @@ import {
 import { kneeFromGait } from "@/lib/walks"
 
 export const FRAME_FRESH_MS = 4000
+export const TOP_LIVE_MS = 3000
 export const POSE_FRESH_MS = 3000
 export const GAIT_FRESH_S = 45
+export const GAME_LIVE_MS = 3000
 const RATE_WINDOW_MS = 5000
 const MAX_MOMENTS = 40
 
 /** The phone's picture rate every two seconds; a server without that route yet is asked again every 20 s. */
 const sideframeDelay = (status: SideframeStatus | null) => (status === null ? 20000 : 2000)
+const gameDelay = (status: GameStatus | null) => (status === null ? 20000 : 2000)
 
 export type CameraState = { src: string | null; seenAt: number; fresh: boolean; seenEver: boolean }
+
+// ---------------------------------------------------------------- the game screen: its state and the commands to it
+export type LastCommand = { cmd: ControlCmd; ok: boolean; gameConnected: boolean; at: number; error: string | null }
+
+export type GameScreen = {
+  state: GameState | null
+  /** A state arrived within the last three seconds (on the socket, or by the server's count). */
+  connected: boolean
+  ageS: number | null
+  polled: boolean
+  /** The server has no game routes yet. */
+  missing: boolean
+  control: (cmd: ControlCmd) => Promise<void>
+  last: LastCommand | null
+  busy: ControlCmd | null
+  /** A gamestate seen on a socket the caller owns. */
+  note: (state: GameState) => void
+}
+
+function controlError(error: unknown) {
+  if (error instanceof ApiError && error.status === 429) return "Too many commands: wait a second."
+  if (error instanceof ApiError && error.status === 404) return "This server has no game control yet."
+  if (error instanceof ApiError) return `The server answered ${error.status}.`
+  return "The server did not answer."
+}
+
+/** GET /api/game/state every two seconds plus the gamestate events on the socket; POST /api/game/control. */
+export function useGameScreen(ownSocket = true): GameScreen {
+  const now = useTicker(1000)
+  const status = usePoll<GameStatus | null>(api.gameState, gameDelay)
+  const [seen, setSeen] = useState<{ state: GameState | null; at: number }>({ state: null, at: 0 })
+  const note = useCallback((state: GameState) => setSeen({ state, at: Date.now() }), [])
+  const onEvents = useCallback(
+    (events: GameEvent[]) => {
+      const newest = events.filter(isGameState).pop()
+      if (newest) note(newest)
+    },
+    [note],
+  )
+  useGameSocket(onEvents, ownSocket)
+  const [last, setLast] = useState<LastCommand | null>(null)
+  const [busy, setBusy] = useState<ControlCmd | null>(null)
+  const refresh = status.refresh
+  const control = useCallback(
+    async (cmd: ControlCmd) => {
+      setBusy(cmd)
+      try {
+        const answer = await api.control(cmd)
+        setLast({ cmd, ok: answer.ok, gameConnected: answer.gameConnected, at: Date.now(), error: null })
+      } catch (error) {
+        setLast({ cmd, ok: false, gameConnected: false, at: Date.now(), error: controlError(error) })
+      } finally {
+        setBusy(null)
+        refresh()
+      }
+    },
+    [refresh],
+  )
+  const liveSeen = seen.state !== null && now - seen.at < GAME_LIVE_MS
+  const state = liveSeen ? seen.state : (status.data?.state ?? seen.state)
+  const connected = liveSeen || Boolean(status.data?.connected)
+  const ageS = liveSeen ? Math.max(0, Math.round((now - seen.at) / 1000)) : (status.data?.ageS ?? null)
+  return { state, connected, ageS, polled: status.polled, missing: status.polled && status.data === null, control, last, busy, note }
+}
 
 export type LiveWalk = {
   active: ActiveSession | null
   running: boolean
   sinceS: number
+  game: GameScreen
+  /** A top-camera picture (feet.py) arrived in the last three seconds. */
+  topLive: boolean
   cameras: { top: CameraState; side: CameraState }
   pose: Pose | null
   poseFresh: boolean
@@ -75,6 +150,8 @@ export function useLiveWalk(playerName: string): LiveWalk {
   const loadPlayer = useCallback(() => api.player(name), [name])
   const player = usePoll(loadPlayer, 3000, Boolean(name), name)
 
+  const game = useGameScreen(false)
+  const noteGame = game.note
   const [cameras, setCameras] = useState<{ top: CameraState; side: CameraState }>({ top: SILENT, side: SILENT })
   const [poseState, setPoseState] = useState<{ pose: Pose | null; at: number }>({ pose: null, at: 0 })
   const [moments, setMoments] = useState<Moment[]>([])
@@ -93,6 +170,7 @@ export function useLiveWalk(playerName: string): LiveWalk {
     let top: string | null = null
     let side: string | null = null
     let pose: Pose | null = null
+    let state: GameState | null = null
     const fresh: Moment[] = []
     for (const event of events) {
       if (isFrame(event)) {
@@ -102,8 +180,11 @@ export function useLiveWalk(playerName: string): LiveWalk {
         pose = event
       } else if (isMoment(event)) {
         fresh.push(event)
+      } else if (isGameState(event)) {
+        state = event
       }
     }
+    if (state) noteGame(state)
     if (top || side) {
       if (side) sideTimes.current = [...sideTimes.current.filter((t) => at - t < RATE_WINDOW_MS), at]
       setCameras((state) => ({
@@ -119,7 +200,7 @@ export function useLiveWalk(playerName: string): LiveWalk {
         return added.length ? [...added.reverse(), ...list].slice(0, MAX_MOMENTS) : list
       })
     }
-  }, [])
+  }, [noteGame])
   const socket = useGameSocket(onEvents)
 
   // The moments the server already kept for this session (newest first on the page).
@@ -176,6 +257,8 @@ export function useLiveWalk(playerName: string): LiveWalk {
     active: current,
     running: Boolean(current),
     sinceS: current ? Math.max(0, Math.round((active.data?.serverTime ?? now / 1000) - (current.startedAt ?? 0))) : 0,
+    game,
+    topLive: cameras.top.seenEver && now - cameras.top.seenAt < TOP_LIVE_MS,
     cameras: { top: freshen(cameras.top), side },
     pose: poseFresh ? poseState.pose : null,
     poseFresh,

@@ -7,13 +7,14 @@ import Link from "next/link"
 import { AnimatePresence, motion } from "motion/react"
 import { ArrowRight, MessageCircle } from "lucide-react"
 import { CameraTile } from "@/components/camera-tile"
+import { GameControl } from "@/components/game-control"
 import { PageHeader } from "@/components/page-header"
 import { PhoneConnect } from "@/components/phone-connect"
 import { PoseCanvas } from "@/components/pose-canvas"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { LEFT, RIGHT, MomentCard, NumberGrid, type Figure } from "@/components/walk-bits"
 import { useGame } from "@/lib/game-data"
-import { useLiveWalk } from "@/lib/live"
+import { bodyCheck, useLiveWalk } from "@/lib/live"
 import { api, usePoll } from "@/lib/game"
 import { MAYA_AVATAR, sticker } from "@/lib/sticker"
 import { clock } from "@/lib/walks"
@@ -63,6 +64,12 @@ export function LiveView() {
       />
 
       <div className="grid gap-5">
+        <BlurFade delay={0.02}>
+          <GameControl
+            game={live.game}
+            checks={{ top: live.topLive, side: live.sideLive, body: bodyCheck(live.sideLive ? live.pose : null).ok, sideRate: live.sideRate, polled: live.socket || online !== null }}
+          />
+        </BlurFade>
         <BlurFade delay={0.05}>
           <PhoneConnect sideLive={live.sideLive} rate={live.sideRate} rateIsPreview={live.sideRateIsPreview} pose={live.pose} polled={live.socket || online !== null} />
         </BlurFade>

@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { motion, useReducedMotion } from "motion/react"
 import { ArrowRight, Moon, Play, Smartphone } from "lucide-react"
+import { GameControlCompact } from "@/components/game-control"
 import { Bob, Magnetic, Parallax, PopTitle, SpringBars, Tilt } from "@/components/motion"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { NumberTicker } from "@/components/ui/number-ticker"
@@ -10,7 +11,7 @@ import { Particles } from "@/components/ui/particles"
 import { DemoTag, MomentCard, NumberGrid, WalkWords, walkFigures } from "@/components/walk-bits"
 import { api, useMounted, usePoll } from "@/lib/game"
 import { useGame } from "@/lib/game-data"
-import { useSideCamera } from "@/lib/live"
+import { useGameScreen, useSideCamera } from "@/lib/live"
 import { asset } from "@/lib/paths"
 import { GAME_BUTTON, MAYA_AVATAR, ZOMBIE, sticker } from "@/lib/sticker"
 import { clockLabel, durationLabel, mayaLine, startOfWeekLocal, streakOf, weekOf, whenLabel, type Walk } from "@/lib/walks"
@@ -73,6 +74,7 @@ export function HomeTrack({ progress }: { progress: number }) {
 export function OverviewView() {
   const { player, walks, latest, demo, loading, running } = useGame()
   const side = useSideCamera()
+  const game = useGameScreen()
   const mounted = useMounted()
   const now = new Date(side.now)
   const week = weekOf(walks, startOfWeekLocal(now), now)
@@ -100,6 +102,12 @@ export function OverviewView() {
         </p>
         <h1 className="font-display mt-1 text-4xl tracking-wide sm:text-5xl">{mounted ? greet(now) : "Hello"}, {firstName}!</h1>
         <p className="mt-1 text-lg text-white/70">Tonight&apos;s chapter: help Gus shuffle home before the sun comes up.</p>
+      </BlurFade>
+
+      <BlurFade delay={0.08}>
+        <div className="mt-5">
+          <GameControlCompact game={game} />
+        </div>
       </BlurFade>
 
       {side.polled && !side.live ? (
