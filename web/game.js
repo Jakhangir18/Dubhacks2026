@@ -901,7 +901,14 @@ class Play extends Phaser.Scene {
       this.showAct();
     }
     const g = this.g;
-    for (const th of out.resolved) { this.resolveFx(th, L); logRemote({ what: th.kind, lane: th.lane, result: th.result, at: Math.round(th.distCm), shoes: shoesLive(g), t: Math.round(g.t) }); }
+    for (const th of out.resolved) {
+      this.resolveFx(th, L);
+      // The log says why: where each shoe stood (lane, toe and heel cm from the line, age of the sighting) and when the
+      // thing was last touched relative to its arrival, so a run of misses can be read without a camera.
+      logRemote({ what: th.kind, lane: th.lane, result: th.result, at: Math.round(th.distCm), shoes: shoesLive(g), t: Math.round(g.t),
+        feet: g.shoes.map((s) => [s.lane, Math.round(s.nearCm), Math.round(s.farCm), Math.round((g.t - s.t) * 1000)]),
+        touch: th.touchedT === undefined ? null : Math.round((th.touchedT - th.arriveT) * 100) / 100 });
+    }
     if (out.actChanged) logRemote({ what: 'act', act: g.act, round: g.round, t: Math.round(g.t) });
     if (Math.floor(g.t / 5) !== Math.floor((g.t - dt) / 5)) logRemote({ what: 'pace', cadence: out.pace.cadence, steps: g.stats.steps, form: Math.round(out.form * 100), shoes: shoesLive(g), base: g.base, t: Math.round(g.t) });
 
