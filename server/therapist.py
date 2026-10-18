@@ -35,7 +35,7 @@ REPORT_SYSTEM = (
 
 REWARD_SYSTEM = (
     "You are the cheerful host of a family reward game. A child finished a walking session. Pick one reward from the "
-    "wishlist that fits the effort (bigger effort, nicer reward, never above the budget) and announce it in one "
+    "wishlist that fits the effort (bigger effort, nicer reward) and announce it in one "
     "sentence. Reply with JSON only: {\"reward\": \"<exact wishlist item name>\", \"line\": \"...\"}."
 )
 
@@ -48,7 +48,7 @@ def clamp(v: Any, lo: float, hi: float, default: float) -> float:
 
 
 # ---------------------------------------------------------------- Gemini
-async def gemini_json(system: str, user: str, timeout: float = 8) -> dict[str, Any] | None:
+async def gemini_json(system: str, user: str, timeout: float = 4) -> dict[str, Any] | None:
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         return None
@@ -70,7 +70,7 @@ async def gemini_json(system: str, user: str, timeout: float = 8) -> dict[str, A
 
 
 # ---------------------------------------------------------------- Backboard memory
-async def backboard(content: str, assistant_id: str | None, memory: str) -> tuple[str, str | None] | None:
+async def backboard(content: str, assistant_id: str | None, memory: str, timeout: float = 20) -> tuple[str, str | None] | None:
     """Send one message to Backboard. memory: 'Auto' writes and reads, 'Readonly' only reads.
     Returns (reply text, assistant id) or None. One assistant per player keeps each player's memory apart."""
     key = os.environ.get("BACKBOARD_API_KEY")
@@ -81,7 +81,7 @@ async def backboard(content: str, assistant_id: str | None, memory: str) -> tupl
         fields["assistant_id"] = assistant_id
     headers = {"X-API-Key": key}
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             r = await client.post(BACKBOARD_URL, headers=headers, json=fields)
             if r.status_code in (415, 422):  # the endpoint may expect form fields
                 r = await client.post(BACKBOARD_URL, headers=headers, data={k: str(v) for k, v in fields.items()})
@@ -98,8 +98,10 @@ def rule_cue(summary: dict[str, Any], limits: dict[str, Any]) -> dict[str, Any]:
     act = summary.get("act")
     cadence = summary.get("cadence") or 0
     asym = summary.get("asymmetryPct")
-    lift = float(limits.get("liftCm", 10))
-    spacing = float(limits.get("spacingCm", 140))
+    # Adjust from the game's current targets (the summary carries them), not from the base limits,
+    # so repeated cues keep stepping in the same direction until the range stops them.
+    lift = float(summary.get("liftTargetCm") or limits.get("liftCm", 10))
+    spacing = float(summary.get("spacingCm") or limits.get("spacingCm", 140))
     if cadence < float(limits.get("minCadence", 80)):
         return {"say": "Keep stepping, a little faster, nice and steady", "params": {}}
     if asym is not None and asym > 20:
@@ -154,12 +156,14 @@ async def plan(player: dict[str, Any], recent: list[dict[str, Any]]) -> dict[str
         res = await backboard(
             f"{name} is starting a walking session now. In one or two short sentences, greet {name} and name one "
             "thing to focus on today, based on what you remember about earlier sessions. Wellness words only.",
-            player["assistantId"], "Readonly")
+            player["assistantId"], "Readonly", timeout=4)
         if res and res[0]:
             return {"say": res[0], "source": "backboard"}
     if recent:
         last = recent[0]["summary"]
-        weak = "the seeds" if (last.get("dodgePct") or 100) < (last.get("stompPct") or 100) else "the flowers"
+        dodge = last.get("dodgePct")
+        stomp = last.get("stompPct")
+        weak = "the seeds" if dodge is not None and (stomp is None or dodge < stomp) else "the flowers"
         return {"say": f"Welcome back {name}! Last time you walked {last.get('steps', 0)} steps. Today, focus on {weak}.",
                 "source": "history"}
     return {"say": f"Hi {name}! Let us walk home together.", "source": "rules"}
@@ -191,7 +195,7 @@ async def pick_reward(summary: dict[str, Any], wishlist: list[dict[str, Any]]) -
     effort = summary.get("formPct", 0)
     out = await gemini_json(REWARD_SYSTEM, json.dumps({"effortPct": effort, "wishlist": wishlist}))
     names = {w["name"]: w for w in wishlist}
-    if out and out.get("reward") in names:
+    if out and isinstance(out.get("reward"), str) and out["reward"] in names:
         return {**names[out["reward"]], "line": str(out.get("line", ""))[:200], "source": "gemini"}
     affordable = sorted(wishlist, key=lambda w: w.get("usd", 0))
     choice = affordable[-1] if effort >= 70 else affordable[0]

@@ -8,6 +8,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from server import therapist
@@ -76,14 +77,16 @@ class CoachIn(BaseModel):
 
 @router.post("/coach")
 async def coach(inp: CoachIn) -> dict[str, Any]:
-    limits = store.player(inp.player)["limits"]
-    return await therapist.coach(inp.summary, limits)
+    # Store calls run in the threadpool so a slow database never stalls the foot-event relay.
+    player = await run_in_threadpool(store.player, inp.player)
+    return await therapist.coach(inp.summary, player["limits"])
 
 
 @router.get("/plan/{name}")
 async def plan(name: str) -> dict[str, Any]:
-    player = store.player(name)
-    return await therapist.plan(player, store.sessions(name, limit=5))
+    player = await run_in_threadpool(store.player, name)
+    recent = await run_in_threadpool(store.sessions, name, 5)
+    return await therapist.plan(player, recent)
 
 
 # ---------------------------------------------------------------- session end: save, remember, report, reward
@@ -108,30 +111,44 @@ def visa_checkout(item: dict[str, Any], player: str) -> dict[str, Any]:
 
 
 async def remember_later(name: str, summary: dict[str, Any]) -> None:
-    player = store.player(name)
+    player = await run_in_threadpool(store.player, name)
     assistant_id = await therapist.remember(player, summary)
     if assistant_id and assistant_id != player.get("assistantId"):
-        store.update_player(name, assistantId=assistant_id)
+        await run_in_threadpool(store.update_player, name, assistantId=assistant_id)
+
+
+REWARDS_PER_DAY = 2   # a child cannot farm rewards by replaying; the parent list is small anyway
+
+
+def rewards_today(rows: list[dict[str, Any]]) -> int:
+    day_ago = time.time() - 86400
+    return sum(1 for r in rows if r.get("ts", 0) >= day_ago and r.get("rewarded"))
 
 
 @router.post("/session")
 async def session(inp: SessionIn, background: BackgroundTasks) -> dict[str, Any]:
     name = inp.player.strip()[:40] or "Player"
-    player = store.player(name)
-    earlier = store.sessions(name, limit=5)
+    player = await run_in_threadpool(store.player, name)
+    earlier = await run_in_threadpool(store.sessions, name, 10)
     note = await therapist.report(inp.summary, earlier)
-    store.add_session(name, inp.summary, inp.verified, note["note"])
-    background.add_task(remember_later, name, inp.summary)   # Backboard memory, off the response path
     out: dict[str, Any] = {"note": note["note"], "noteSource": note["source"], "reward": None, "receipt": None}
     long_enough = (inp.summary.get("seconds") or 0) >= 20   # the short judge demo is about 30 s
-    if inp.verified and long_enough and inp.summary.get("act") == "home":
+    eligible = inp.verified and long_enough and inp.summary.get("act") == "home" and rewards_today(earlier) < REWARDS_PER_DAY
+    if eligible:
         reward = await therapist.pick_reward(inp.summary, player.get("rewards", []))
         if reward:
             out["reward"] = reward
             out["receipt"] = visa_checkout(reward, name)
+    await run_in_threadpool(store.add_session, name, inp.summary, inp.verified, note["note"], out["reward"] is not None)
+    background.add_task(remember_later, name, inp.summary)   # Backboard memory, off the response path
     return out
 
 
 @router.get("/sessions/{name}")
 def sessions(name: str) -> list[dict[str, Any]]:
     return store.sessions(name, limit=30)
+
+
+@router.get("/limits/{name}")
+def limits(name: str) -> dict[str, Any]:
+    return store.player(name)["limits"]

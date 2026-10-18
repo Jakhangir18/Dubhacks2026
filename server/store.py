@@ -4,6 +4,7 @@ MongoDB Atlas), otherwise a local JSON file so the demo runs offline."""
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 import time
@@ -35,9 +36,14 @@ def clean_limits(raw: dict[str, Any]) -> dict[str, Any]:
         try:
             if isinstance(default, list):
                 lo, hi = float(raw[key][0]), float(raw[key][1])
+                if not (math.isfinite(lo) and math.isfinite(hi)):
+                    continue
                 out[key] = [min(lo, hi), max(lo, hi)]
             else:
-                out[key] = float(raw[key])
+                v = float(raw[key])
+                if not math.isfinite(v):
+                    continue
+                out[key] = min(max(v, 0.0), 10000.0)
         except (TypeError, ValueError, IndexError):
             continue
     out["liftCm"] = min(max(out["liftCm"], out["liftRange"][0]), out["liftRange"][1])
@@ -93,18 +99,21 @@ class Store:
                 "assistantId": doc.get("assistantId"), "notes": doc.get("notes", "")}
 
     def update_player(self, name: str, **fields: Any) -> dict[str, Any]:
-        current = self.player(name)
-        current.update({k: v for k, v in fields.items() if v is not None})
-        if "limits" in fields and fields["limits"] is not None:
-            current["limits"] = clean_limits(fields["limits"])
+        """Set only the given fields, so two writers (the panel and the memory task) never overwrite each other."""
+        name = name.strip()[:40] or "Player"
+        changes = {k: v for k, v in fields.items() if v is not None}
+        if "limits" in changes:
+            changes["limits"] = clean_limits(changes["limits"])
         if self.mongo is not None:
-            self.mongo.players.update_one({"name": current["name"]}, {"$set": current}, upsert=True)
+            self.mongo.players.update_one({"name": name}, {"$set": {"name": name, **changes}}, upsert=True)
         else:
             with self.lock:
                 db = self._load()
-                db["players"][current["name"]] = current
+                doc = db["players"].get(name, {"name": name})
+                doc.update(changes)
+                db["players"][name] = doc
                 self._save(db)
-        return current
+        return self.player(name)
 
     def players(self) -> list[str]:
         if self.mongo is not None:
@@ -113,8 +122,10 @@ class Store:
             return sorted(self._load()["players"].keys())
 
     # ---------- sessions ----------
-    def add_session(self, name: str, summary: dict[str, Any], verified: bool, note: str = "") -> dict[str, Any]:
-        doc = {"player": name, "summary": summary, "verified": verified, "note": note, "ts": time.time()}
+    def add_session(self, name: str, summary: dict[str, Any], verified: bool, note: str = "",
+                    rewarded: bool = False) -> dict[str, Any]:
+        doc = {"player": name, "summary": summary, "verified": verified, "note": note, "rewarded": rewarded,
+               "ts": time.time()}
         if self.mongo is not None:
             self.mongo.sessions.insert_one(dict(doc))
         else:

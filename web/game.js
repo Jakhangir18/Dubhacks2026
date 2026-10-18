@@ -33,18 +33,20 @@ async function api(path, body) {
 }
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error('timeout')), ms))]);
 
+const DEMO = { walkSeconds: 8, gardenPlants: 4, stormSeeds: 4 };
+// Called before every game, so limits saved in the therapist panel apply to the next walk without a reload.
 async function loadPlayer() {
-  try {
-    const p = await withTimeout(api(`/api/player/${encodeURIComponent(settings.player)}`), 3000);
-    settings.limits = p.limits || {};
-    if (params.get('demo') === '1') Object.assign(settings.limits, { walkSeconds: 8, gardenPlants: 4, stormSeeds: 4 });
-    const plan = await withTimeout(api(`/api/plan/${encodeURIComponent(settings.player)}`), 6000);
-    settings.greeting = plan.say;
-  } catch { /* offline: default limits, local greeting */ }
+  const name = encodeURIComponent(settings.player);
+  const [player, plan] = await Promise.allSettled([
+    withTimeout(api(`/api/player/${name}`), 3000),
+    withTimeout(api(`/api/plan/${name}`), 8000),
+  ]);
+  settings.limits = player.status === 'fulfilled' ? { ...player.value.limits } : {};
+  if (params.get('demo') === '1') Object.assign(settings.limits, DEMO);
+  settings.greeting = plan.status === 'fulfilled' ? plan.value.say : null;
 }
-loadPlayer();
-// ?demo=1: a short game for judges and testing (also re-applied after the server limits load)
-if (params.get('demo') === '1') Object.assign(settings.limits, { walkSeconds: 8, gardenPlants: 4, stormSeeds: 4 });
+let playerReady = loadPlayer();
+if (params.get('demo') === '1') Object.assign(settings.limits, DEMO);   // ?demo=1: a short game for judges
 
 function say(text) {
   if (!settings.voice || !window.speechSynthesis) return;
@@ -206,7 +208,11 @@ class Title extends Phaser.Scene {
     this.events.once('shutdown', () => { this.off(); this.scale.off('resize', this.restartOnResize, this); });
   }
   restartOnResize() { if (!this.started) this.scene.restart(); }
-  go() { if (!this.started) { this.started = true; this.scene.start('play'); } }
+  go() {
+    if (this.started) return;
+    this.started = true;
+    playerReady.then(() => this.scene.start('play'));
+  }
 }
 
 // ---------- the walk home ----------
@@ -312,16 +318,18 @@ class Play extends Phaser.Scene {
   }
 
   async askCoach() {
-    const sum = summary(this.g);
+    const g = this.g;
+    const sum = summary(g);
     let cue;
     try {
-      const out = await withTimeout(api('/api/coach', { player: settings.player, summary: sum }), 5000);
-      if (out.params) applyParams(this.g, out.params);
+      const out = await withTimeout(api('/api/coach', { player: settings.player, summary: sum }), 7000);
+      if (!this.sys.isActive() || this.g !== g) return;   // a new game started meanwhile
+      if (out.params) applyParams(g, out.params);
       cue = out.say;
     } catch {
       cue = this.localCue(sum);
     }
-    if (!this.sys.isActive() || !cue) return;
+    if (!this.sys.isActive() || this.g !== g || !cue) return;
     this.coachText.setText(cue);
     say(cue);
   }
@@ -476,7 +484,7 @@ class Home extends Phaser.Scene {
     this.rewardText = this.add.text(W / 2, H * 0.84, '', txt(26, C.magenta)).setOrigin(0.5);
     if (data.result) this.showResult(data.result);
     say(`You made it home. ${s.stompPct ?? 0} percent of flowers stomped. Great walking.`);
-    this.input.keyboard.on('keydown-R', () => this.scene.start('title'));
+    this.input.keyboard.on('keydown-R', () => { playerReady = loadPlayer(); this.scene.start('title'); });
     const again = () => this.scene.restart(data);
     this.scale.once('resize', again);
     this.events.once('shutdown', () => this.scale.off('resize', again));
@@ -485,9 +493,9 @@ class Home extends Phaser.Scene {
     window.dispatchEvent(new CustomEvent('zombiewalk:session', { detail: s }));
     if (params.get('scene') === 'home') return;   // preview only, nothing to save
     const verified = (s.formPct ?? 0) >= 40;        // walking was verified for most of the session
-    withTimeout(api('/api/session', { player: settings.player, summary: s, verified }), 15000)
+    withTimeout(api('/api/session', { player: settings.player, summary: s, verified }), 25000)
       .then((result) => { data.result = result; if (this.sys.isActive()) this.showResult(result); })
-      .catch(() => { if (this.sys.isActive()) this.noteText.setText('Saved on this laptop only (server offline).'); });
+      .catch(() => { if (this.sys.isActive()) this.noteText.setText('Not saved: the game server did not answer.'); });
   }
 
   showResult(result) {

@@ -98,3 +98,36 @@ def test_short_or_unverified_session_gets_no_reward():
     unverified = client.post("/api/session", json={"player": "Mia", "summary": summary(), "verified": False}).json()
     unfinished = client.post("/api/session", json={"player": "Mia", "summary": summary(act="storm")}).json()
     assert short["reward"] is None and unverified["reward"] is None and unfinished["reward"] is None
+
+
+def test_nan_and_infinite_limits_are_ignored():
+    lim = clean_limits({"liftRange": ["nan", 18], "walkSeconds": "inf", "liftCm": 9})
+    assert lim["liftRange"] == [6.0, 18.0]
+    assert lim["walkSeconds"] == 45
+    assert lim["liftCm"] == 9.0
+    r = client.put("/api/player/Ann", json={"limits": {"liftRange": ["nan", 18]}})
+    assert r.status_code == 200
+    assert client.get("/api/player/Ann").status_code == 200
+
+
+def test_rewards_are_capped_per_day():
+    client.put("/api/player/Mia", json={"rewards": [{"name": "sticker", "usd": 1}]})
+    got = [client.post("/api/session", json={"player": "Mia", "summary": summary()}).json()["reward"] for _ in range(4)]
+    assert [bool(g) for g in got] == [True, True, False, False]
+
+
+def test_rule_cue_steps_from_the_current_target():
+    out = therapist.rule_cue(summary(act="storm", dodgePct=40, liftTargetCm=8), {"liftCm": 10, "liftRange": [6, 18]})
+    assert out["params"]["liftCm"] == 7
+
+
+def test_plan_handles_a_zero_dodge_rate():
+    client.post("/api/session", json={"player": "Mia", "summary": summary(dodgePct=0, stompPct=50)})
+    assert "seeds" in client.get("/api/plan/Mia").json()["say"]
+
+
+def test_memory_task_does_not_overwrite_panel_edits(offline):
+    offline.update_player("Mia", limits={"liftCm": 9}, rewards=[{"name": "a", "usd": 1}])
+    offline.update_player("Mia", assistantId="asst-9")
+    p = offline.player("Mia")
+    assert p["limits"]["liftCm"] == 9.0 and p["rewards"] == [{"name": "a", "usd": 1}] and p["assistantId"] == "asst-9"
