@@ -11,7 +11,13 @@ export class AmbientGarden {
     this.hud = $('garden-hud');
     this.title = $('act-title'); this.score = $('score'); this.coach = $('coach');
     this.progress = $('home-progress'); this.pace = $('pace'); this.prompt = $('walk-prompt');
-    this.images = ART.map(name => { const img = new Image(); img.src = `art/${name}.svg`; return img; });
+    // Generated art first (web/art/hd), the SVG if it is missing.
+    this.images = ART.map(name => {
+      const img = new Image();
+      img.onerror = () => { img.onerror = null; img.src = `art/${name}.svg`; };
+      img.src = `art/hd/${name}.png`;
+      return img;
+    });
     // x, y, size, phase, art index: allocated only once, recycled in place.
     this.decor = new Float32Array(72 * 5);
     for (let i = 0; i < 72; i++) {
