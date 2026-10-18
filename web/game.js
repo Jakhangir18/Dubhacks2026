@@ -2,6 +2,8 @@
 // Floor projection, top-down: the bottom band is the walking zone; flowers and seeds come from the top.
 import { newGame, step, addEvent, summary, needCm, startAt, RULES } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
+import { mountCameraPanel } from './camera-panel.js';
+import { connectBridge } from './bridge.js';
 
 const Phaser = window.Phaser;
 const Warp = window.Warp;
@@ -46,6 +48,10 @@ function toggleAutoWalk() {
   autoWalk = setInterval(() => { keyStep(autoFoot, 4); autoFoot = autoFoot === 'L' ? 'R' : 'L'; }, 600);
 }
 
+// ---------- camera and Raspberry Pi inputs ----------
+const cameraPanel = mountCameraPanel();          // V: phone or webcam, live lift values
+connectBridge((status) => { document.getElementById('bridge').textContent = status; });   // Pi events via the server
+
 // ---------- projector corner warp ----------
 const stage = document.getElementById('stage');
 const handleLayer = document.getElementById('handles');
@@ -61,7 +67,7 @@ function toggleCorners() {
 }
 
 window.addEventListener('keydown', (e) => {
-  if (e.repeat) return;   // a held key must not fake a stream of steps
+  if (e.repeat || ['INPUT', 'SELECT'].includes(e.target.tagName)) return;   // a held key must not fake a stream of steps
   const k = e.key.toLowerCase();
   const map = {
     a: () => keyStep('L', 4), d: () => keyStep('R', 4),
@@ -70,6 +76,7 @@ window.addEventListener('keydown', (e) => {
     f: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()),
     m: () => { settings.voice = !settings.voice; Warp.store.set('zombiewalk.voice', settings.voice); },
     k: () => { const el = document.getElementById('keys'); el.hidden = !el.hidden; },
+    v: () => cameraPanel.toggle(),
   };
   if (map[k]) { map[k](); e.preventDefault(); }
 });
