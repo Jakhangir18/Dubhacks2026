@@ -39,6 +39,8 @@ export const RULES = {
   toeCm: 300,                    // how far past the hit line the toes are; the game sets it from its layout
   shoeHoldS: 3,                  // shoes drive the game this long after the last sighting, then the lift rules return
   shoeGapS: 1,                   // a lane unseen this long starts its swing tracking afresh
+  stanceS: 6,                    // the toe line follows where the shoes have stood over this window
+  stanceMarginCm: 30,            // a thing is gone only this far behind the standing feet
 };
 
 export function rng(seed = 1) {
@@ -71,6 +73,7 @@ export function newGame(limits = {}, seed = 1) {
     lastShoeT: null,
     shoeMidX: null,                // the midpoint between the two shoes when both were last seen: the lane divider for one shoe
     shoes: [],                     // latest sightings {lane, xFrac, nearCm, farCm, t}
+    stance: [],                    // recent {t, nearCm} of every sighting: where the feet really stand
     shoeTrack: { L: { phase: 'back', max: -Infinity, min: Infinity }, R: { phase: 'back', max: -Infinity, min: Infinity } },
     toeCm: RULES.toeCm,
     log: [],                     // resolved things for the report and the UI
@@ -111,6 +114,14 @@ export function addShoes(g, shoes, t = g.t) {
   if (g.lastShoeT !== null && t - g.lastShoeT > RULES.shoeGapS) resetShoes(g);   // the feet were out of view
   g.shoeMode = true;
   g.lastShoeT = t;
+  // The toe line follows the feet: a calibration a little off must not make things vanish before they reach them.
+  for (const s of seen) g.stance.push({ t, nearCm: Math.max(s.nearCm, s.farCm) });
+  while (g.stance.length && t - g.stance[0].t > RULES.stanceS) g.stance.shift();
+  if (g.stance.length >= 10) {
+    const sorted = g.stance.map((s) => s.nearCm).sort((a, b) => a - b);
+    const rest = sorted[Math.floor(sorted.length * 0.25)];   // the feet at rest, not mid-swing
+    g.toeCm = Math.max(g.toeCm, -rest + RULES.stanceMarginCm);
+  }
   if (seen.length === 2) g.shoeMidX = (seen[0].xFrac + seen[1].xFrac) / 2;
   g.shoes = seen.map((s, i) => ({
     lane: seen.length === 2 ? (i === 0 ? 'L' : 'R') : (s.xFrac < (g.shoeMidX ?? 0.5) ? 'L' : 'R'),
@@ -141,6 +152,7 @@ export function shoesLive(g) {
 // After a pause or a gap: forget the sightings and the half-finished swings, so nothing lands on stale geometry.
 export function resetShoes(g) {
   g.shoes = [];
+  g.stance = [];
   g.lastShoeT = null;   // shoes drive the game again only from the next sighting
   for (const lane of ['L', 'R']) g.shoeTrack[lane] = { phase: 'back', max: -Infinity, min: Infinity };
 }

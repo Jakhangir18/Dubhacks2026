@@ -308,3 +308,17 @@ test('when the shoes drop out mid-act, things past the line still wait for the t
   assert.equal(th.result, 'miss');
   assert.ok(th.distCm < -g.toeCm);              // missed at the toes, as under the shoe rules
 });
+
+test('the toe line follows where the shoes stand, so a flower reaches feet that map past the field', () => {
+  const g = toGarden();
+  const standing = () => addShoes(g, [{ xFrac: 0.3, nearCm: -500, farCm: -530 }, { xFrac: 0.7, nearCm: -500, farCm: -530 }]);
+  for (let i = 0; i < 12; i++) { standing(); step(g, DT); }
+  assert.ok(g.toeCm >= 530, `toeCm ${g.toeCm}`);        // the feet stand 500 cm past the line, 30 cm margin
+  walkUntil(g, () => { standing(); return g.things.length > 0; });
+  const th = g.things[0];
+  walkUntil(g, () => { standing(); return th.distCm < -400; }, 90);
+  assert.equal(th.result, null);                         // not missed at the old toe line (300 cm)
+  addShoes(g, [{ xFrac: th.lane === 'L' ? 0.3 : 0.7, nearCm: th.distCm + 10, farCm: th.distCm - 10 }]);
+  step(g, DT);
+  assert.equal(th.result, 'hit');
+});
