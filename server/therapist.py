@@ -14,7 +14,7 @@ import httpx
 
 from server import gemini
 
-BACKBOARD_URL = "https://app.backboard.io/api/threads/messages"
+BACKBOARD_URL = "https://app.backboard.io/api"
 
 COACH_SYSTEM = (
     "You are the voice of a warm physical-therapy coach inside a walking game for children, teenagers and adults. "
@@ -42,6 +42,11 @@ REWARD_SYSTEM = (
     "sentence. Reply with JSON only: {\"reward\": \"<exact wishlist item name>\", \"line\": \"...\"}."
 )
 
+MEMORY_SYSTEM = (
+    "You remember one player's walking-game sessions for their physical-therapy coach. Keep the trend: pace, "
+    "flowers and seeds, left and right steps, the focus for next time. Wellness words only, never a diagnosis."
+)
+
 
 def clamp(v: Any, lo: float, hi: float, default: float) -> float:
     try:
@@ -59,25 +64,39 @@ async def gemini_json(system: str, user: str, timeout: float = 4) -> dict[str, A
 # ---------------------------------------------------------------- Backboard memory
 async def backboard(content: str, assistant_id: str | None, memory: str, timeout: float = 20) -> tuple[str, str | None] | None:
     """Send one message to Backboard. memory: 'Auto' writes and reads, 'Readonly' only reads.
-    Returns (reply text, assistant id) or None. One assistant per player keeps each player's memory apart."""
+    Returns (reply text, assistant id) or None. One assistant per player keeps each player's memory apart:
+    it is created on the first call, and every message goes to a new thread of it (memory spans its threads)."""
     key = os.environ.get("BACKBOARD_API_KEY")
     if not key:
         return None
-    fields: dict[str, Any] = {"content": content, "memory": memory, "stream": False}
-    if assistant_id:
-        fields["assistant_id"] = assistant_id
     headers = {"X-API-Key": key}
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.post(BACKBOARD_URL, headers=headers, json=fields)
-            if r.status_code in (415, 422):  # the endpoint may expect form fields
-                r = await client.post(BACKBOARD_URL, headers=headers, data={k: str(v) for k, v in fields.items()})
+        async with httpx.AsyncClient(base_url=BACKBOARD_URL, headers=headers, timeout=timeout) as client:
+            if not assistant_id:
+                r = await client.post("/assistants", json={"name": "Zombie Walk Home coach", "system_prompt": MEMORY_SYSTEM})
+                r.raise_for_status()
+                assistant_id = r.json()["assistant_id"]
+            r = await client.post(f"/assistants/{assistant_id}/threads", json={})
             r.raise_for_status()
-            j = r.json()
-            text = j.get("content") or j.get("message") or ""
-            return str(text), j.get("assistant_id") or assistant_id
-    except (httpx.HTTPError, ValueError, AttributeError):
+            r = await client.post(f"/threads/{r.json()['thread_id']}/messages",
+                                  json={"content": content, "memory": memory, "stream": False})
+            r.raise_for_status()
+            return str(r.json().get("content") or ""), assistant_id
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
         return None
+
+
+async def backboard_ping(timeout: float = 5) -> str | None:
+    """None when the key works, else the reason. Lists one assistant: no message, no memory written."""
+    key = os.environ.get("BACKBOARD_API_KEY")
+    if not key:
+        return "no BACKBOARD_API_KEY"
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.get(f"{BACKBOARD_URL}/assistants", headers={"X-API-Key": key}, params={"limit": 1})
+        return None if r.status_code == 200 else f"Backboard HTTP {r.status_code}"
+    except httpx.HTTPError as e:
+        return f"Backboard call failed ({type(e).__name__})"
 
 
 # ---------------------------------------------------------------- live coach
@@ -168,7 +187,7 @@ async def plan(player: dict[str, Any], recent: list[dict[str, Any]]) -> dict[str
         res = await backboard(
             f"{name} is starting a walking session now. In one or two short sentences, greet {name} and name one "
             "thing to focus on today, based on what you remember about earlier sessions. Wellness words only.",
-            player["assistantId"], "Readonly", timeout=4)
+            player["assistantId"], "Readonly", timeout=3)   # two calls; the game waits 8 s
         if res and res[0]:
             return {"say": res[0], "source": "backboard"}
     if recent:
@@ -195,7 +214,8 @@ async def remember(player: dict[str, Any], summary: dict[str, Any]) -> str | Non
 
 async def report(summary: dict[str, Any], recent: list[dict[str, Any]]) -> dict[str, Any]:
     history = [describe(r["summary"]) for r in recent[:5]]   # the five latest only
-    out = await gemini_json(REPORT_SYSTEM, json.dumps({"today": describe(summary), "earlier": history}))
+    # The save waits for the note and the reward; the game waits 25 s in all, so 10 + 6 s leaves room.
+    out = await gemini_json(REPORT_SYSTEM, json.dumps({"today": describe(summary), "earlier": history}), timeout=10)
     if out and isinstance(out.get("note"), str):
         return {"note": out["note"], "source": "gemini"}
     dodge = summary.get("dodgePct")
@@ -209,7 +229,7 @@ async def pick_reward(summary: dict[str, Any], wishlist: list[dict[str, Any]]) -
     if not wishlist:
         return None
     effort = summary.get("formPct", 0)
-    out = await gemini_json(REWARD_SYSTEM, json.dumps({"effortPct": effort, "wishlist": wishlist}))
+    out = await gemini_json(REWARD_SYSTEM, json.dumps({"effortPct": effort, "wishlist": wishlist}), timeout=6)
     names = {w["name"]: w for w in wishlist}
     if out and isinstance(out.get("reward"), str) and out["reward"] in names:
         return {**names[out["reward"]], "line": str(out.get("line", ""))[:200], "source": "gemini"}

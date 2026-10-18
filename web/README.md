@@ -29,7 +29,7 @@ Open http://localhost:8000/therapist.html (with the server running).
 - **Play as this player** makes that player current for the game (limits, greeting, memory, rewards).
 - The session table shows every finished game with the coach's note.
 - **AI gait review** (off by default): with a side camera running `gait.py --server`, each game's walk is reviewed after Home. The session row shows the review's state; **details** opens a short version with **Apply suggested settings** (the server keeps them inside the ranges), and **Full report** opens `report.html?id=<session>` (printable). Without the consent tick the review uses fixed rules and no numbers leave the laptop. Shapes: `vision/CONTRACT.md`.
-- Chips at the top show which sponsor integrations are live.
+- Chips at the top show which keys are set. **Check integrations** makes a real call to Gemini, MongoDB and Backboard and turns each chip green or red (hover for the reason); Perceptron is not called, its calls are paid.
 
 ## Keys and sponsor features
 
@@ -40,7 +40,10 @@ GEMINI_API_KEY=...        # MLH Best Use of Gemini API: live coach cues, session
 BACKBOARD_API_KEY=...     # MLH Best Use of Backboard: the coach remembers each player across sessions
 MONGODB_URI=mongodb+srv://...   # MLH Best Use of MongoDB Atlas: players and sessions
 PERCEPTRON_API_KEY=...    # Perceptron track: Mk1.5 double-checks stomps, dodges and form from leg-only frames
+PUBLIC_URL=https://...    # optional: public address for the clip QR (e.g. Tailscale Funnel), so any phone can open it
 ```
+
+Switching to MongoDB with games already played offline: `python -m server.store` copies `data/store.json` into Atlas (players and settings already there are kept, sessions are added once).
 
 Perceptron also needs consent: tick "Perceptron double-check" for the player in the therapist panel and save. Without it no frame leaves the laptop.
 

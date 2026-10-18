@@ -71,12 +71,46 @@ class Store:
                 self.mongo = client[os.environ.get("MONGODB_DB", "zombiewalk")]
             except Exception as e:  # noqa: BLE001 - any connection problem falls back to the file
                 print(f"MongoDB unavailable, using the local file: {e}")
+        if self.mongo is not None:
+            # Not unique: an old duplicate must never stop the server from starting.
+            for coll, keys in (("players", [("name", 1)]), ("sessions", [("id", 1)]),
+                               ("sessions", [("player", 1), ("ts", -1)]), ("settings", [("key", 1)])):
+                try:
+                    self.mongo[coll].create_index(keys)
+                except Exception as e:  # noqa: BLE001 - a missing index only makes queries slower
+                    print(f"MongoDB index on {coll} {keys} skipped: {e}")
         self.lock = threading.Lock()
         self.file = DATA / "store.json"
 
     @property
     def backend(self) -> str:
         return "mongodb" if self.mongo is not None else "file"
+
+    def ping(self) -> str | None:
+        """None when MongoDB answers, else the reason (also when MONGODB_URI is set but the file is in use)."""
+        if self.mongo is None:
+            return "MONGODB_URI set but the connection failed at startup" if os.environ.get("MONGODB_URI") else "no MONGODB_URI"
+        try:
+            self.mongo.command("ping")
+            return None
+        except Exception as e:  # noqa: BLE001
+            return f"MongoDB ping failed ({type(e).__name__})"
+
+    def import_file(self, path: Path) -> dict[str, int]:
+        """Copy a local store.json into MongoDB: a player already in MongoDB is kept, sessions are added once by id."""
+        if self.mongo is None:
+            raise RuntimeError("MongoDB is not connected: set MONGODB_URI")
+        db = json.loads(path.read_text())
+        for name, doc in db.get("players", {}).items():
+            self.mongo.players.update_one({"name": name}, {"$setOnInsert": {**doc, "name": name}}, upsert=True)
+        added = 0
+        for doc in db.get("sessions", []):
+            if doc.get("id") and self.mongo.sessions.update_one(
+                    {"id": doc["id"]}, {"$setOnInsert": doc}, upsert=True).upserted_id is not None:
+                added += 1
+        for key, value in db.get("settings", {}).items():
+            self.mongo.settings.update_one({"key": key}, {"$setOnInsert": {"key": key, **value}}, upsert=True)
+        return {"players": len(db.get("players", {})), "sessions": added}
 
     # ---------- file backend ----------
     def _load(self) -> dict[str, Any]:
@@ -190,3 +224,12 @@ class Store:
             rows = self._load()["sessions"]
         rows = [r for r in rows if not name or r["player"] == name]
         return sorted(rows, key=lambda r: r["ts"], reverse=True)[:limit]
+
+
+if __name__ == "__main__":   # python -m server.store [data/store.json]: copy the offline file into MongoDB Atlas
+    import sys
+
+    from server.app import load_env
+
+    load_env()
+    print(Store().import_file(Path(sys.argv[1]) if len(sys.argv) > 1 else DATA / "store.json"))

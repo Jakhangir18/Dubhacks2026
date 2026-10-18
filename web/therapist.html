@@ -14,6 +14,7 @@
     h1 { margin: 0; font-size: 20px; } h1 b { color: var(--green); }
     .chip { font-size: 12px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); color: var(--dim); }
     .chip.on { color: #000; background: var(--green); border-color: var(--green); }
+    .chip.bad { color: #000; background: #ff4d4d; border-color: #ff4d4d; }
     main { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; padding: 16px 24px; max-width: 1200px; }
     section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
     h2 { margin: 0 0 12px; font-size: 16px; color: var(--yellow); }
@@ -50,6 +51,7 @@
     <span id="st-storage" class="chip">storage</span>
     <span id="st-visa" class="chip">Visa</span>
     <span id="st-perceptron" class="chip">Perceptron</span>
+    <button id="check" title="Makes a real call to each service (not Perceptron: its calls are paid)">Check integrations</button>
   </header>
   <main>
     <section>
@@ -160,6 +162,21 @@
         $('st-visa').textContent = `Visa: ${s.visa}`;
         $('st-perceptron').classList.toggle('on', s.perceptron);
       } catch { say('server not reachable: run the game server (see web/README.md)'); }
+    }
+
+    // The chips above only say a key is set; this makes a real call to each service.
+    async function checkIntegrations() {
+      say('checking integrations…');
+      try {
+        const h = await api('/api/health');
+        const chips = { gemini: 'st-gemini', backboard: 'st-backboard', mongodb: 'st-storage', perceptron: 'st-perceptron' };
+        for (const [k, id] of Object.entries(chips)) {
+          $(id).classList.toggle('on', h[k].ok);
+          $(id).classList.toggle('bad', !h[k].ok);
+          $(id).title = h[k].detail;
+        }
+        say(Object.entries(h).map(([k, v]) => `${k}: ${v.ok ? 'ok' : v.detail}`).join(' · '));
+      } catch { say('integration check failed: is the game server running?'); }
     }
 
     async function listPlayers(select) {
@@ -394,6 +411,7 @@
       say(`saved ${player.name}`);
     }
     $('save').onclick = save;
+    $('check').onclick = checkIntegrations;
     $('play').onclick = () => {
       if (!player) return say('load a player first');
       store.set('zombiewalk.player', player.name);
