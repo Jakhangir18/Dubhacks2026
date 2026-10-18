@@ -147,7 +147,14 @@ async function start() {
   starting = true;
   try {
     $('st-cam').textContent = 'loading the pose model…';
-    const id = $('dev').value || store.get('zombiewalk.camera', null);
+    let id = $('dev').value || store.get('zombiewalk.camera', null);
+    // On load (nothing picked in the list yet) prefer the stand camera by name: ?cam=<part of its name>, USB by
+    // default. A phone joining as a Continuity camera shifts the order, and the saved id then opened the laptop's.
+    if (!$('dev').value) {
+      const want = (new URLSearchParams(location.search).get('cam') || 'USB').toLowerCase();
+      const match = (await FootTracker.cameras()).find((c) => c.label.toLowerCase().includes(want));
+      if (match) id = match.deviceId;
+    }
     await tracker.start(id);
     const cams = await FootTracker.cameras();
     const current = video.srcObject.getVideoTracks()[0].getSettings().deviceId;
