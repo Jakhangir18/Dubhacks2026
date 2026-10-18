@@ -29,31 +29,46 @@
     // The phone's camera, as pictures to the game server: ten a second, 480 px on the long side, for the gait
     // analysis on the server and the dashboard's picture. No video is stored.
     const $ = (id) => document.getElementById(id);
-    const FPS = 12, LONG = 400, IN_FLIGHT = 8;   // small pictures, several uploads at once: a 600 ms round trip over the internet must not set the frame rate
-    let timer = null, busy = 0, sent = 0;
+    // Pictures go down one WebSocket, pipelined: a slow round trip over the internet never sets the frame rate.
+    const FPS = 12, LONG = 640, IN_FLIGHT = 8;
+    let timer = null, busy = 0, sent = 0, ws = null, lastCount = 0, lastAt = performance.now();
+    function connect() {
+      try { ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/sideframe`); } catch { ws = null; return; }
+      ws.binaryType = 'arraybuffer';
+      ws.onclose = () => { ws = null; setTimeout(connect, 1500); };
+      ws.onerror = () => { try { ws.close(); } catch { /* already closed */ } };
+    }
     async function start() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
       $('v').srcObject = stream;
       $('go').hidden = true;
       try { await navigator.wakeLock?.request('screen'); } catch { /* the screen may still dim */ }
+      connect();
       timer = setInterval(shot, 1000 / FPS);
+      setInterval(() => {   // the chip says what really leaves the phone
+        const now = performance.now(), rate = (sent - lastCount) / ((now - lastAt) / 1000);
+        lastCount = sent; lastAt = now;
+        const ok = (ws && ws.readyState === 1) || busy > 0;
+        $('st').textContent = ok ? `sending · ${rate.toFixed(1)} a second · ${sent}` : 'no connection';
+        $('st').classList.toggle('on', ok && rate > 0);
+      }, 1000);
     }
     async function shot() {
       const v = $('v');
-      if (busy >= IN_FLIGHT || !v.videoWidth) return;
-      busy += 1;
+      if (!v.videoWidth) return;
+      if (ws && ws.readyState === 1 && ws.bufferedAmount > 400000) return;   // the link is behind: skip this picture
+      if (!(ws && ws.readyState === 1) && busy >= IN_FLIGHT) return;
+      const scale = LONG / Math.max(v.videoWidth, v.videoHeight);
+      const c = $('c'); c.width = Math.round(v.videoWidth * scale); c.height = Math.round(v.videoHeight * scale);
+      c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+      const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.6));
+      if (!blob) return;
+      if (ws && ws.readyState === 1) { ws.send(blob); sent += 1; return; }
+      busy += 1;   // no socket: plain uploads, several at once
       try {
-        const scale = LONG / Math.max(v.videoWidth, v.videoHeight);
-        const c = $('c'); c.width = Math.round(v.videoWidth * scale); c.height = Math.round(v.videoHeight * scale);
-        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
-        const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.55));
         const r = await fetch('/api/sideframe', { method: 'POST', headers: { 'content-type': 'image/jpeg' }, body: blob });
-        sent += 1;
-        $('st').textContent = r.ok ? `sending · ${sent}` : `server ${r.status}`;
-        $('st').classList.toggle('on', r.ok);
-      } catch (e) {
-        $('st').textContent = 'no connection'; $('st').classList.remove('on');
-      } finally { busy -= 1; }
+        if (r.ok) sent += 1;
+      } catch { /* counted by the chip as no connection */ } finally { busy -= 1; }
     }
     $('go').onclick = () => start().catch((e) => { $('st').textContent = `camera: ${e.message}`; });
   </script>

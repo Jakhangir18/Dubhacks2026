@@ -119,3 +119,12 @@ def test_phone_side_frames_are_served_one_by_one():
     r = client.get("/api/sideframe?after=0&wait=0.1")
     assert r.status_code == 200 and r.content == jpeg and r.headers["X-Seq"] == "1"
     assert client.get("/api/sideframe?after=1&wait=0.1").status_code == 204
+
+
+def test_phone_pictures_arrive_over_the_socket_too():
+    jpeg = b"\xff\xd8\xff\xe0" + b"\x01" * 32
+    with client.websocket_connect("/ws/sideframe") as ws:
+        ws.send_bytes(jpeg)
+        ws.send_bytes(b"junk")   # ignored
+        r = client.get("/api/sideframe?after=0&wait=1")
+    assert r.status_code == 200 and r.content == jpeg

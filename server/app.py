@@ -245,19 +245,37 @@ side_cond = asyncio.Condition()
 side_shown_at = 0.0
 
 
-@app.post("/api/sideframe")
-async def post_sideframe(request: Request) -> dict[str, Any]:
+async def take_sideframe(body: bytes) -> int:
+    """Keep the newest phone picture, wake the puller, show the dashboard two a second."""
     global side_shown_at
-    body = await request.body()
-    if not body.startswith(b"\xff\xd8") or len(body) > MAX_SIDEFRAME_BYTES:
-        raise HTTPException(413 if len(body) > MAX_SIDEFRAME_BYTES else 415)
     async with side_cond:
         side_frame.update(seq=side_frame["seq"] + 1, jpeg=body, ts=time.time())
         side_cond.notify_all()
     if time.time() - side_shown_at >= 0.5:
         side_shown_at = time.time()
         await broadcast([{"kind": "frame", "source": "side", "jpeg": "data:image/jpeg;base64," + base64.b64encode(body).decode()}])
-    return {"seq": side_frame["seq"]}
+    return side_frame["seq"]
+
+
+@app.post("/api/sideframe")
+async def post_sideframe(request: Request) -> dict[str, Any]:
+    body = await request.body()
+    if not body.startswith(b"\xff\xd8") or len(body) > MAX_SIDEFRAME_BYTES:
+        raise HTTPException(413 if len(body) > MAX_SIDEFRAME_BYTES else 415)
+    return {"seq": await take_sideframe(body)}
+
+
+@app.websocket("/ws/sideframe")
+async def ws_sideframe(ws: WebSocket) -> None:
+    """The phone's pictures as binary messages, one picture each: pipelined, so a slow round trip costs no frames."""
+    await ws.accept()
+    try:
+        while True:
+            data = await ws.receive_bytes()
+            if data.startswith(b"\xff\xd8") and len(data) <= MAX_SIDEFRAME_BYTES:
+                await take_sideframe(data)
+    except (WebSocketDisconnect, RuntimeError):
+        pass
 
 
 @app.get("/api/sideframe")
