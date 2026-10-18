@@ -113,7 +113,12 @@ export class AmbientGarden {
 
   drawImage(index, x, y, w, h = w) {
     const img = this.images[index];
-    if (img.complete && img.naturalWidth) this.ctx.drawImage(img, x - w / 2, y - h / 2, w, h);
+    if (!img.complete || !img.naturalWidth) return;
+    if (index > 1 && index !== 7) {   // contain-fit everything but tiles and the fence, which join edge to edge
+      const s = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+      w = img.naturalWidth * s; h = img.naturalHeight * s;
+    }
+    this.ctx.drawImage(img, x - w / 2, y - h / 2, w, h);
   }
 
   frame(now) {
