@@ -8,10 +8,11 @@ import { send, listen } from './link.js';
 
 const CAM_KEY = window.Warp.CAM_KEY;
 const CORNERS = ['FRONT-LEFT', 'FRONT-RIGHT', 'BACK-RIGHT', 'BACK-LEFT'];
-// The saved calibration, read once and after each save (this window is the only writer).
-let saved = { points: store.get(CAM_KEY + '.points', null), picture: store.get(CAM_KEY + '.picture', 'local') };
+
 
 const store = window.Warp.store;
+// The saved shoe calibration, read once and after each save (this window is the only writer).
+let saved = { points: store.get(CAM_KEY + '.points', null), picture: store.get(CAM_KEY + '.picture', 'local') };
 const $ = (id) => document.getElementById(id);
 const video = $('video');
 const overlay = $('overlay');
