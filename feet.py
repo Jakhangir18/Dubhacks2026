@@ -101,9 +101,9 @@ def open_camera(name=None, index=None):
                            "then restart it.")
     names = camera_names()
     if index is None:
-        pool = [i for i, n in enumerate(names) if not any(s in n.lower() for s in ("iphone", "ipad"))]
-        if name:
-            pool = [i for i in pool if name.lower() in names[i].lower()]
+        # Continuity phones can steal the default; only pick one if asked for by name
+        pool = [i for i, n in enumerate(names)
+                if (name and name.lower() in n.lower()) or (not name and not any(s in n.lower() for s in ("iphone", "ipad")))]
         if not pool:
             raise RuntimeError(f"No matching camera. Available: {dict(enumerate(names))}")
         index = pool[0]
