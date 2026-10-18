@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import os
 import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
@@ -136,6 +137,11 @@ async def session(inp: SessionIn, background: BackgroundTasks) -> dict[str, Any]
     name = inp.player.strip()[:40] or "Player"
     player = await run_in_threadpool(store.player, name)
     earlier = await run_in_threadpool(store.sessions, name, 200)   # enough history for the per-day reward cap
+    inp.summary.pop("sideCamera", None)   # only the server attaches side-camera data, cleaned
+    side = fresh_gait(player)
+    if side:
+        inp.summary["sideCamera"] = side   # the therapist note and the stored session both see it
+        await run_in_threadpool(store.update_player, name, gait={"used": True})   # one walk, one summary
     note = await therapist.report(inp.summary, earlier)
     out: dict[str, Any] = {"note": note["note"], "noteSource": note["source"], "reward": None, "receipt": None}
     long_enough = (inp.summary.get("seconds") or 0) >= 20   # the short judge demo is about 30 s
@@ -153,6 +159,52 @@ async def session(inp: SessionIn, background: BackgroundTasks) -> dict[str, Any]
             out["receipt"] = {"network": "Visa", "status": "checkout failed, try again from the panel"}
     background.add_task(remember_later, name, inp.summary)   # Backboard memory, off the response path
     return out
+
+
+# ---------------------------------------------------------------- side-camera gait (vision/CONTRACT.md)
+GAIT_FRESH_S = 30 * 60   # a side-camera summary older than this does not belong to the walk being saved
+
+
+def clean_gait(value: Any, depth: int = 0) -> Any:
+    """Numbers, short strings, booleans and small nested objects or lists only; anything else is dropped."""
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, int):
+        return value if abs(value) < 2**53 else None   # fits a float and MongoDB's 8-byte int
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, str):
+        return value[:200]
+    if depth < 3 and isinstance(value, dict):
+        return {str(k)[:40]: clean_gait(v, depth + 1) for k, v in list(value.items())[:40]}
+    if depth < 3 and isinstance(value, list):
+        return [clean_gait(v, depth + 1) for v in value[:60]]
+    return None
+
+
+class GaitIn(BaseModel):
+    player: str = "Player"
+    source: str = "side-camera"
+    summary: dict[str, Any] | None   # gait.py GaitTracker.summary(); None when it saw too little
+
+
+@router.post("/gait")
+def post_gait(inp: GaitIn) -> dict[str, Any]:
+    name = inp.player.strip()[:40] or "Player"
+    if name not in store.players():
+        raise HTTPException(404, f"no player {name!r}: use the name from the therapist panel")
+    if not inp.summary:
+        return {"ok": False, "reason": "empty summary"}
+    gait = {"ts": time.time(), "source": inp.source[:40], "summary": clean_gait(inp.summary)}
+    store.update_player(name, gait=gait)
+    return {"ok": True}
+
+
+def fresh_gait(player: dict[str, Any]) -> dict[str, Any] | None:
+    gait = player.get("gait")
+    if not isinstance(gait, dict) or not isinstance(gait.get("summary"), dict):
+        return None
+    return gait["summary"] if time.time() - float(gait.get("ts") or 0) < GAIT_FRESH_S else None
 
 
 @router.get("/sessions/{name}")
