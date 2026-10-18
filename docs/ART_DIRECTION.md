@@ -16,6 +16,18 @@ The single style reference for every generated or drawn asset. Prompts for image
 - Kid-friendly and funny, nothing scary or gory.
 - Projector rule still holds: everything outside the lawn and props is near-black, so the bright lawn and characters carry the light; no fine texture, no thin lines, no text inside images.
 
+## Concept art (owner's pick, 2026-10-18)
+
+The owner's concept picture is the target look: a picket fence and a vegetable garden down both sides, the house at the top, two lanes, the hit line. These files are cut from it (Pillow, keyed by colour distance):
+
+| File | Used for |
+| --- | --- |
+| `web/art/gus-pvz.png` | Gus in every pose (`gus-idle`, `gus-step`, `gus-celebrate`); the back slipper, hidden by a banner in the concept, is a copy of the front one |
+| `web/art/fence-left.png`, `web/art/fence-right.png` | the space left and right of the lanes, on the field, in the zone preview and on the title; stacked from the clean upper part of both concept edges, darks lifted for the projector |
+| `web/art/home-view.png` | the house view across the top of the title, the zombie and the progress bar painted out; the game's own flowers stand in a bed in front of it |
+
+The space beside the lanes belongs to the fence strips: the lift meters are off (`SHOW_METERS` in `web/game.js`).
+
 ## Palette
 
 | Role | Hex |
@@ -34,7 +46,7 @@ The single style reference for every generated or drawn asset. Prompts for image
 
 ## Cast
 
-- **Gus**: a small friendly zombie kid in purple pyjamas and fuzzy slippers, green skin, one stitched patch, huge round eyes, one buck tooth, messy dark hair tuft. He must get home to bed before sunrise.
+- **Gus**: the cartoon zombie of the concept art (`web/art/gus-pvz.png`): bald grey-green head with a few hair strands, huge round eyes, open mouth with square teeth, rumpled purple pyjamas with a torn patch, fuzzy purple slippers, shuffling along. He must get home to bed before sunrise.
 - **Grandma Rosa**: never seen, only her garden and her missing slippers.
 - **Marmalade**: a grumpy marigold, orange petals, furrowed brow.
 - **Ding-Dong**: a sulky violet bell blossom, pouting.
