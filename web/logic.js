@@ -3,16 +3,18 @@
 // speed set by their cadence. Units: cm, seconds, steps per minute.
 //
 // Acts: 'walk' (keep a steady pace for walkSeconds) -> 'garden' (stomp flowers with the matching foot)
-//       -> 'storm' (lift the targeted foot over seed balls) -> 'home'.
+//       -> 'storm' (lift the targeted foot over seed balls; only when stormSeeds > 0) -> 'home'.
+// Flowers come on a beat: lanes alternate and each flower is an odd number of steps after the last, so a player
+// who keeps a steady cadence meets every flower with the other foot.
 
 export const LIMITS = {          // set by the therapist (Therapist panel); the coach adapts inside them
   minCadence: 80,                // steps per minute needed to move forward
   walkSeconds: 45,               // act 1 length, counted only while the pace is good
   gardenPlants: 12,              // act 2 length
-  stormSeeds: 10,                // act 3 length
+  stormSeeds: 0,                 // act 3 length; 0 leaves the seeds out: flowers only, rounds of them
   liftCm: 10,                    // lift needed to dodge a seed
   liftRange: [6, 18],            // the coach may move liftCm only inside this range
-  spacingCm: 140,                // distance between plants
+  spacingCm: 140,                // distance between plants, snapped to an odd number of steps (3 at the default plant speed)
   spacingRange: [90, 220],
   speedScale: 0.7,               // how fast plants come, times the walking speed (0.3 to 2); 1 felt too fast on the pad
   rounds: 2,                     // flowers then seeds, this many times, before home
@@ -40,6 +42,10 @@ export const RULES = {
   speedUpS: 0.6,
   slowDownS: 1.0,
   restCmS: 1,
+  // The pace warning holds: it turns on after this long of a bad pace and off after this long of a good one, so one
+  // missed step never flashes the floor and a cadence hovering at the minimum does not flicker. Not before graceS.
+  paceWarnS: 1.2,
+  paceGraceS: 3,
   points: { stomp: 10, dodge: 15 },
   // Shoe mode (feet.py boxes on the camera): a flower is smashed when a shoe covers it, a seed splats; a thing
   // that passes the toes resolves the other way. Distances are world cm on the field.
@@ -72,11 +78,14 @@ export function newGame(limits = {}, seed = 1) {
     actT: 0,                     // seconds spent in the current act
     walkGoodS: 0,                // act 1 seconds at a good pace
     speed: 0,                    // world speed in cm/s, eased towards the cadence
+    paceGated: false,            // the pace warning, held (see RULES.paceWarnS)
+    paceFlipT: null,             // when the pace last started disagreeing with the warning
     travelledCm: 0,
     nextSpawnCm: 0,
     spawned: 0,
     nextId: 1,
     things: [],                  // flowers and seeds on the floor
+    lastLane: null,              // the lane of the last thing spawned; the next takes the other
     events: [],                  // foot events, newest last; each may be used once
     strikes: [],                 // {t, foot} for cadence and symmetry
     score: 0,
@@ -226,12 +235,22 @@ export function form(p) {
 
 // ---------- spawning ----------
 function spawnThing(g) {
-  const lane = g.rand() < 0.5 ? 'L' : 'R';
+  const lane = g.lastLane === 'L' ? 'R' : 'L';   // the feet alternate, so do the lanes
+  g.lastLane = lane;
   const kind = g.act === 'garden' ? 'flower' : 'seed';
   const th = { id: g.nextId++, kind, lane, distCm: RULES.aheadCm, arriveT: null, result: null };
   g.things.push(th);
   g.spawned += 1;
   return th;
+}
+
+// The beat: the therapist's spacing in world cm, snapped to an odd number of steps (the world moves one stride
+// times the plant speed per step), so a steady walker meets each thing with the other foot.
+export function beatCm(g) {
+  const stepCm = RULES.strideCm * speedScale(g);
+  let steps = Math.max(1, Math.round(g.limits.spacingCm / stepCm));
+  if (steps % 2 === 0) steps -= 1;
+  return steps * stepCm;
 }
 
 function quota(g) {
@@ -271,19 +290,29 @@ function judge(g, th) {
     e.t >= th.arriveT - RULES.beforeS && e.t <= th.arriveT + RULES.afterS);
 }
 
+// Frame-rate independent easing: the share of the gap to close this frame for a time constant tauS.
+export function ease(dt, tauS) { return 1 - Math.exp(-dt / tauS); }
+
 // ---------- main step ----------
-// Advance by dt seconds. Returns {resolved: [...], actChanged: bool, pace, form}.
+// Advance by dt seconds. Returns {resolved: [...], actChanged: bool, pace, form, speed}.
 export function step(g, dt) {
   g.t += dt;
   g.actT += dt;
   const p = pace(g);
   const f = form(p);
+  const bad = !p.ok && g.t > RULES.paceGraceS;
+  if (bad === g.paceGated) g.paceFlipT = null;
+  else if (g.paceFlipT === null) g.paceFlipT = g.t;
+  else if (g.t - g.paceFlipT >= RULES.paceWarnS) { g.paceGated = bad; g.paceFlipT = null; }
+  p.gated = g.paceGated;
   if (g.act !== 'home') { g.formSum += f * dt; g.formN += dt; }   // time-weighted, independent of frame rate
   const scale = speedScale(g);
   const walking = p.cadence > 0;
   const cadence = p.ok ? p.cadence : walking ? Math.max(p.cadence, g.limits.minCadence * RULES.slowFloor) : 0;
   const target = (cadence / 60) * RULES.strideCm * scale;   // slow walking slows the world a little; standing still stops it
-  g.speed += (target - g.speed) * (1 - Math.exp(-dt / (target > g.speed ? RULES.speedUpS : RULES.slowDownS)));
+  // A stop glides to rest over about slowDownS of travel: a thing that close to the line still arrives and is judged
+  // against the standing player, which is the feedback for breaking the beat.
+  g.speed += (target - g.speed) * ease(dt, target > g.speed ? RULES.speedUpS : RULES.slowDownS);
   if (Math.abs(target - g.speed) < (target === 0 ? RULES.restCmS : 0.01)) g.speed = target;   // settle, never creep
   const speed = g.speed;
   const moved = speed * dt;
@@ -300,7 +329,7 @@ export function step(g, dt) {
 
   while (g.spawned < quota(g) && g.travelledCm >= g.nextSpawnCm) {
     spawnThing(g);
-    g.nextSpawnCm = g.travelledCm + g.limits.spacingCm;
+    g.nextSpawnCm = g.travelledCm + beatCm(g);
   }
   for (const th of g.things) {
     if (th.result) continue;
@@ -349,8 +378,10 @@ function nextAct(g, out) {
     };
   }
   const rounds = Math.max(1, Math.round(Number(g.limits.rounds) || 1));
-  if (g.act === 'storm' && g.round < rounds) { g.round += 1; g.act = 'garden'; }   // another round of flowers and seeds
-  else g.act = { walk: 'garden', garden: 'storm', storm: 'home' }[g.act];
+  const seeds = Number(g.limits.stormSeeds) > 0;
+  const roundEnd = seeds ? 'storm' : 'garden';
+  if (g.act === roundEnd && g.round < rounds) { g.round += 1; g.act = 'garden'; }   // another round
+  else g.act = { walk: 'garden', garden: seeds ? 'storm' : 'home', storm: 'home' }[g.act];
   g.actT = 0;
   g.actResolved = 0;
   g.spawned = 0;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, pace, form, applyParams, summary, needCm, startAt, speedScale } from '../web/logic.js';
+import { RULES, beatCm, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, pace, form, applyParams, summary, needCm, startAt, speedScale } from '../web/logic.js';
 
 const DT = 0.05;
 
@@ -59,10 +59,57 @@ test('the world speed glides: no jump when the pace starts, flips or stops', () 
   const nominal = (100 / 60) * 50 * 0.7;   // steps land on frames, so the measured cadence wobbles by a step or two
   assert.ok(Math.abs(steady - nominal) < 0.05 * nominal, `reaches the cadence speed, got ${steady} for ${nominal}`);
   for (let i = 1; i < speeds.length; i++) assert.ok(speeds[i] - speeds[i - 1] < 0.1 * steady, 'no jump on the way up');
+  const stopT = g.t, stopCm = g.travelledCm, lastStrikeT = g.strikes[g.strikes.length - 1].t;
   for (let i = 0; i < 40; i++) step(g, DT);   // 2 s without a step: past stopAfterS, the target is 0
   assert.ok(g.speed > 0 && g.speed < steady, `slows instead of freezing, got ${g.speed}`);
   for (let i = 0; i < 80; i++) step(g, DT);   // 4 s more: at rest, exactly
   assert.equal(g.speed, 0);
+  // Full speed until stopAfterS after the last step, then a glide worth about slowDownS of travel.
+  const expected = steady * (lastStrikeT + RULES.stopAfterS - stopT + RULES.slowDownS);
+  const glided = g.travelledCm - stopCm;
+  assert.ok(Math.abs(glided - expected) < 0.1 * expected, `glides ${glided} cm, expected about ${expected}`);
+});
+
+test('the pace warning holds: it comes after a sustained bad pace and leaves after a sustained good one', () => {
+  const g = newGame({ walkSeconds: 60 }, 1);
+  walk(g, 6, 0.6);                        // 100 steps per minute, past the grace period
+  assert.equal(step(g, DT).pace.gated, false);
+  const until = (cond, limitS = 20) => { const end = g.t + limitS; while (g.t < end) { walk(g, DT, g._gap); if (cond(pace(g))) return; } assert.fail('not reached'); };
+  g._gap = 1.0;                           // 60 steps per minute: below the minimum once the window sees it
+  until((p) => !p.ok);
+  const badT = g.t;
+  assert.equal(step(g, DT).pace.gated, false, 'not at once');
+  until(() => g.t >= badT + RULES.paceWarnS + 2 * DT);
+  assert.equal(step(g, DT).pace.gated, true, 'after the hold');
+  g._gap = 0.6;
+  until((p) => p.ok);
+  const okT = g.t;
+  assert.equal(step(g, DT).pace.gated, true, 'still shown right after the pace recovers');
+  until(() => g.t >= okT + RULES.paceWarnS + 2 * DT);
+  assert.equal(step(g, DT).pace.gated, false, 'gone after the hold');
+});
+
+test('with no seeds the rounds are flowers only, lanes alternate, and each flower comes an odd number of steps after the last', () => {
+  const g = newGame({ walkSeconds: 1, gardenPlants: 4, rounds: 2 }, 2);   // stormSeeds defaults to 0
+  const acts = [g.act], spawns = [];
+  let ids = g.nextId;
+  walkUntil(g, () => {
+    const key = g.act === 'garden' ? `garden ${g.round}` : g.act;
+    if (key !== acts[acts.length - 1]) acts.push(key);
+    if (g.nextId !== ids) { ids = g.nextId; spawns.push({ round: g.round, cm: g.travelledCm }); }
+    return g.act === 'home';
+  }, 120);
+  assert.deepEqual(acts, ['walk', 'garden 1', 'garden 2', 'home']);
+  assert.equal(g.log.length, 8);
+  assert.ok(g.log.every((l) => l.kind === 'flower'));
+  for (let i = 1; i < g.log.length; i++) assert.notEqual(g.log[i].lane, g.log[i - 1].lane, 'lanes alternate');
+  const beat = beatCm(g);
+  assert.equal(beat, 3 * RULES.strideCm * 0.7);   // 140 cm at the default plant speed snaps to 3 steps
+  for (let i = 1; i < spawns.length; i++) {
+    if (spawns[i].round !== spawns[i - 1].round) continue;
+    const gap = spawns[i].cm - spawns[i - 1].cm;
+    assert.ok(Math.abs(gap - beat) < 10, `spawn gap ${gap} cm, beat ${beat}`);
+  }
 });
 
 test('a steady pace with both feet finishes act 1', () => {
@@ -185,7 +232,7 @@ test('lift targets never exceed the therapist maximum', () => {
 });
 
 test('startAt jumps to an act through the normal transition', () => {
-  const g = newGame({}, 1);
+  const g = newGame({ stormSeeds: 2 }, 1);
   startAt(g, 'storm');
   assert.equal(g.act, 'storm');
   assert.equal(g.actResolved, 0);
@@ -269,7 +316,7 @@ test('at the line: a shoe on the flower smashes it, no shoe means it got away', 
 });
 
 test('at the line: a shoe on the seed splats, a clear lane is a dodge', () => {
-  const g = toGarden();
+  const g = toGarden({ stormSeeds: 2 });
   startAt(g, 'storm');
   walkUntil(g, () => g.things.length > 0);
   const seed = g.things[0];
