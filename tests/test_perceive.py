@@ -2,24 +2,13 @@
 
 import json
 
-import pytest
 from fastapi.testclient import TestClient
 
-from server import api, perceive
+from server import perceive
 from server.app import app
-from server.store import Store
 
 client = TestClient(app)
 JPEG = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD"
-
-
-@pytest.fixture(autouse=True)
-def offline(monkeypatch, tmp_path):
-    for key in ("GEMINI_API_KEY", "BACKBOARD_API_KEY", "MONGODB_URI", "PERCEPTRON_API_KEY"):
-        monkeypatch.delenv(key, raising=False)
-    fresh = Store()
-    fresh.file = tmp_path / "store.json"
-    monkeypatch.setattr(api, "store", fresh)
 
 
 def frames(n=3):
@@ -48,7 +37,7 @@ def test_step_check_with_consent(monkeypatch):
     monkeypatch.setattr(perceive, "ask", fake)
     r = client.post("/api/perceive", json={"player": "Mia", "kind": "step", "foot": "L", "thing": "flower", "frames": frames()})
     assert r.json()["verdict"] == "yes" and r.json()["source"] == "perceptron"
-    assert "left foot" in seen["question"]
+    assert "left knee" in seen["question"] and "flower" in seen["question"]
     assert seen["frames"][0] == {"image_url": {"url": JPEG}, "timestamp_ms": 0}
 
 
@@ -96,3 +85,20 @@ async def test_request_body_shape(monkeypatch):
     assert part["type"] == "video_frames" and len(part["video_frames"]["frames"]) == 3
     assert sent["body"]["response_format"]["type"] == "json_schema"
     assert sent["headers"]["Authorization"] == "Bearer k"
+
+
+def test_bad_timestamps_are_skipped_not_fatal():
+    bad = [{"tsMs": float("inf"), "url": JPEG}, {"tsMs": "x", "url": JPEG}, {"tsMs": 5, "url": JPEG}]
+    assert [f["timestamp_ms"] for f in perceive.clean_frames(bad)] == [5]
+
+
+def test_call_budget_per_minute():
+    assert all(perceive.allow_call(now=100.0) for _ in range(perceive.CALLS_PER_MINUTE))
+    assert not perceive.allow_call(now=100.5)
+    assert perceive.allow_call(now=161.0)   # a minute later the budget is back
+
+
+def test_oversized_frame_list_is_rejected():
+    client.put("/api/player/Mia", json={"perceptronConsent": True})
+    r = client.post("/api/perceive", json={"player": "Mia", "kind": "form", "frames": frames(perceive.MAX_FRAMES * 4 + 1)})
+    assert r.status_code == 422

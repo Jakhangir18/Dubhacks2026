@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import os
+import time
+from collections import deque
 from typing import Any
 
 import httpx
@@ -19,6 +21,8 @@ URL = "https://api.perceptron.inc/v1/chat/completions"
 MODEL = os.environ.get("PERCEPTRON_MODEL", "perceptron-mk1.5")
 MAX_FRAMES = 8
 MAX_FRAME_CHARS = 400_000   # a 320 px wide JPEG data URL is far below this
+CALLS_PER_MINUTE = 40       # one game sends about 30; the endpoint has no login, so cap the spend
+_calls: deque[float] = deque()
 
 STEP_SCHEMA = {
     "type": "object",
@@ -44,6 +48,16 @@ FORM_SCHEMA = {
 }
 
 
+def allow_call(now: float | None = None) -> bool:
+    now = time.monotonic() if now is None else now
+    while _calls and now - _calls[0] > 60:
+        _calls.popleft()
+    if len(_calls) >= CALLS_PER_MINUTE:
+        return False
+    _calls.append(now)
+    return True
+
+
 def clean_frames(frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Keep at most MAX_FRAMES JPEG or PNG data URLs with increasing integer timestamps."""
     out: list[dict[str, Any]] = []
@@ -54,7 +68,7 @@ def clean_frames(frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
         url = str(f.get("url", ""))
         try:
             ts = int(f.get("tsMs", -1))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             continue
         if not url.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")) or len(url) > MAX_FRAME_CHARS:
             continue
@@ -68,7 +82,8 @@ def clean_frames(frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def step_question(foot: str, kind: str) -> str:
     side = "left" if foot == "L" else "right"
     if kind == "flower":
-        action = f"the {side} foot lifts and comes down onto the bright projected flower in its lane"
+        action = (f"the {side} knee is raised clearly higher than in a normal walking step "
+                  "and the foot then comes down onto the bright projected flower in its lane")
     else:
         action = f"the {side} foot is lifted clearly off the floor as the projected seed ball reaches it"
     return ("These timestamped frames show a person's lower legs on a walking pad with a game projected on the floor. "

@@ -33,8 +33,15 @@ export class Perceiver {
     this.checked = 0;
     this.agree = 0;
     this.form = null;
-    this.busy = false;
+    this.busy = { step: false, form: false };   // a slow form check never blocks step checks
     this.lastForm = performance.now();
+  }
+
+  // Called when a game ends: keep the counts for the summary, stop capturing and sending.
+  stop() {
+    this.gen++;
+    this.enabled = false;
+    this.frames = [];
   }
 
   capture() {
@@ -74,7 +81,7 @@ export class Perceiver {
   checkStep(th) {
     if (!this.enabled) return;
     const now = performance.now();
-    const frames = this.frames.filter((f) => now - f.tsMs <= STEP_WINDOW_MS);
+    const frames = this.frames.filter((f) => now - f.tsMs <= STEP_WINDOW_MS).slice(-8);   // keep the newest: the step itself
     if (frames.length < 2) return;
     this.send({ kind: 'step', foot: th.lane, thing: th.kind, frames }, (out) => {
       if (out.verdict !== 'yes' && out.verdict !== 'no') return;   // unclear: not counted either way
@@ -84,8 +91,8 @@ export class Perceiver {
   }
 
   async send(body, done) {
-    if (this.busy) return;   // one request at a time; a busy moment just skips a check
-    this.busy = true;
+    if (this.busy[body.kind]) return;   // one request per kind at a time; a busy moment just skips a check
+    this.busy[body.kind] = true;
     const gen = this.gen;
     try {
       const r = await fetch('/api/perceive', { method: 'POST', headers: { 'content-type': 'application/json' },
@@ -95,7 +102,7 @@ export class Perceiver {
       if (out.source === 'no-consent') this.enabled = false;
       else if (out.source === 'perceptron') done(out);
     } catch { /* offline or slow: the game never waits for Perceptron */ }
-    finally { if (gen === this.gen) this.busy = false; }
+    finally { if (gen === this.gen) this.busy[body.kind] = false; }
   }
 
   badge() {

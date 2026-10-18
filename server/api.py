@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from server import perceive, therapist
 from server.store import Store
@@ -168,7 +168,7 @@ class PerceiveIn(BaseModel):
     kind: str                 # "step" or "form"
     foot: str | None = None   # for step: "L" or "R"
     thing: str | None = None  # for step: "flower" or "seed"
-    frames: list[dict[str, Any]]
+    frames: list[dict[str, Any]] = Field(max_length=perceive.MAX_FRAMES * 4)
 
 
 @router.post("/perceive")
@@ -176,6 +176,8 @@ async def perceive_frames(inp: PerceiveIn) -> dict[str, Any]:
     player = await run_in_threadpool(store.player, inp.player)
     if not player.get("perceptronConsent"):
         return {"source": "no-consent"}   # nothing leaves the laptop without consent
+    if not perceive.allow_call():
+        return {"source": "busy"}   # caps spend on the paid API from any client on the network
     frames = perceive.clean_frames(inp.frames)
     if inp.kind == "step" and inp.foot in {"L", "R"} and inp.thing in {"flower", "seed"}:
         return await perceive.check_step(frames, inp.foot, inp.thing)

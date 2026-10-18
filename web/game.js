@@ -116,6 +116,14 @@ const gardenState = { cadence: 0, act: 'title', paceOk: true, paused: false,
 const gardenEvent = new CustomEvent('zombiewalk:pace', { detail: gardenState });
 function publishGarden(values) { Object.assign(gardenState, values); window.dispatchEvent(gardenEvent); }
 function reaction(value) { window.dispatchEvent(new CustomEvent('zombiewalk:reaction', { detail: value })); }
+// A resize while zone setup has the scene paused (F for fullscreen) must not bring it back on top of the preview.
+function restartWhenShown(scene, data) {
+  if (!scene.sys.isPaused()) { scene.scene.restart(data); return; }
+  if (scene.restartQueued) return;
+  scene.restartQueued = true;
+  scene.events.once('resume', () => { scene.restartQueued = false; scene.scene.restart(data); });
+}
+
 function openZone() {
   const game = window.zombieGame;
   if (!game || zone.active || !game.scene.isActive('title') && !game.scene.isActive('play') && !game.scene.isActive('home')) return;
@@ -332,7 +340,7 @@ class Title extends Phaser.Scene {
     this.scale.on('resize', this.restartOnResize, this);
     this.events.once('shutdown', () => { this.off(); this.scale.off('resize', this.restartOnResize, this); });
   }
-  restartOnResize() { if (!this.started) this.scene.restart(); }
+  restartOnResize() { if (!this.started) restartWhenShown(this); }
   go() {
     if (this.started || zone.active) return;
     sound.unlock();
@@ -352,6 +360,7 @@ class Play extends Phaser.Scene {
     this.highSound = { L: false, R: false };
     this.g = newGame(settings.limits, Date.now() % 100000);
     perceiver.reset(settings.perceptron, settings.player);
+    this.events.once('shutdown', () => perceiver.stop());   // no frames leave on the Home or Title screens
     this.sprites = new Map();
     this.nextGardenUpdate = 0;
     this.coachLine = '';
@@ -723,7 +732,7 @@ class Home extends Phaser.Scene {
       data.cancelled = true; data.uploadAbort?.abort(); clip.cancel();
       playerReady = loadPlayer(); this.scene.start('title');
     });
-    const again = () => this.scene.restart(data);
+    const again = () => restartWhenShown(this, data);
     this.scale.once('resize', again);
     this.events.once('shutdown', () => this.scale.off('resize', again));
     if (data.replay) return;
