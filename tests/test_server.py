@@ -51,3 +51,16 @@ def test_garbled_websocket_frame_does_not_close_the_sender():
         pi.send_text("{not json")
         pi.send_json({"foot": "L", "kind": "strike"})
         assert game.receive_json() == [{"foot": "L", "kind": "strike", "source": "pi"}]
+
+
+def test_load_env_drops_inline_comments(tmp_path, monkeypatch):
+    from server.app import load_env
+    f = tmp_path / "keys"
+    f.write_text('A_KEY=abc   # the README style\nB_KEY="x # y"\n# C_KEY=no\n')
+    for k in ("A_KEY", "B_KEY", "C_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    load_env(f)
+    import os
+    assert os.environ["A_KEY"] == "abc"
+    assert os.environ["B_KEY"] == "x # y"
+    assert "C_KEY" not in os.environ
