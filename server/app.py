@@ -15,6 +15,8 @@ Environment (.env next to this repo root, never committed):
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import io
 import json
 import math
@@ -232,6 +234,43 @@ async def post_events(inp: EventsIn) -> dict[str, Any]:
     events = clean_batch(inp.events)
     listeners = await broadcast(events)
     return {"accepted": len(events), "listeners": listeners}
+
+
+# ---------------------------------------------------------------- the phone as the side camera (web/phone.html)
+# The phone posts JPEG pictures; gait.py on this host pulls them one by one (long poll) and the dashboard gets
+# two a second as "frame" events with source "side". One picture is kept in memory, never on disk.
+MAX_SIDEFRAME_BYTES = 400_000
+side_frame: dict[str, Any] = {"seq": 0, "jpeg": b"", "ts": 0.0}
+side_cond = asyncio.Condition()
+side_shown_at = 0.0
+
+
+@app.post("/api/sideframe")
+async def post_sideframe(request: Request) -> dict[str, Any]:
+    global side_shown_at
+    body = await request.body()
+    if not body.startswith(b"\xff\xd8") or len(body) > MAX_SIDEFRAME_BYTES:
+        raise HTTPException(413 if len(body) > MAX_SIDEFRAME_BYTES else 415)
+    async with side_cond:
+        side_frame.update(seq=side_frame["seq"] + 1, jpeg=body, ts=time.time())
+        side_cond.notify_all()
+    if time.time() - side_shown_at >= 0.5:
+        side_shown_at = time.time()
+        await broadcast([{"kind": "frame", "source": "side", "jpeg": "data:image/jpeg;base64," + base64.b64encode(body).decode()}])
+    return {"seq": side_frame["seq"]}
+
+
+@app.get("/api/sideframe")
+async def get_sideframe(after: int = 0, wait: float = 1.0) -> Response:
+    """The next phone picture after `after` (long poll up to `wait` s, at most 5); 204 when none came."""
+    async with side_cond:
+        if side_frame["seq"] <= after:
+            try:
+                await asyncio.wait_for(side_cond.wait_for(lambda: side_frame["seq"] > after), timeout=max(0.0, min(5.0, wait)))
+            except TimeoutError:
+                return Response(status_code=204)
+        return Response(content=side_frame["jpeg"], media_type="image/jpeg",
+                        headers={"X-Seq": str(side_frame["seq"]), "X-Ts": f"{side_frame['ts']:.3f}"})
 
 
 # ---------------------------------------------------------------- therapist, players, sessions, rewards

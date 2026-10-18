@@ -110,3 +110,12 @@ def test_dashboard_is_served_once_built_and_keeps_inside_its_folder(tmp_path, mo
     assert client.get("/dashboard/assets/app.js").text == "console.log(1)"
     assert client.head("/dashboard/").status_code == 200
     assert "root" in client.get("/dashboard/..%2Fsecret.txt").text           # never outside the build
+
+
+def test_phone_side_frames_are_served_one_by_one():
+    jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 64
+    assert client.post("/api/sideframe", content=b"not a jpeg", headers={"content-type": "image/jpeg"}).status_code == 415
+    assert client.post("/api/sideframe", content=jpeg, headers={"content-type": "image/jpeg"}).json() == {"seq": 1}
+    r = client.get("/api/sideframe?after=0&wait=0.1")
+    assert r.status_code == 200 and r.content == jpeg and r.headers["X-Seq"] == "1"
+    assert client.get("/api/sideframe?after=1&wait=0.1").status_code == 204

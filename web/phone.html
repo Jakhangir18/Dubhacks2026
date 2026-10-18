@@ -26,9 +26,10 @@
   </main>
   <canvas id="c" hidden></canvas>
   <script>
-    // The phone's camera, as pictures to the game server: five a second, 480 px on the long side. No video is stored.
+    // The phone's camera, as pictures to the game server: ten a second, 480 px on the long side, for the gait
+    // analysis on the server and the dashboard's picture. No video is stored.
     const $ = (id) => document.getElementById(id);
-    const FPS = 5, LONG = 480;
+    const FPS = 10, LONG = 480;
     let timer = null, busy = false, sent = 0;
     async function start() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
@@ -45,9 +46,8 @@
         const scale = LONG / Math.max(v.videoWidth, v.videoHeight);
         const c = $('c'); c.width = Math.round(v.videoWidth * scale); c.height = Math.round(v.videoHeight * scale);
         c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
-        const jpeg = c.toDataURL('image/jpeg', 0.6);
-        const r = await fetch('/api/events', { method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ events: [{ kind: 'frame', source: 'side', jpeg }] }) });
+        const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.6));
+        const r = await fetch('/api/sideframe', { method: 'POST', headers: { 'content-type': 'image/jpeg' }, body: blob });
         sent += 1;
         $('st').textContent = r.ok ? `sending · ${sent}` : `server ${r.status}`;
         $('st').classList.toggle('on', r.ok);

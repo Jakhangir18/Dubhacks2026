@@ -854,6 +854,39 @@ def session_window(rows, game, epoch0, trim_start, trim_end):
     return first + trim_start, last - trim_end, "trimmed"
 
 
+class HttpCap:
+    """A camera that pulls the phone's pictures from the game server (web/phone.html posts them to /api/sideframe):
+    the side camera with no Mac camera at all. read() waits up to a second per picture and gives up after about
+    30 s without one, so the loop that runs gait.py starts it afresh when the phone is back."""
+
+    def __init__(self, server, fps=10):
+        self.server, self.fps, self.seq, self.ok = server.rstrip("/"), fps, 0, True
+
+    def isOpened(self):
+        return self.ok
+
+    def get(self, prop):
+        return self.fps if prop == cv2.CAP_PROP_FPS else 0
+
+    def read(self):
+        for _ in range(30):
+            try:
+                req = urllib.request.Request(f"{self.server}/api/sideframe?after={self.seq}&wait=1")
+                with urllib.request.urlopen(req, timeout=6) as r:
+                    if r.status == 204:
+                        continue
+                    self.seq = int(r.headers.get("X-Seq", self.seq + 1))
+                    frame = cv2.imdecode(np.frombuffer(r.read(), dtype=np.uint8), cv2.IMREAD_COLOR)
+                    if frame is not None:
+                        return True, frame
+            except Exception:  # noqa: BLE001 - the server or the phone is away: try again
+                time.sleep(0.5)
+        return False, None
+
+    def release(self):
+        self.ok = False
+
+
 def main():
     p = argparse.ArgumentParser(description="Gait analysis demo (q to stop)")
     p.add_argument("--video", help="recorded side-view video")
@@ -866,6 +899,7 @@ def main():
     p.add_argument("--player", help="with --server: follow only this player's sessions (default: every player)")
     p.add_argument("--once", action="store_true", help="with --server: stop after the first finished session")
     p.add_argument("--no-preview", action="store_true", help="no preview window: with --server the dashboard shows the picture")
+    p.add_argument("--http-frames", metavar="URL", help="the side camera is a phone on web/phone.html: pull its pictures from this game server")
     p.add_argument("--session-id", help="with --video and --server: the game session this recording belongs to")
     p.add_argument("--offset", type=float, default=0.0,
                    help="with --session-id: video seconds at which that session started")
@@ -879,6 +913,8 @@ def main():
         cap = cv2.VideoCapture(args.video)
         if not cap.isOpened():
             raise SystemExit(f"Could not open video {args.video}")
+    elif args.http_frames:
+        cap = HttpCap(args.http_frames)
     else:
         try:
             cap = open_camera(args.camera_name, args.camera)
@@ -894,7 +930,7 @@ def main():
     if args.server and not args.video:
         follower = SessionFollower(args.server, rec, base, args.player, args.once)
         threading.Thread(target=follower.run, daemon=True).start()
-    sender = ShoeSender(args.server, source="side") if args.server and not args.video else None   # the dashboard's side view
+    sender = ShoeSender(args.server, source="side") if args.server and not args.video and not args.http_frames else None   # the dashboard's side view (a phone's pictures reach it through the server already)
     last_post = 0.0
     try:
         while not rec.stop.is_set() and rec.capturing():
