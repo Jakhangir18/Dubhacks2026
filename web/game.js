@@ -1,9 +1,9 @@
 // Zombie Walk Home: Phaser scenes, art, HUD and input. Rules live in logic.js.
 // Floor projection: things arrive at the pad's front edge; ghost feet mark the toes below.
-import { newGame, step, addEvent, addShoes, shoesLive, resetShoes, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
+import { newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
-import { connectBridge, SHOES_EVENT, FRAME_EVENT } from './bridge.js';
+import { connectBridge, SHOES_EVENT, FRAME_EVENT, MARKS_EVENT } from './bridge.js';
 import { ACTS, ENDING } from './lore.js';
 import { GardenSound } from './sound.js';
 import { WalkClip, uploadClip } from './clip.js';
@@ -145,6 +145,22 @@ window.addEventListener(SHOES_EVENT, (e) => {
   scratch.t = performance.now() / 1000;
   addShoes(scratch, mapShoes(e.detail.boxes, scratchLayout));
   if (scratch.stats.steps > before) emitFoot({ foot: scratch.strikes[scratch.strikes.length - 1].foot, kind: 'strike', source: 'feet' });
+});
+
+// A foot seen on a coloured mark: the camera judged the hit itself; the mark's place picks the lane and the thing.
+window.addEventListener(MARKS_EVENT, (e) => {
+  const play = window.zombieGame?.scene.getScene('play');
+  if (!camH || !play?.sys.isActive() || play.paused || zone.active) return;
+  const L = play.layout();
+  for (const [color, cx, cy] of e.detail.marks) {
+    const kind = color === 'cyan' ? 'flower' : color === 'magenta' ? 'seed' : null;
+    if (!kind) continue;
+    const [fx, fy] = Warp.mapPoint(camH, cx, cy);
+    if (!Number.isFinite(fx) || !Number.isFinite(fy)) continue;
+    const lane = fx < L.W / 2 ? 'L' : 'R';
+    const th = markHit(play.g, lane, kind, fieldDist(fy, L), play.lastForm ?? 1);
+    if (th) play.resolveFx(th, L);
+  }
 });
 
 // feet.py's camera picture goes on to the camera window, where the shoe calibration is clicked.
@@ -825,6 +841,7 @@ class Play extends Phaser.Scene {
       this.askCoach();
     }
 
+    this.lastForm = out.form;   // for things the camera resolves between frames
     this.drawWorld(L, out);
     this.drawThings(L, out);
     this.drawHud(L, out, dt);
@@ -851,11 +868,13 @@ class Play extends Phaser.Scene {
       let s = this.sprites.get(th.id);
       if (!s) {
         const pad = this.add.ellipse(0, 34, 300, 144).setStrokeStyle(12, C.lime, 0.6).setVisible(false);
+        // Shoe mode: a solid coloured disc under the thing once it is on the belt, for the camera (cyan flower, magenta seed).
+        const mark = this.add.ellipse(0, 20, 200, 120, th.kind === 'flower' ? 0x00e5ff : 0xff00c8, 1).setVisible(false);
         const arc = this.add.graphics({ x: 0, y: 34 }).setScale(1, 0.48);
         const plant = this.add.image(0, 0, th.kind === 'flower' ? this.flowerKey(th.id) : 'seed')
           .setScale(th.kind === 'flower' ? PLANT_SCALE : 2.0);
         // Pads travel with the exact rules position; tile decoration never snaps an obstacle's distance.
-        s = this.add.container(L.lanes[th.lane], L.top, [pad, plant, arc]).setDepth(5);
+        s = this.add.container(L.lanes[th.lane], L.top, [mark, pad, plant, arc]).setDepth(5);
         this.sprites.set(th.id, s);
         if (th.kind === 'seed') {
           sound.play('seed');
@@ -867,17 +886,18 @@ class Play extends Phaser.Scene {
       }
       const y = this.yFor(th.distCm, L);
       const near = Math.max(0, 1 - th.distCm / RULES.aheadCm);
-      const plant = s.list[1];
+      const plant = s.list[2];
       const scale = Math.min(1.15, L.W / FIELD.width);
       s.setPosition(L.lanes[th.lane], y).setScale(scale, scale * 1.25);
       s.setVisible(!th.result);
-      const pad = s.list[0];
+      const pad = s.list[1];
       // Once open, the window stays open: a pace dip must not flip the cue back or flash the lane again.
       const windowOpen = s.windowOpen || th.arriveT !== null || th.distCm <= out.speed * RULES.beforeS;
       pad.setVisible(near > 0.72 && !th.result);
+      s.list[0].setVisible(!!camH && !th.result && th.distCm < 20);   // the camera mark, on the belt only
       pad.setStrokeStyle(12, windowOpen ? C.white : C.lime, windowOpen ? 1 : 0.6);
       pad.setScale(windowOpen ? 1 : 1 + 0.06 * Math.sin(g.t * Math.PI * 6));
-      const arc = s.list[2];
+      const arc = s.list[3];
       arc.clear();
       if (windowOpen && !th.result && !shoesLive(g)) {   // the timing arc belongs to the lift rules
         const arrival = th.arriveT ?? g.t + (out.speed > 0 ? th.distCm / out.speed : 0);   // the world stops when the pace drops

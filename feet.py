@@ -92,6 +92,7 @@ class BlobDetector:
     def __init__(self, min_frac=0.002, max_frac=0.14, fill=0.45, label="blob"):   # a sock with its lit shin can be a tall column; the chevrons are under 0.1 %
         self.min_frac, self.max_frac, self.fill, self.label = min_frac, max_frac, fill, label
         self.threshold = 0
+        self.marks = []   # [colour, cx, cy, w, h] fractions: a foot lit by a projected mark, seen on the last call
         self.zone = None   # polygon of the projected zone, fractions of the frame; outside it nothing counts (console, walls)
 
     def __call__(self, frame):
@@ -99,17 +100,26 @@ class BlobDetector:
         if self.zone is None:
             return []   # without the calibrated zone the console and the walls would count as feet
         gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (7, 7), 0)
-        # pale things only: white socks and grey shoes pass, the projected green lawn and coloured flowers do not
-        sat = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)[:, :, 1]
-        gray[sat > 110] = 0
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        self.marks = []
         if self.zone is not None:
             h, w = gray.shape
             keep = np.zeros_like(gray)
             cv2.fillPoly(keep, [np.array([[int(x * w), int(y * h)] for x, y in self.zone], dtype="int32")], 255)
             gray = cv2.bitwise_and(gray, keep)
         top = float(np.percentile(gray, 99.5))          # the brightest pixels set the bar, so exposure does not matter
-        self.threshold = max(40, int(top * 0.6))
+        self.threshold = max(120, int(top * 0.6))        # the lit black belt stays below 120 even through the gamma curve
         mask = (gray >= self.threshold).astype("uint8")
+        # A foot standing on a coloured mark the game projects under a flower (cyan) or a seed (magenta) lights up in that
+        # colour: a bright, saturated blob of that hue is a hit the camera saw itself.
+        hue, sat = hsv[:, :, 0], hsv[:, :, 1]
+        for name, lo, hi in (("cyan", 85, 105), ("magenta", 140, 170)):
+            m = ((gray >= self.threshold) & (sat > 90) & (hue >= lo) & (hue <= hi)).astype("uint8")
+            m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((5, 5), "uint8"))
+            for c in cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
+                x, y, w, h = cv2.boundingRect(c)
+                if w * h >= 0.001 * frame.shape[0] * frame.shape[1]:
+                    self.marks.append([name, (x + w / 2) / frame.shape[1], (y + h / 2) / frame.shape[0], w / frame.shape[1], h / frame.shape[0]])
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), "uint8"))
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         area = frame.shape[0] * frame.shape[1]
@@ -160,6 +170,7 @@ class ShoeSender:
         self.conn = None
         self.pending = None
         self.frame = None   # the newest preview frame waits in its own slot, so a busy connection never loses it
+        self.marks = None   # the newest foot-on-mark sightings, likewise
         self.lock = threading.Condition()
         self.listeners = None
         threading.Thread(target=self._run, daemon=True).start()
@@ -177,7 +188,7 @@ class ShoeSender:
         except Exception:  # noqa: BLE001 - no calibration yet, or offline
             return None
 
-    def send(self, boxes, w, h, frame=None):
+    def send(self, boxes, w, h, frame=None, marks=None):
         event = {"kind": "shoes", "source": self.source,
                  "boxes": [[round(f.x1 / w, 4), round(f.y1 / h, 4), round(f.x2 / w, 4), round(f.y2 / h, 4), round(f.conf, 3)]
                            for f in boxes]}
@@ -193,6 +204,8 @@ class ShoeSender:
             self.pending = event
             if preview is not None:
                 self.frame = preview
+            if marks:
+                self.marks = {"kind": "marks", "source": self.source, "marks": [[m[0]] + [round(v, 4) for v in m[1:]] for m in marks]}
             self.lock.notify()
 
     def _run(self):
@@ -200,7 +213,8 @@ class ShoeSender:
             with self.lock:
                 while self.pending is None:
                     self.lock.wait()
-                events = [self.pending] + ([self.frame] if self.frame is not None else [])
+                events = [self.pending] + ([self.marks] if self.marks is not None else []) + ([self.frame] if self.frame is not None else [])
+                self.marks = None
                 body, self.pending, self.frame = json.dumps({"events": events}), None, None
             try:
                 if self.conn is None:
@@ -305,15 +319,19 @@ def main():
             last_zone_check = time.time()
             blobs.zone = sender.zone()
         feet = det(frame) if det else []
-        if blobs and not feet:
-            feet = blobs(frame)
+        marks = []
+        if blobs:
+            found = blobs(frame)   # also looks for a foot lit by a projected mark
+            marks = blobs.marks
+            if not feet:
+                feet = found
         times.append(time.perf_counter() - t0)
         if sender:
             now = time.time()
             with_frame = now - last_frame_sent > 0.5   # two pictures a second are enough to click corners on
             if with_frame:
                 last_frame_sent = now
-            sender.send(feet, frame.shape[1], frame.shape[0], frame if with_frame else None)
+            sender.send(feet, frame.shape[1], frame.shape[0], frame if with_frame else None, marks)
         for f in (det.rejected if det else []):
             cv2.rectangle(frame, (f.x1, f.y1), (f.x2, f.y2), (0, 0, 255), 1)
         for f in feet:

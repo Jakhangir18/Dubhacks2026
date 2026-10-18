@@ -89,3 +89,9 @@ def test_camera_frames_are_relayed_within_a_size_cap():
     assert clean_event({"kind": "frame", "jpeg": jpeg}) == {"kind": "frame", "jpeg": jpeg, "source": "feet"}
     assert clean_event({"kind": "frame", "jpeg": "data:image/png;base64,AAAA"}) is None
     assert clean_event({"kind": "frame", "jpeg": "data:image/jpeg;base64," + "A" * 300_000}) is None
+
+
+def test_marks_are_cleaned():
+    got = clean_event({"kind": "marks", "marks": [["cyan", 0.5, 1.4, 0.1, 0.1], ["red", 0, 0, 0, 0], "x", ["magenta", "a", 0, 0, 0]]})
+    assert got == {"kind": "marks", "marks": [["cyan", 0.5, 1.0, 0.1, 0.1]], "source": "feet"}
+    assert clean_event({"kind": "marks", "marks": "no"}) is None

@@ -42,6 +42,7 @@ export const RULES = {
   shoeGapS: 1,                   // a lane unseen this long starts its swing tracking afresh
   stanceS: 6,                    // the toe line follows where the shoes have stood over this window
   stanceMarginCm: 30,            // a thing is gone only this far behind the standing feet
+  markReachCm: 120,              // a camera-seen foot-on-mark resolves the nearest thing of that kind within this
 };
 
 export function rng(seed = 1) {
@@ -157,6 +158,17 @@ export function resetShoes(g) {
   g.stance = [];
   g.lastShoeT = null;   // shoes drive the game again only from the next sighting
   for (const lane of ['L', 'R']) g.shoeTrack[lane] = { phase: 'back', max: -Infinity, min: Infinity };
+}
+
+// The camera saw a foot on a coloured mark the game draws under a thing on the belt: cyan under flowers, magenta under
+// seeds. The nearest unresolved thing of that kind in the lane, on the belt or within reach, resolves at once.
+export function markHit(g, lane, kind, distCm, f = 1) {
+  const near = g.things.filter((th) => !th.result && th.kind === kind && th.lane === lane &&
+    Math.abs(th.distCm - distCm) <= RULES.markReachCm).sort((a, b) => Math.abs(a.distCm - distCm) - Math.abs(b.distCm - distCm))[0];
+  if (!near) return null;
+  const out = { resolved: [] };
+  resolve(g, near, kind === 'flower' ? 'hit' : 'miss', f, out);
+  return near;
 }
 
 function shoeOn(g, th) {

@@ -107,6 +107,21 @@ def clean_event(ev: Any) -> dict[str, Any] | None:
         return None
     if ev.get("kind") == "shoes":
         return clean_shoes(ev)
+    if ev.get("kind") == "marks":
+        marks = ev.get("marks")
+        if not isinstance(marks, list):
+            return None
+        out: list[Any] = []
+        for m in marks[:8]:
+            if not isinstance(m, list) or len(m) != 5 or m[0] not in {"cyan", "magenta"}:
+                continue
+            try:
+                nums = [float(v) for v in m[1:]]
+            except (TypeError, ValueError):
+                continue
+            if all(math.isfinite(v) for v in nums):
+                out.append([m[0]] + [max(0.0, min(1.0, v)) for v in nums])
+        return {"kind": "marks", "marks": out, "source": str(ev.get("source", "feet"))[:20]}
     if ev.get("kind") == "frame":
         jpeg = ev.get("jpeg")
         if not isinstance(jpeg, str) or not jpeg.startswith("data:image/jpeg;base64,") or len(jpeg) > MAX_FEED_FRAME_CHARS:

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newGame, step, addEvent, addShoes, shoesLive, resetShoes, pace, form, applyParams, summary, needCm, startAt, speedScale } from '../web/logic.js';
+import { newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, pace, form, applyParams, summary, needCm, startAt, speedScale } from '../web/logic.js';
 
 const DT = 0.05;
 
@@ -329,4 +329,17 @@ test('rounds: flowers and seeds repeat before home, and the summary counts them'
   walkUntil(g, () => { if (acts[acts.length - 1] !== g.act) acts.push(g.act); return g.act === 'home'; }, 300);
   assert.deepEqual(acts, ['walk', 'garden', 'storm', 'garden', 'storm', 'home']);
   assert.equal(summary(g).rounds, 2);
+});
+
+test('a camera-seen foot on a mark resolves the nearest thing of that kind in the lane', () => {
+  const g = toGarden();
+  walkUntil(g, () => g.things.length > 0);
+  const th = g.things[0];
+  walkUntil(g, () => th.distCm < -20);
+  assert.equal(markHit(g, th.lane === 'L' ? 'R' : 'L', 'flower', th.distCm), null);   // other lane: nothing
+  assert.equal(markHit(g, th.lane, 'seed', th.distCm), null);                       // other kind: nothing
+  assert.equal(markHit(g, th.lane, 'flower', th.distCm - 400), null);                // too far: nothing
+  assert.equal(markHit(g, th.lane, 'flower', th.distCm + 50), th);
+  assert.equal(th.result, 'hit');
+  assert.equal(g.stats.stomp[0], 1);
 });
