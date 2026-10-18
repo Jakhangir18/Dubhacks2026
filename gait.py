@@ -25,6 +25,7 @@ import csv
 import math
 import os
 import statistics
+import subprocess
 import time
 import urllib.request
 from dataclasses import dataclass
@@ -268,8 +269,13 @@ class GaitTracker:
         path = f"models/pose_landmarker_{model}.task"
         if not os.path.exists(path):
             os.makedirs(os.path.dirname(path), exist_ok=True)
+            url = MODEL_URL.format(model)
             print(f"Downloading {model} pose model (one time)...")
-            urllib.request.urlretrieve(MODEL_URL.format(model), path)
+            try:
+                urllib.request.urlretrieve(url, path)
+            except Exception:
+                # Network proxy may block urllib TLS; fall back to curl.
+                subprocess.run(["curl", "-fsSL", "-o", path, url], check=True)
         self.landmarker = vision.PoseLandmarker.create_from_options(vision.PoseLandmarkerOptions(
             base_options=mp_python.BaseOptions(model_asset_path=path), running_mode=vision.RunningMode.VIDEO))
         self.rows = []     # one dict per frame, the raw data behind summary() and save_csv()
