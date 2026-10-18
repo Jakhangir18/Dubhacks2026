@@ -18,14 +18,14 @@ Per step of each foot, in this order (full contract: `vision/CONTRACT.md`):
 
 ## Where to send
 
-- HTTP: `POST https://vps-worker.taild24189.ts.net:8443/api/events` with `{"events": [ ... ]}` (the laptop must be on the team tailnet), or the same path on a local server.
-- WebSocket (lower latency): `wss://vps-worker.taild24189.ts.net:8443/ws/events`, one event or a list per message.
+- `<server>` is the demo server address shared in the team chat (the laptop must be on the team tailnet), or a local server.
+- HTTP: `POST https://<server>/api/events` with `{"events": [ ... ]}`. Reply `{"accepted": n, "listeners": n}`: `listeners` is the number of open game windows; 0 means the game is not connected.
+- WebSocket (lower latency): `wss://<server>/ws/events`, one event or a list per message. It sends no reply; check `listeners` with one HTTP post first.
 - `vision/pi_sender.py` is a working sender to copy; `python3 vision/pi_sender.py --server <url> --demo` sends a fake walk.
-- Reply `{"accepted": n, "listeners": n}`: `listeners` is the number of open game windows. 0 means the game is not connected.
 
 ## How the game judges the events (web/logic.js, unchanged)
 
-- Act 1 (walking): the game learns each foot's **normal lift** from the `liftCm` values. Absolute accuracy matters less than consistency: a lift that is 20 % too high every time is fine.
+- Act 1 (walking): the game learns each foot's **normal lift** from the `liftCm` values. Consistency matters most, but not only: the seed rule also has an absolute floor (the therapist's lift target, 10 cm by default), so a detector that reads low will miss seeds.
 - Act 2 (flowers): a stomp counts when a `lift` of that foot reaches **normal + 4 cm** within **0.6 s before to 0.35 s after** the flower reaches the line.
 - Act 3 (seeds): a dodge counts when a `lift` reaches **normal + 7 cm** (and at least the therapist's lift target) in the same window.
 - Pace: `strike` events of **both** feet must keep the cadence at or above the therapist's minimum (80 steps per minute by default), or the world stops.
@@ -44,12 +44,12 @@ So the two things that matter most: a `lift` for every real step with a stable `
 
 - `web/vision.js` (browser, MediaPipe Pose lite): per-foot ground level, lowest foot point, shank length for cm. The owner reports it reacts too fast and misses steps on the pad; the moving belt pulling the foot back is a likely cause in a front view.
 - `gait.py` (side view, MediaPipe, full metrics): measures well but after the fact; it does not send live events yet.
-- `/camera.html` on the laptop shows every event as it arrives (from any source), the lift graph and what the game does with it: use it to test.
+- `/camera.html` on the laptop lists every lift and strike the game receives, from its own camera or from any other sender (tagged with the sender's `source`), and what the game does with each plant: use it to test. The game window must be open too.
 
 ## Done when
 
 1. `listeners` is 1 and the camera window's event list shows a `lift` and a `strike` for every step, both feet, during 30 s of normal walking on the pad, with no extra events while standing still.
-2. Normal steps give a steady `liftCm` (spread under about 3 cm); deliberate high steps give at least 6 cm more.
+2. Normal steps give a steady `liftCm` (spread under about 3 cm); deliberate high steps give at least 7 cm more, and at least 10 cm in total.
 3. `/?demo=1` played on the pad: at least 4 of 5 deliberate high steps on a flower count, and no flower counts during normal walking.
 4. Left and right are correct: lifting only the left foot lights the left lane.
 

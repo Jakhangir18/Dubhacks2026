@@ -1,6 +1,6 @@
 // Zombie Walk Home: Phaser scenes, art, HUD and input. Rules live in logic.js.
 // Floor projection: things arrive at the pad's front edge; ghost feet mark the toes below.
-import { newGame, step, addEvent, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES } from './logic.js';
+import { newGame, step, addEvent, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
 import { connectBridge } from './bridge.js';
@@ -103,7 +103,7 @@ let autoFoot = 'L';
 // [ and ]: plants slower or faster, live, remembered on this laptop.
 function nudgeSpeed(delta) {
   const play = window.zombieGame?.scene.getScene('play');
-  const now = Number(play?.g?.limits.speedScale ?? settings.limits.speedScale ?? 1);
+  const now = Number(play?.g?.limits.speedScale ?? settings.limits.speedScale ?? LIMITS.speedScale);
   const next = Math.round(Math.min(SPEED_RANGE[1], Math.max(SPEED_RANGE[0], now + delta)) * 10) / 10;
   settings.limits.speedScale = next;
   if (play?.g) play.g.limits.speedScale = next;
@@ -136,6 +136,10 @@ listen((m) => {
   cameraWasAlive = true;
 });
 setInterval(() => { cameraWasAlive = cameraWindowAlive(); }, 1000);
+
+// Every step the game receives from other sources (keyboard, Pi, a side camera over the server) is shown in the
+// camera window too, so a detector on another computer can be tested there.
+onFoot((ev) => { if (ev.source !== 'camera-window' && cameraWindowAlive()) send('foot-seen', { ev }); });
 
 listen((m) => {
   if (m.type !== 'foot' || !['L', 'R'].includes(m.foot) || !['lift', 'strike'].includes(m.kind)) return;

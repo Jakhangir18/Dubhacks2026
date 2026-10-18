@@ -264,7 +264,7 @@
       const limits = { minCadence: n('minCadence'), walkSeconds: n('walkSeconds'), gardenPlants: n('gardenPlants'),
         stormSeeds: n('stormSeeds'), liftCm: n('liftCm'), liftRange: [n('liftMin'), n('liftMax')], spacingCm: n('spacingCm'),
         spacingRange: [n('spacingMin'), n('spacingMax')], sessionMinutes: n('sessionMinutes'),
-        speedScale: $('speedScale').value === '' ? 0.7 : n('speedScale') };   // empty means the default
+        speedScale: $('speedScale').value === '' ? undefined : n('speedScale') };   // empty: the server's default
       try { localStorage.removeItem('zombiewalk.speedScale'); } catch { /* blocked */ }   // the therapist's speed wins over the operator's [ ] keys
       player = await api(`/api/player/${encodeURIComponent(player.name)}`, { method: 'PUT', body: JSON.stringify({ limits, rewards, notes: $('notes').value,
         perceptronConsent: $('perceptronConsent').checked }) });

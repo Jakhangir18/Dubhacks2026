@@ -140,11 +140,11 @@ function median(a) {
 }
 
 // Height a lift must reach on this foot for this kind of thing.
-// Plant speed as step() applies it: the limit, clamped to 0.3-2, 1 when missing.
+// Plant speed as step() applies it: the limit, clamped to 0.3-2, the default when missing.
 export const SPEED_RANGE = [0.3, 2];
 export function speedScale(g) {
   const v = Number(g.limits.speedScale);
-  return Number.isFinite(v) ? Math.min(SPEED_RANGE[1], Math.max(SPEED_RANGE[0], v)) : 1;
+  return Number.isFinite(v) ? Math.min(SPEED_RANGE[1], Math.max(SPEED_RANGE[0], v)) : LIMITS.speedScale;
 }
 
 export function needCm(g, kind, foot) {
