@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+<title>Pea spitter</title>
+<defs><linearGradient id="leaf" x2=".2" y2="1"><stop stop-color="#eaff80"/><stop offset=".5" stop-color="#8edf43"/><stop offset="1" stop-color="#2a9d67"/></linearGradient></defs>
+<g stroke="#173b32" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+<path d="M59 111Q24 122 9 104Q23 85 54 99Q77 82 109 102Q99 124 64 114" fill="url(#leaf)"/>
+<path d="M58 105Q70 76 52 65" fill="none" stroke-width="13"/>
+<path d="M55 102Q67 78 53 66" fill="none" stroke="#84de4b" stroke-width="6"/>
+<path d="M74 77Q24 90 19 50Q14 22 43 16Q70 10 84 40L112 43L109 78Z" fill="url(#leaf)"/>
+<ellipse cx="108" cy="60" rx="16" ry="23" fill="#b7f767"/>
+<ellipse cx="111" cy="61" rx="8" ry="14" fill="#174f42" stroke-width="3"/>
+<path d="M28 35Q38 22 53 25" fill="none" stroke="#f1ffbd" stroke-width="7"/>
+<ellipse cx="56" cy="45" rx="10" ry="14" fill="#fffce0" stroke-width="3"/>
+<ellipse cx="60" cy="48" rx="4" ry="7" fill="#173b32" stroke="none"/>
+<path d="M44 29L66 34M30 62Q38 70 46 65M24 105L45 108M78 107L94 104" fill="none"/>
+<path d="M31 16Q29 3 43 5L51 14" fill="#8edf43"/>
+</g></svg>

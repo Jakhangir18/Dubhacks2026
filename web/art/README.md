@@ -42,3 +42,11 @@ The game uses Phaser’s Canvas renderer: the sprite set needs no WebGL effects,
 ## Generated art (concept E, 2026-10-18)
 
 `hd/*.png` are generated with Higgsfield (style sheet on `nano_banana_pro`, sprites on `gpt_image_2_5` with transparent backgrounds) from the style reference in `docs/ART_DIRECTION.md`, then scaled to twice their game size. The game draws each one into the box of the SVG with the same name and keeps the SVG as the fallback.
+
+## Three-round story
+
+- `gus-walk-sheet.webp`: the supplied `out/game-anim/gus-walk-sheet.png`, encoded as WebP at quality 86. Original 1536×1024 layout, 6×4 cells of 256×256, 24 transparent frames at 8 fps. Canvas mirrors the left-facing source toward the house.
+- `maya-cartoon.webp`: copied from the dashboard's supplied portrait. Its opaque background is contained in a round cameo at the door.
+- `spitter.svg` and `spikeweed.svg`: original vector targets, with thick outlines and bright green/gold silhouettes. Both use the existing flower rules; the spitter's peas are decoration only.
+
+The full-window garden uses the existing HD scenery, cached into two canvases (garden and intro panorama) on load and resize. No remote assets or animation libraries are required.

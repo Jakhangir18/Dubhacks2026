@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+<title>Spike patch plant</title>
+<defs><linearGradient id="moss" x2="0" y2="1"><stop stop-color="#d4ff6a"/><stop offset="1" stop-color="#27b68c"/></linearGradient><linearGradient id="spike" x2=".5" y2="1"><stop stop-color="#fff7b0"/><stop offset="1" stop-color="#e5a746"/></linearGradient></defs>
+<g stroke="#183b35" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+<path d="M16 104L5 88L25 83L13 65L39 67L48 48L67 61L89 48L96 72L120 74L112 94L123 104Q70 128 16 104Z" fill="#43ba67"/>
+<path d="M18 94Q16 57 60 55Q102 51 112 93Q101 117 66 114Q32 115 18 94Z" fill="url(#moss)"/>
+<path d="M23 79L19 36L48 66M45 61L60 13L76 62M77 65L106 29L103 85" fill="url(#spike)"/>
+<path d="M12 98L6 68L35 89M94 99L123 64L115 104" fill="url(#spike)"/>
+<path d="M38 81Q48 76 56 84L54 94L41 94ZM74 84Q84 75 94 79L90 93L77 94Z" fill="#fffce0" stroke-width="3"/>
+<path d="M49 85V91M80 85V91M56 103Q65 97 74 103" fill="none"/>
+<path d="M37 75L55 80M75 80L95 73" fill="none"/>
+<path d="M58 48L61 30M89 61L99 45" stroke="#fffbd1" stroke-width="4"/>
+</g></svg>

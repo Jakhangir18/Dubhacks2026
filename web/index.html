@@ -13,6 +13,22 @@
 <body>
   <canvas id="ambient" aria-hidden="true"></canvas>
   <div id="stage"></div>
+  <section id="story-screen" hidden aria-label="Gus's walk home">
+    <div id="story-intro">
+      <p class="story-eyebrow">ONE NIGHT. THREE GARDEN PATCHES. ONE WAY HOME.</p>
+      <h1>ZOMBIE<br><span>WALK HOME</span></h1>
+      <p id="story-caption">Help Gus get home to Maya.</p>
+    </div>
+    <article id="story-rest" hidden>
+      <p class="story-eyebrow" id="story-round"></p>
+      <h2>Maya's coaching corner</h2>
+      <p id="story-coach" aria-live="polite"></p>
+      <p class="story-next">Next: wait for NOW! Then step onto the plant.</p>
+      <p id="story-numbers"></p>
+    </article>
+    <div id="story-ending" hidden><p class="story-eyebrow">THREE PATCHES LATER…</p><h2>Welcome home, Gus!</h2><p>You did it! — Maya</p></div>
+    <div id="story-footer"><strong id="story-prompt">Walk to start</strong><span id="story-detail">4 steps · or press Enter</span></div>
+  </section>
   <section id="garden-hud" aria-label="Walking progress">
     <div class="hud-heading"><strong id="act-title"></strong><strong id="score"></strong></div>
     <strong id="walk-prompt" hidden>KEEP WALKING</strong>

@@ -33,3 +33,27 @@ button:focus-visible { outline: 4px solid #ffda79; outline-offset: 4px; }
 #keys b { color: #b6ff86; }
 body.setting-zone #garden-hud { visibility: hidden; }
 @media (prefers-reduced-motion: reduce) { #walk-prompt { animation: none; } }
+
+/* The story lives in projector/window space. #stage retains its calibrated matrix. */
+body.story-active #garden-hud { visibility: hidden; }
+body.story-active #ambient { z-index: 2; }
+#story-screen { position: fixed; inset: 0; z-index: 3; pointer-events: none; text-shadow: 0 3px 2px #102f30; }
+#story-intro { position: absolute; top: 7%; left: 6%; max-width: 67%; }
+.story-eyebrow { color: #e4f7ad; font-size: clamp(24px, 1.7vw, 34px); font-weight: bold; letter-spacing: 3px; margin: 0 0 18px; }
+#story-intro h1 { font-size: clamp(60px, 6.2vw, 120px); line-height: .95; letter-spacing: -3px; color: #ffdf77; -webkit-text-stroke: 2px #173b32; text-shadow: 0 7px #173b32; margin: 0; }
+#story-intro h1 span { color: #c2ff8a; }
+#story-caption { font-size: clamp(28px, 2.2vw, 42px); margin: 22px 0; font-weight: bold; }
+#story-screen.intro-walking #story-intro h1 { visibility: hidden; }
+#story-screen.intro-walking #story-caption { position: absolute; top: 48px; width: 720px; max-width: 80vw; }
+#story-rest { position: absolute; top: 6%; left: 5%; width: 59%; box-sizing: border-box; padding: 28px 36px; border: 5px solid #e8d39c; border-radius: 28px; background: #0c3034f5; box-shadow: 0 12px 0 #071e29aa; }
+#story-rest h2 { font-size: clamp(32px, 2.5vw, 48px); color: #c3ff92; margin: 0 0 16px; }
+#story-coach { font-size: clamp(32px, 2.4vw, 46px); line-height: 1.2; margin: 0 0 22px; }
+#story-numbers { border-top: 2px solid #84b4a0; padding-top: 16px; color: #ffdf88; font-size: clamp(24px, 1.65vw, 32px); line-height: 1.4; margin: 0; }
+.story-next { font-size: 28px; color: #c3ff92; margin: 0 0 20px; }
+#story-ending { position: absolute; top: 8%; left: 6%; }
+#story-ending h2 { font-size: clamp(48px, 4vw, 78px); color: #ceff8c; margin: 12px 0; }
+#story-ending p:last-child { font-size: 40px; }
+#story-footer { position: absolute; bottom: 4%; left: 50%; transform: translateX(-50%); width: max-content; max-width: 90%; text-align: center; background: #0c3034f5; border: 3px solid #d0ef9b; border-radius: 22px; padding: 14px 38px; }
+#story-prompt { display: block; color: #ffe58b; font-size: clamp(32px, 2.5vw, 48px); }
+#story-detail { display: block; font-size: 26px; margin-top: 4px; }
+body.setting-zone #story-screen { display: none; }
