@@ -7,9 +7,12 @@ import { ArrowRight } from "lucide-react"
 import { PageHeader } from "@/components/page-header"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { NumberTicker } from "@/components/ui/number-ticker"
-import { formatWhen } from "@/lib/format"
+import { DemoTag } from "@/components/walk-bits"
+import { useMounted } from "@/lib/game"
+import { useGame } from "@/lib/game-data"
 import { sticker, type StickerTone } from "@/lib/sticker"
 import { useStride } from "@/lib/store"
+import { startOfWeekLocal, streakOf, weekOf, whenLabel } from "@/lib/walks"
 import { cn } from "cn"
 
 const RANGES = [
@@ -21,41 +24,51 @@ const RANGES = [
 const EASE_OUT = [0.22, 1, 0.36, 1] as const
 
 export function ProgressView() {
-  const { state, derived } = useStride()
+  const { state } = useStride()
+  const { walks, latest, demo } = useGame()
+  const mounted = useMounted()
   const [range, setRange] = useState<(typeof RANGES)[number]["id"]>("14")
   const [active, setActive] = useState<number | null>(null)
   const selected = RANGES.find((item) => item.id === range) ?? RANGES[0]
+  const now = useMemo(() => new Date(), [])
   const points = useMemo(() => {
-    const cutoff = selected.days
-      ? derived.now.getTime() - selected.days * 24 * 60 * 60 * 1000
-      : 0
-    return derived.recent
-      .filter((session) => new Date(session.playedAt).getTime() >= cutoff)
+    const cutoff = selected.days ? now.getTime() / 1000 - selected.days * 24 * 60 * 60 : 0
+    return walks
+      .filter((walk) => walk.at >= cutoff && walk.flowersPct !== null)
       .slice()
       .reverse()
-  }, [derived.now, derived.recent, selected.days])
+  }, [now, walks, selected.days])
 
-  const latest = derived.latest
-  const bestPace = Math.max(...state.sessions.map((session) => session.pace), 0)
-  const bestSymmetry = Math.max(...state.sessions.map((session) => session.symmetry), 0)
-  const goalPct = Math.min(100, Math.round((derived.weekMinutes / state.weeklyGoalMin) * 100))
+  const weekStart = startOfWeekLocal(now)
+  const week = weekOf(walks, weekStart, now)
+  const lastWeekStart = new Date(weekStart)
+  lastWeekStart.setDate(lastWeekStart.getDate() - 7)
+  const lastWeek = weekOf(walks, lastWeekStart, now)
+  const weekMinutes = week.reduce((sum, day) => sum + day.minutes, 0)
+  const lastWeekMinutes = lastWeek.reduce((sum, day) => sum + day.minutes, 0)
+  const streak = streakOf(walks, now)
+  const bestCadence = Math.max(...walks.map((walk) => walk.cadence ?? 0), 0)
+  const bestEven = Math.max(...walks.map((walk) => walk.evenPct ?? 0), 0)
+  const goalPct = Math.min(100, Math.round((weekMinutes / state.weeklyGoalMin) * 100))
 
   return (
     <div>
       <PageHeader
         eyebrow="SCORES"
         title="My progress"
-        subtitle="Walking score is pace and symmetry together. Both come from the trackpad."
+        subtitle="Flowers hit is the game's score for each walk. Cadence and evenness come from the pad; the knees from the side camera."
+        extra={demo ? <DemoTag className="mt-2" /> : null}
       />
 
       <section className="grid grid-cols-2 gap-4 sm:gap-5 xl:grid-cols-4">
         <Stat
           tone="teal"
-          label="WALKING SCORE"
+          label="FLOWERS HIT"
           labelClass="text-[#2de2c4]"
           numberClass="text-[#9cff5a]"
-          value={derived.walkingScore}
-          hint={`${derived.scoreDelta > 0 ? "+" : ""}${derived.scoreDelta}% vs the prior five`}
+          value={latest?.flowersPct ?? null}
+          unit="%"
+          hint={latest ? (mounted ? `latest walk, ${whenLabel(latest.at, now)}` : "latest walk") : "No walks yet"}
           delay={0.1}
           tilt={-1.5}
         />
@@ -64,7 +77,7 @@ export function ProgressView() {
           label="THIS WEEK"
           labelClass="text-[#c9a8ff]"
           numberClass="text-white"
-          value={derived.weekMinutes}
+          value={weekMinutes}
           unit="min"
           hint={`${state.weeklyGoalMin} minute goal`}
           delay={0.16}
@@ -75,19 +88,20 @@ export function ProgressView() {
           label="STREAK"
           labelClass="text-[#ffb21e]"
           numberClass="text-[#ffd76a]"
-          value={derived.streak}
-          unit="days"
-          hint={`Best ${state.bestStreak}`}
+          value={streak}
+          unit="nights"
+          hint={`${walks.length} ${walks.length === 1 ? "walk" : "walks"} on record`}
           delay={0.22}
           tilt={-1.5}
         />
         <Stat
           tone="lime"
-          label="LATEST SYMMETRY"
+          label="EVEN L / R"
           labelClass="text-[#9cff5a]"
           numberClass="text-[#2de2ff]"
-          value={latest ? latest.symmetry : null}
-          hint={latest ? latest.levelName : "No walks yet"}
+          value={latest?.evenPct ?? null}
+          unit="%"
+          hint={latest ? "latest walk" : "No walks yet"}
           delay={0.28}
           tilt={1.5}
         />
@@ -97,8 +111,8 @@ export function ProgressView() {
         <section className={sticker("ink", "mt-5 p-5 sm:p-6")}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="font-display text-outline text-2xl tracking-wide text-white">WALKING SCORE</h2>
-              <p className="text-sm text-white/60">Each point is a scored walk.</p>
+              <h2 className="font-display text-outline text-2xl tracking-wide text-white">FLOWERS HIT</h2>
+              <p className="text-sm text-white/60">Each point is a walk.</p>
             </div>
             <div className="flex rounded-full border-[2.5px] border-[#2c4639] bg-[#070b10] p-1" role="tablist" aria-label="Score range">
               {RANGES.map((item) => {
@@ -133,13 +147,13 @@ export function ProgressView() {
             </div>
           </div>
           {points.length === 0 ? (
-            <p className="mt-10 mb-6 text-sm text-white/60">No scored walks in this window.</p>
+            <p className="mt-10 mb-6 text-sm text-white/60">No walks in this window.</p>
           ) : (
             <ScoreChart
-              points={points.map((session) => ({
-                label: formatWhen(session.playedAt, derived.now),
-                score: session.walkingScore,
-                name: session.levelName,
+              points={points.map((walk) => ({
+                label: mounted ? whenLabel(walk.at, now) : "",
+                score: walk.flowersPct ?? 0,
+                name: walk.home ? "Gus got home" : "a short walk",
               }))}
               active={active}
               onActive={setActive}
@@ -151,23 +165,27 @@ export function ProgressView() {
       <section className="mt-5 grid gap-5 lg:grid-cols-2">
         <MetricCard
           tone="amber"
-          label="PACE"
+          label="CADENCE"
           titleClass="text-[#ffb21e]"
           numberClass="text-[#ffd76a]"
           fillClass="bg-[linear-gradient(90deg,#a8690b,#ffb21e_70%,#ffd76a)]"
-          value={latest?.pace ?? 0}
-          best={bestPace}
-          note="Cadence from the trackpad. Rushing the last third is the usual leak."
+          value={latest?.cadence ?? 0}
+          max={150}
+          unit="/min"
+          best={bestCadence}
+          note="Steps a minute on the pad. Rushing the last round is the usual leak."
           delay={0.42}
         />
         <MetricCard
           tone="teal"
-          label="SYMMETRY"
+          label="EVEN L / R"
           titleClass="text-[#2de2c4]"
           numberClass="text-[#2de2ff]"
           fillClass="bg-[linear-gradient(90deg,#17806f,#2de2c4_70%,#2de2ff)]"
-          value={latest?.symmetry ?? 0}
-          best={bestSymmetry}
+          value={latest?.evenPct ?? 0}
+          max={100}
+          unit="%"
+          best={bestEven}
           note="Left and right sharing the work. A longer step on one side shows up here."
           delay={0.48}
         />
@@ -179,7 +197,7 @@ export function ProgressView() {
             <div>
               <h2 className="font-display text-outline text-2xl tracking-wide text-white">WEEKLY MINUTES</h2>
               <p className="mt-0.5 text-sm text-white/70">
-                {derived.weekMinutes} of {state.weeklyGoalMin} minutes. Last week was {derived.lastWeekMinutes}.
+                {weekMinutes} of {state.weeklyGoalMin} minutes. Last week was {lastWeekMinutes}.
               </p>
             </div>
             <Link href="/activity" className="inline-flex items-center gap-1 text-sm font-semibold text-[#9cff5a] hover:underline">
@@ -238,7 +256,7 @@ function Stat({
         <p className={cn("text-[11px] font-bold tracking-[0.16em]", labelClass)}>{label}</p>
         <p className={cn("font-display text-outline mt-1 text-4xl leading-none tabular-nums sm:text-5xl", numberClass)}>
           {value === null ? "—" : <Count value={value} delay={delay + 0.3} />}
-          {unit ? <span className="ml-1.5 text-xl sm:text-2xl">{unit}</span> : null}
+          {unit && value !== null ? <span className="ml-1.5 text-xl sm:text-2xl">{unit}</span> : null}
         </p>
         <p className="mt-2 text-sm leading-5 text-white/65">{hint}</p>
       </motion.article>
@@ -271,6 +289,8 @@ function MetricCard({
   numberClass,
   fillClass,
   value,
+  max,
+  unit,
   best,
   note,
   delay,
@@ -281,6 +301,8 @@ function MetricCard({
   numberClass: string
   fillClass: string
   value: number
+  max: number
+  unit: string
   best: number
   note: string
   delay: number
@@ -292,10 +314,11 @@ function MetricCard({
           <h3 className={cn("font-display text-2xl tracking-wide", titleClass)}>{label}</h3>
           <p className={cn("font-display text-outline text-5xl leading-none tabular-nums", numberClass)}>
             {value || "—"}
+            {value ? <span className="ml-1 text-xl text-white/60">{unit}</span> : null}
           </p>
         </div>
-        <Meter pct={value} fillClass={fillClass} delay={delay + 0.35} className="mt-3" />
-        <p className="mt-2 text-xs font-bold tracking-[0.12em] text-white/60">BEST {best || "—"}</p>
+        <Meter pct={(value / max) * 100} fillClass={fillClass} delay={delay + 0.35} className="mt-3" />
+        <p className="mt-2 text-xs font-bold tracking-[0.12em] text-white/60">BEST {best || "—"}{best ? unit : ""}</p>
         <p className="mt-2 text-sm leading-6 text-white/70">{note}</p>
       </motion.article>
     </BlurFade>
@@ -361,7 +384,7 @@ function ScoreChart({
           viewBox={`0 0 ${width} ${height}`}
           className="block h-[260px] w-full"
           role="img"
-          aria-label="Walking scores over time"
+          aria-label="Flowers hit over time"
           onMouseLeave={() => onActive(null)}
         >
           <defs>
@@ -471,7 +494,7 @@ function ScoreChart({
               onMouseEnter={() => onActive(index)}
               onClick={() => onActive(index)}
             >
-              <title>{`${point.name}, ${point.score}`}</title>
+              <title>{`${point.name}, ${point.score}%`}</title>
             </circle>
           ))}
         </svg>
@@ -485,13 +508,13 @@ function ScoreChart({
             transition={{ type: "spring", stiffness: 520, damping: 20, delay: active === null ? 1 : 0 }}
             aria-hidden="true"
           >
-            {current.score}
+            {current.score}%
           </motion.div>
         ) : null}
       </div>
       {current ? (
         <p className="mt-3 text-sm text-white/70" aria-live="polite">
-          <span className="font-display text-lg text-[#9cff5a] tabular-nums">{current.score}</span> on {current.name} · {current.label}
+          <span className="font-display text-lg text-[#9cff5a] tabular-nums">{current.score}%</span> of the flowers, {current.name} · {current.label}
         </p>
       ) : null}
     </div>

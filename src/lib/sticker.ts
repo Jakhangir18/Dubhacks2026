@@ -1,4 +1,5 @@
 import { cn } from "cn"
+import { asset } from "@/lib/paths"
 
 export type StickerTone = "lime" | "amber" | "violet" | "teal" | "rose" | "ink"
 
@@ -21,10 +22,10 @@ export const GAME_BUTTON =
   "font-display inline-flex h-12 items-center gap-2 rounded-2xl border-[2.5px] border-[#0b1a14] bg-[#9cff5a] px-6 text-xl tracking-wide text-[#0b1a14] shadow-[0_5px_0_#3d7a19] transition hover:-translate-y-0.5 active:translate-y-1 active:shadow-[0_1px_0_#3d7a19]"
 
 export const ZOMBIE = {
-  portrait: "/zombie/portrait.webp",
-  idle: "/zombie/idle.webp",
-  walk: "/zombie/walk.webp",
-  cheer: "/zombie/cheer.webp",
+  portrait: asset("/zombie/portrait.webp"),
+  idle: asset("/zombie/idle.webp"),
+  walk: asset("/zombie/walk.webp"),
+  cheer: asset("/zombie/cheer.webp"),
 }
 
-export const MAYA_AVATAR = "/images/maya-cartoon.webp"
+export const MAYA_AVATAR = asset("/images/maya-cartoon.webp")

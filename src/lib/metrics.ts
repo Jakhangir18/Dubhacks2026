@@ -122,22 +122,22 @@ export function derive(state: AppState, now = new Date()): Derived {
     {
       id: "maya-note",
       title: "Maya left a note",
-      body: "Symmetry is up this week. She wants the same rhythm, with a little more distance.",
+      body: "Her review of your latest walk is on the overview, and she answers questions in the chat.",
       href: "/therapist",
       kind: "link",
     },
     {
-      id: `level-${state.prescribedLevelId}`,
-      title: `Level ${String(state.prescribedLevelId).padStart(2, "0")} is ready`,
-      body: `${prescribed.name} is the recovery goal on your plan. The plant walk stays the same.`,
-      href: `/play/session?level=${state.prescribedLevelId}`,
+      id: "live-walk",
+      title: "Watch yourself walk",
+      body: "Connect the phone at the side of the pad: the live walk draws your legs and shows the moments worth a look.",
+      href: "/play",
       kind: "link",
     },
     {
       id: kitReady ? "kit-ok" : "kit-attention",
-      title: kitReady ? "Movement kit connected" : "A sensor needs a check",
+      title: "Connections",
       body: kitReady
-        ? "Camera and trackpad both answered."
+        ? "See what is connected: the game server, the phone and the services behind Maya."
         : `${missing.join(" and ")} did not answer. Reconnect before a scored walk.`,
       href: "/play",
       kind: "kit",
