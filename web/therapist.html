@@ -67,6 +67,7 @@
       <label>Flower spacing, cm <input type="number" id="spacingCm" min="40" max="400"></label>
       <label>Spacing range, cm <span><input type="number" id="spacingMin"> – <input type="number" id="spacingMax"></span></label>
       <label>Session length, minutes <input type="number" id="sessionMinutes" min="3" max="60"></label>
+      <label>Plant speed, times walking speed <input type="number" id="speedScale" min="0.3" max="2" step="0.1"></label>
       <p class="hint">Wellness training game, not a medical device. Default session about 17 minutes.</p>
     </section>
 
@@ -147,7 +148,7 @@
 
     function fill(p) {
       const L = p.limits;
-      for (const k of ['minCadence', 'walkSeconds', 'gardenPlants', 'stormSeeds', 'liftCm', 'spacingCm', 'sessionMinutes']) $(k).value = L[k];
+      for (const k of ['minCadence', 'walkSeconds', 'gardenPlants', 'stormSeeds', 'liftCm', 'spacingCm', 'sessionMinutes', 'speedScale']) $(k).value = L[k];
       $('liftMin').value = L.liftRange[0]; $('liftMax').value = L.liftRange[1];
       $('spacingMin').value = L.spacingRange[0]; $('spacingMax').value = L.spacingRange[1];
       rewards = p.rewards || [];
@@ -262,7 +263,9 @@
       const n = (id) => Number($(id).value);
       const limits = { minCadence: n('minCadence'), walkSeconds: n('walkSeconds'), gardenPlants: n('gardenPlants'),
         stormSeeds: n('stormSeeds'), liftCm: n('liftCm'), liftRange: [n('liftMin'), n('liftMax')], spacingCm: n('spacingCm'),
-        spacingRange: [n('spacingMin'), n('spacingMax')], sessionMinutes: n('sessionMinutes') };
+        spacingRange: [n('spacingMin'), n('spacingMax')], sessionMinutes: n('sessionMinutes'),
+        speedScale: $('speedScale').value === '' ? 1 : n('speedScale') };
+      try { localStorage.removeItem('zombiewalk.speedScale'); } catch { /* blocked */ }   // the therapist's speed wins over the operator's [ ] keys
       player = await api(`/api/player/${encodeURIComponent(player.name)}`, { method: 'PUT', body: JSON.stringify({ limits, rewards, notes: $('notes').value,
         perceptronConsent: $('perceptronConsent').checked }) });
       fill(player);

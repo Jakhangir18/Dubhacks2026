@@ -24,6 +24,7 @@ DEFAULT_LIMITS: dict[str, Any] = {
     "spacingCm": 140,
     "spacingRange": [90, 220],
     "sessionMinutes": 17,
+    "speedScale": 1.0,   # how fast plants come, times the walking speed
 }
 
 
@@ -48,6 +49,7 @@ def clean_limits(raw: dict[str, Any]) -> dict[str, Any]:
             continue
     out["liftCm"] = min(max(out["liftCm"], out["liftRange"][0]), out["liftRange"][1])
     out["spacingCm"] = min(max(out["spacingCm"], out["spacingRange"][0]), out["spacingRange"][1])
+    out["speedScale"] = min(max(out["speedScale"], 0.3), 2.0)
     for key in ("walkSeconds", "gardenPlants", "stormSeeds", "minCadence"):
         out[key] = max(1, round(out[key]))
     return out
@@ -98,7 +100,7 @@ class Store:
         return {"name": name, "limits": clean_limits(doc.get("limits", {})), "rewards": doc.get("rewards", []),
                 "assistantId": doc.get("assistantId"), "notes": doc.get("notes", ""),
                 "perceptronConsent": bool(doc.get("perceptronConsent", False)),
-                "perceptronReports": doc.get("perceptronReports", [])}
+                "perceptronReports": doc.get("perceptronReports", []), "gait": doc.get("gait")}
 
     def update_player(self, name: str, **fields: Any) -> dict[str, Any]:
         """Set only the given fields, so two writers (the panel and the memory task) never overwrite each other."""

@@ -11,7 +11,13 @@ export class AmbientGarden {
     this.hud = $('garden-hud');
     this.title = $('act-title'); this.score = $('score'); this.coach = $('coach');
     this.progress = $('home-progress'); this.pace = $('pace'); this.prompt = $('walk-prompt');
-    this.images = ART.map(name => { const img = new Image(); img.src = `art/${name}.svg`; return img; });
+    // Generated art first (web/art/hd), the SVG if it is missing.
+    this.images = ART.map(name => {
+      const img = new Image();
+      img.onerror = () => { img.onerror = null; img.src = `art/${name}.svg`; };
+      img.src = `art/hd/${name}.png`;
+      return img;
+    });
     // x, y, size, phase, art index: allocated only once, recycled in place.
     this.decor = new Float32Array(72 * 5);
     for (let i = 0; i < 72; i++) {
@@ -103,11 +109,17 @@ export class AmbientGarden {
     this.progress.value = state.progress || 0;
     this.progress.parentElement.hidden = state.act === 'title' || state.act === 'setup';
     this.prompt.hidden = state.paceOk || state.paused || state.act === 'home' || this.zone.active;
+    this.coach.style.color = state.coachColor || '';
   }
 
   drawImage(index, x, y, w, h = w) {
     const img = this.images[index];
-    if (img.complete && img.naturalWidth) this.ctx.drawImage(img, x - w / 2, y - h / 2, w, h);
+    if (!img.complete || !img.naturalWidth) return;
+    if (index > 1 && index !== 7) {   // contain-fit everything but tiles and the fence, which join edge to edge
+      const s = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+      w = img.naturalWidth * s; h = img.naturalHeight * s;
+    }
+    this.ctx.drawImage(img, x - w / 2, y - h / 2, w, h);
   }
 
   frame(now) {
@@ -161,8 +173,8 @@ export class AmbientGarden {
       c.globalAlpha = this.ripple * .45; c.strokeStyle = '#9df5df'; c.lineWidth = 14;
       c.beginPath(); c.arc(this.centerX, this.centerY, (1 - this.ripple) * Math.max(w, h), 0, Math.PI * 2); c.stroke();
     }
-    const pulse = this.paceOk ? .75 : .55 + .35 * Math.sin(this.elapsed * 4);
-    c.strokeStyle = this.paceOk ? '#bbffc7' : '#ffcb7c';
+    const pulse = this.paceOk ? .75 : .5 + .5 * Math.sin(this.elapsed * Math.PI * 2);
+    c.strokeStyle = this.paceOk ? '#bbffc7' : '#ffb21e';
     c.globalAlpha = pulse * .12; c.lineWidth = 30; c.stroke(this.path);
     c.globalAlpha = pulse * .25; c.lineWidth = 16; c.stroke(this.path);
     c.globalAlpha = pulse; c.lineWidth = 6; c.stroke(this.path);

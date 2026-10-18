@@ -12,7 +12,7 @@ html, body { margin: 0; height: 100%; background: #081e29; overflow: hidden; col
 progress { flex: 1; min-width: 0; height: 16px; accent-color: #a3ee90; }
 #pace { color: #b8d0d1; font-size: 24px; }
 #coach { font-size: 28px; line-height: 1.2; margin-top: 6px; }
-#walk-prompt { color: #ffd485; font-size: 32px; animation: walk-glow 1.4s ease-in-out infinite alternate; }
+#walk-prompt { color: #ffb21e; font-size: 32px; animation: walk-glow 1.4s ease-in-out infinite alternate; }
 @keyframes walk-glow { to { text-shadow: 0 0 20px #ffbf57; opacity: .65; } }
 #zone-setup { position: fixed; inset: 8px; border: 4px solid #d8ffca; border-radius: 16px; pointer-events: none; z-index: 10; box-shadow: inset 0 0 18px #c9ffa355, 0 0 18px #c9ffa355; }
 #setup-copy { margin: 10px auto; width: min(1060px, calc(100% - 48px)); text-align: center; background: #071e2bf2; border-radius: 18px; padding: 10px 16px; box-sizing: border-box; }
