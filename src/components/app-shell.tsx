@@ -143,9 +143,7 @@ function TopBar() {
           </span>
           {kitReady ? "Kit ready" : "Check kit"}
         </button>
-        <div className="hidden sm:block">
-          <PageActions />
-        </div>
+        <PageActions />
         <button
           type="button"
           onClick={() => setProfileOpen(true)}

@@ -64,7 +64,7 @@ export function OverviewView() {
   return (
     <div>
       <BlurFade delay={0.05}>
-        <p className="text-[11px] font-bold tracking-[0.2em] text-[#2de2c4]">NIGHT {derived.streak + 1} · GRANDMA ROSA&apos;S GARDEN</p>
+        <p className="text-[11px] font-bold tracking-[0.2em] text-[#2de2c4]">NIGHT {derived.streak + (derived.practicedToday ? 0 : 1)} · GRANDMA ROSA&apos;S GARDEN</p>
         <h1 className="font-display mt-1 text-4xl tracking-wide sm:text-5xl">{greeting(derived.now)}, Jordan!</h1>
         <p className="mt-1 text-lg text-white/70">Tonight&apos;s chapter: help Gus shuffle home before the sun comes up.</p>
       </BlurFade>

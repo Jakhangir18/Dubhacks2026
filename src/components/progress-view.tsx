@@ -331,8 +331,10 @@ function ScoreChart({
   const padRight = 18
   const padTop = 44
   const padBottom = 30
-  const min = 60
+  const lowest = Math.min(60, ...points.map((point) => point.score))
+  const min = Math.max(0, Math.floor(lowest / 10) * 10)
   const max = 100
+  const marks = [min + Math.round((max - min) / 4), min + Math.round((max - min) / 2), min + Math.round((3 * (max - min)) / 4)]
   const toY = (score: number) => padTop + (1 - (Math.min(max, Math.max(min, score)) - min) / (max - min)) * (height - padTop - padBottom)
   const coords = points.map((point, index) => {
     const x = points.length === 1 ? width / 2 : padLeft + (index * (width - padLeft - padRight)) / (points.length - 1)
@@ -368,7 +370,7 @@ function ScoreChart({
               <stop offset="100%" stopColor="#9cff5a" stopOpacity="0" />
             </linearGradient>
           </defs>
-          {[70, 80, 90].map((mark) => {
+          {marks.map((mark) => {
             const y = toY(mark)
             return (
               <g key={mark}>
