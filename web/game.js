@@ -28,6 +28,10 @@ const txt = (size, color = C.white) => ({ ...TEXT, fontSize: `${Math.max(24, siz
 // ---------- shared state ----------
 // URL options for development and screenshots: ?scene=play&act=garden&auto=1
 const params = new URLSearchParams(location.search);
+const FIELD = Warp.FIELD;   // the portrait game field, 720 x 1280; the zone warp fits it to the floor
+// ?floor=1: the whole field lies on a white board in front of the pad (black belt, lit venue), so the hit line
+// sits near the board's rear edge by the pad and nothing is dimmed as "belt".
+const BOARD = params.get('floor') === '1';
 const settings = {
   voice: Warp.store.get('zombiewalk.voiceOn', false),   // spoken lines are off until the team picks a voice (M)
   limits: {},                                       // the current player's limits from the server (therapist panel)
@@ -206,7 +210,6 @@ connectBridge((status) => { document.getElementById('bridge').textContent = stat
 
 // ---------- projector corner warp ----------
 // Portrait like the pad, and a 9:16 walk clip. The one place the field size is set: Warp reads it from #stage.
-const FIELD = Warp.FIELD;
 Object.assign(document.getElementById('stage').style, { width: `${FIELD.width}px`, height: `${FIELD.height}px` });
 const zone = new WalkingZone();
 new AmbientGarden(zone);
@@ -374,9 +377,6 @@ function makeTextures(scene) {
   }
 }
 
-// ?floor=1: the whole field lies on a white board in front of the pad (black belt, lit venue), so the hit line
-// sits near the board's rear edge by the pad and nothing is dimmed as "belt".
-const BOARD = params.get('floor') === '1';
 function floorLayout(W, H) {
   const zoneY = H * (BOARD ? 0.86 : 0.54), top = H * 0.085;
   return { W, H, zoneY, top, rowH: (zoneY - top) / 6,
