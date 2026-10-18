@@ -153,4 +153,4 @@ def test_gait_rules():
 def test_plant_speed_is_kept_between_its_bounds():
     assert clean_limits({"speedScale": 7})["speedScale"] == 2.0
     assert clean_limits({"speedScale": 0})["speedScale"] == 0.3
-    assert clean_limits({})["speedScale"] == 1.0
+    assert clean_limits({})["speedScale"] == 0.7

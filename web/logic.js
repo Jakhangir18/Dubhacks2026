@@ -14,7 +14,7 @@ export const LIMITS = {          // set by the therapist (Therapist panel); the 
   liftRange: [6, 18],            // the coach may move liftCm only inside this range
   spacingCm: 140,                // distance between plants
   spacingRange: [90, 220],
-  speedScale: 1,                 // how fast plants come, times the walking speed (0.3 to 2)
+  speedScale: 0.7,               // how fast plants come, times the walking speed (0.3 to 2); 1 felt too fast on the pad
 };
 
 export const RULES = {
