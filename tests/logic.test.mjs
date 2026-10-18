@@ -218,7 +218,8 @@ test('shoe swings on the belt count as steps and keep the pace gate open', () =>
   const g = newGame({ walkSeconds: 2 }, 1);
   shoeWalk(g, 6, 0.6);                    // 100 steps per minute, alternating feet
   assert.equal(g.shoeMode, true);
-  assert.ok(g.stats.steps >= 8, `steps ${g.stats.steps}`);
+  assert.ok(g.stats.steps >= 8 && g.stats.steps <= 12, `steps ${g.stats.steps}`);   // one per swing, no jitter steps
+  assert.ok(g.base.L > 10 && g.base.L < 20, `normal swing ${g.base.L}`);        // act 1 learned the normal swing
   assert.equal(pace(g).ok, true);
   assert.equal(g.act, 'garden');          // act 1 filled with no lift events at all
 });
@@ -245,21 +246,33 @@ test('a shoe on a flower smashes it at once; a flower that passes the toes is mi
   assert.ok(next.distCm < -g.toeCm);
 });
 
-test('a seed under a shoe splats; a seed in a clear lane is dodged once it passes the toes', () => {
+test('a seed under a shoe splats, unless a big step came just before; a clear lane dodges at the toes', () => {
   const g = toGarden();
   startAt(g, 'storm');
+  g.base = { L: 16, R: 16 };   // act 1 would have learned the normal swing (120 world cm = 16)
   walkUntil(g, () => g.things.length > 0);
   const seed = g.things[0];
   walkUntil(g, () => seed.distCm < -20);
-  addShoes(g, [{ xFrac: seed.lane === 'L' ? 0.3 : 0.7, nearCm: seed.distCm + 10, farCm: seed.distCm - 10 }]);
+  const x = seed.lane === 'L' ? 0.3 : 0.7;
+  // a normal step first (swing 120 world cm = 16 'cm'), then the foot lands on the seed: splat
+  for (const d of [-500, -440, -380, -500, -500]) { addShoes(g, [{ xFrac: x, nearCm: d + 30, farCm: d }]); step(g, DT); }
+  addShoes(g, [{ xFrac: x, nearCm: seed.distCm + 10, farCm: seed.distCm - 10 }]);
   step(g, DT);
   assert.equal(seed.result, 'miss');
-  walkUntil(g, () => g.things.some((x) => x !== seed && !x.result));
-  const clear = g.things.find((x) => x !== seed && !x.result);
+  // the next seed in the same lane: a big step (swing 240 world cm = 32 'cm') right before the foot reaches it: dodged
+  walkUntil(g, () => g.things.some((t) => t !== seed && !t.result && t.lane === seed.lane && t.distCm < -20), 120);
+  const next = g.things.find((t) => t !== seed && !t.result && t.lane === seed.lane);
+  resetShoes(g);
+  for (const d of [-500, -380, -260, -500, -500]) { addShoes(g, [{ xFrac: x, nearCm: d + 30, farCm: d }]); step(g, DT); }
+  addShoes(g, [{ xFrac: x, nearCm: next.distCm + 10, farCm: next.distCm - 10 }]);
+  step(g, DT);
+  assert.equal(next.result, 'hit');
+  walkUntil(g, () => g.things.some((t) => !t.result && t !== seed && t !== next), 120);
+  const clear = g.things.find((t) => !t.result && t !== seed && t !== next);
   // a shoe keeps showing in the other lane and never touches it
-  walkUntil(g, () => { addShoes(g, [{ xFrac: clear.lane === 'L' ? 0.7 : 0.3, nearCm: -40, farCm: -70 }]); return clear.result !== null; }, 90);
+  walkUntil(g, () => { addShoes(g, [{ xFrac: clear.lane === 'L' ? 0.7 : 0.3, nearCm: -40, farCm: -70 }]); return clear.result !== null; }, 120);
   assert.equal(clear.result, 'hit');
-  assert.equal(g.stats.dodge[0], 1);
+  assert.ok(g.stats.dodge[0] >= 2, `dodges ${g.stats.dodge[0]}`);   // plus any seed that passed the toes in the other lane
 });
 
 test('a stale shoe sighting no longer smashes anything', () => {

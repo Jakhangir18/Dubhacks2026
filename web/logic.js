@@ -36,7 +36,10 @@ export const RULES = {
   // that passes the toes resolves the other way. Distances are world cm on the field.
   shoeReachCm: 20,               // margin around the shoe's span when matching a thing
   shoeFreshS: 0.3,               // a shoe sighting older than this is gone
-  shoeSwingCm: 20,               // a shoe must travel this far forward, then back, to count as one step
+  shoeSwingCm: 40,               // a shoe must travel this far forward, then back, to count as one step (box jitter is under 20)
+  shoeStepMinS: 0.3,             // one landing per foot at most this often
+  swingCmPerLiftCm: 7.5,         // world cm of forward swing on the belt per cm of 'lift': a long or high step swings far
+  shoeDodgeS: 1.0,               // a big swing this recently, as the seed reaches the foot, is the dodge
   toeCm: 300,                    // how far past the hit line the toes are; the game sets it from its layout
   shoeHoldS: 3,                  // shoes drive the game this long after the last sighting, then the lift rules return
   shoeGapS: 1,                   // a lane unseen this long starts its swing tracking afresh
@@ -77,7 +80,7 @@ export function newGame(limits = {}, seed = 1) {
     shoeMidX: null,                // the midpoint between the two shoes when both were last seen: the lane divider for one shoe
     shoes: [],                     // latest sightings {lane, xFrac, nearCm, farCm, t}
     stance: [],                    // recent {t, nearCm} of every sighting: where the feet really stand
-    shoeTrack: { L: { phase: 'back', max: -Infinity, min: Infinity }, R: { phase: 'back', max: -Infinity, min: Infinity } },
+    shoeTrack: { L: { phase: 'back', max: -Infinity, min: Infinity, lastStrikeT: -Infinity }, R: { phase: 'back', max: -Infinity, min: Infinity, lastStrikeT: -Infinity } },
     toeCm: RULES.toeCm,
     log: [],                     // resolved things for the report and the UI
     actResolved: 0,              // things resolved in the current act (progress bar)
@@ -139,8 +142,15 @@ export function addShoes(g, shoes, t = g.t) {
     } else {
       tr.max = Math.max(tr.max, d);
       if (d < tr.max - RULES.shoeSwingCm) {   // the foot stopped going forward: it landed and the belt takes it back
-        tr.phase = 'back'; tr.min = d;
-        addEvent(g, { foot: s.lane, kind: 'strike', t });
+        tr.phase = 'back';
+        const swing = tr.max - tr.min;   // how far the foot travelled forward: a long or high step swings further
+        tr.min = d;
+        if (t - tr.lastStrikeT >= RULES.shoeStepMinS) {
+          tr.lastStrikeT = t;
+          // The swing stands in for the lift height, so act 1 learns a normal step and a seed asks for a bigger one.
+          addEvent(g, { foot: s.lane, kind: 'lift', liftCm: Math.round((swing / RULES.swingCmPerLiftCm) * 10) / 10, t });
+          addEvent(g, { foot: s.lane, kind: 'strike', t });
+        }
       }
     }
   }
@@ -157,7 +167,7 @@ export function resetShoes(g) {
   g.shoes = [];
   g.stance = [];
   g.lastShoeT = null;   // shoes drive the game again only from the next sighting
-  for (const lane of ['L', 'R']) g.shoeTrack[lane] = { phase: 'back', max: -Infinity, min: Infinity };
+  for (const lane of ['L', 'R']) g.shoeTrack[lane] = { phase: 'back', max: -Infinity, min: Infinity, lastStrikeT: -Infinity };
 }
 
 // The camera saw a foot on a coloured mark the game draws under a thing on the belt: cyan under flowers, magenta under
@@ -167,8 +177,14 @@ export function markHit(g, lane, kind, distCm, f = 1) {
     Math.abs(th.distCm - distCm) <= RULES.markReachCm).sort((a, b) => Math.abs(a.distCm - distCm) - Math.abs(b.distCm - distCm))[0];
   if (!near) return null;
   const out = { resolved: [] };
-  resolve(g, near, kind === 'flower' ? 'hit' : 'miss', f, out);
+  resolve(g, near, kind === 'flower' || bigSwing(g, lane) ? 'hit' : 'miss', f, out);
   return near;
+}
+
+// A seed reaching the foot is dodged only by a big step just before: a swing above the seed's lift target.
+function bigSwing(g, lane) {
+  const need = needCm(g, 'seed', lane);
+  return !!takeEvent(g, (e) => e.kind === 'lift' && e.foot === lane && e.liftCm >= need && g.t - e.t <= RULES.shoeDodgeS);
 }
 
 function shoeOn(g, th) {
@@ -281,7 +297,7 @@ export function step(g, dt) {
     if (th.arriveT === null && th.distCm <= 0) th.arriveT = g.t;
     if (shoesLive(g)) {
       // A shoe on a flower smashes it; a shoe on a seed is a splat. Past the toes: the flower got away, the seed was dodged.
-      if (shoeOn(g, th)) resolve(g, th, th.kind === 'flower' ? 'hit' : 'miss', f, out);
+      if (shoeOn(g, th)) resolve(g, th, th.kind === 'flower' || bigSwing(g, th.lane) ? 'hit' : 'miss', f, out);
       else if (th.distCm < -g.toeCm) resolve(g, th, th.kind === 'flower' ? 'miss' : 'hit', f, out);
     } else if (th.arriveT !== null && g.t - th.arriveT > RULES.afterS) {
       if (judge(g, th)) resolve(g, th, 'hit', f, out);
