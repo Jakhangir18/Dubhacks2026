@@ -10,6 +10,7 @@ import { WalkClip, uploadClip } from './clip.js';
 import { WalkingZone } from './zone.js';
 import { AmbientGarden } from './ambient.js';
 import { Perceiver } from './perceive.js';
+import { send, listen, cameraWindowAlive, RemotePerceiver } from './link.js';
 
 const Phaser = window.Phaser;
 const Warp = window.Warp;
@@ -117,8 +118,29 @@ function toggleAutoWalk() {
 
 // ---------- camera and Raspberry Pi inputs ----------
 const cameraPanel = mountCameraPanel();          // V: phone or webcam, live lift values
-const perceiver = new Perceiver(cameraPanel.tracker);   // Perceptron second opinion on the same camera
-if (params.has('scene')) window.zombiewalk = { perceiver, tracker: cameraPanel.tracker };   // development and end-to-end tests
+// Perceptron second opinion: on this window's camera (V), or in the camera window (camera.html) when it is open.
+const localPerceiver = new Perceiver(cameraPanel.tracker);
+const remotePerceiver = new RemotePerceiver();
+let perceiver = localPerceiver;
+if (params.has('scene')) window.zombiewalk = { perceiver: localPerceiver, tracker: cameraPanel.tracker };   // development and end-to-end tests
+
+// Foot events from the camera window on the laptop screen; the game stamps them on arrival like any source.
+// While the camera window runs, this window's own camera (V) would count every step twice: ignore it.
+const doubleCamera = (ev) => ev.source === 'camera' && cameraWindowAlive();
+
+// When the camera window appears, give it the current banner at once instead of at the next update.
+let cameraWasAlive = false;
+listen((m) => {
+  if (m.type !== 'camera-alive') return;
+  if (!cameraWasAlive) send('game', { state: { ...gardenState } });
+  cameraWasAlive = true;
+});
+setInterval(() => { cameraWasAlive = cameraWindowAlive(); }, 1000);
+
+listen((m) => {
+  if (m.type !== 'foot' || !['L', 'R'].includes(m.foot) || !['lift', 'strike'].includes(m.kind)) return;
+  emitFoot({ foot: m.foot, kind: m.kind, liftCm: Number.isFinite(m.liftCm) ? m.liftCm : undefined, source: 'camera-window' });
+});
 connectBridge((status) => { document.getElementById('bridge').textContent = status; });   // Pi events via the server
 
 // ---------- projector corner warp ----------
@@ -131,7 +153,11 @@ new AmbientGarden(zone);
 const gardenState = { cadence: 0, act: 'title', paceOk: true, paused: false,
   title: '', score: '', coach: '', pace: '', progress: 0 };
 const gardenEvent = new CustomEvent('zombiewalk:pace', { detail: gardenState });
-function publishGarden(values) { Object.assign(gardenState, values); window.dispatchEvent(gardenEvent); }
+function publishGarden(values) {
+  Object.assign(gardenState, values);
+  window.dispatchEvent(gardenEvent);
+  if (cameraWindowAlive()) send('game', { state: { ...gardenState } });   // the laptop screen shows the same banner
+}
 function reaction(value) { window.dispatchEvent(new CustomEvent('zombiewalk:reaction', { detail: value })); }
 // A resize while zone setup has the scene paused (F for fullscreen) must not bring it back on top of the preview.
 function restartWhenShown(scene, data) {
@@ -185,6 +211,7 @@ window.addEventListener('keydown', (e) => {
     n: () => sound.toggle(),
     k: () => { const el = document.getElementById('keys'); el.hidden = !el.hidden; },
     v: () => cameraPanel.toggle(),
+    o: () => window.open('camera.html', 'zombiewalk-camera'),   // the camera window for the laptop screen
     '[': () => nudgeSpeed(-0.1), ']': () => nudgeSpeed(0.1),
   };
   if (zone.active && ['a', 'd', 'q', 'e', 'w', 'c', 'z'].includes(k)) return;
@@ -470,6 +497,7 @@ class Title extends Phaser.Scene {
     this.tweens.add({ targets: z, y: z.y - 10, angle: 3, duration: 650, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
     const steps = [];
     this.off = onFoot((ev) => {
+      if (doubleCamera(ev)) return;
       if (ev.kind !== 'strike') return;
       steps.push(performance.now());
       while (steps.length && performance.now() - steps[0] > 3000) steps.shift();
@@ -498,6 +526,7 @@ class Play extends Phaser.Scene {
     this.paused = false;
     this.highSound = { L: false, R: false };
     this.g = newGame(settings.limits, Date.now() % 100000);
+    perceiver = cameraWindowAlive() ? remotePerceiver : localPerceiver;
     perceiver.reset(settings.perceptron, settings.player, () => this.paused || this.sys.isPaused());
     this.events.once('shutdown', () => perceiver.stop());   // no frames leave on the Home or Title screens
     this.sprites = new Map();
@@ -528,6 +557,7 @@ class Play extends Phaser.Scene {
     };
 
     this.off = onFoot((ev) => {
+      if (doubleCamera(ev)) return;
       if (this.paused || zone.active) return;                          // the world is frozen; steps do not count
       // Stamp with the game clock, interpolated to the moment the event arrived between two frames,
       // so a slow frame rate does not bunch steps together.
@@ -606,6 +636,7 @@ class Play extends Phaser.Scene {
 
   resolveFx(th, L) {
     perceiver.checkStep(th);
+    send('resolved', { th: { kind: th.kind, lane: th.lane, result: th.result } });
     sound.play(th.result !== 'hit' ? 'miss' : th.kind === 'flower' ? 'stomp' : 'dodge');
     if (th.result === 'hit') reaction(th.kind === 'flower' ? 'stomp' : 'dodge');
     const x = L.lanes[th.lane];
@@ -992,4 +1023,16 @@ window.zombieGame = new Phaser.Game({
   // Size the source canvas explicitly; Warp alone maps it to the walking zone.
   scale: { mode: Phaser.Scale.NONE, ...FIELD },
   scene: [Preload, Boot, ZonePreview, Title, Play, Home],
+});
+
+// A small copy of the projected picture for the camera window, a few times a second, only while it is open.
+const mirror = document.createElement('canvas');
+mirror.width = 180; mirror.height = 320;
+let lastMirror = 0;
+window.zombieGame.events.on('postrender', () => {
+  const now = performance.now();
+  if (now - lastMirror < 500 || !cameraWindowAlive()) return;
+  lastMirror = now;
+  mirror.getContext('2d').drawImage(window.zombieGame.canvas, 0, 0, mirror.width, mirror.height);
+  send('mirror', { url: mirror.toDataURL('image/jpeg', 0.6) });
 });
