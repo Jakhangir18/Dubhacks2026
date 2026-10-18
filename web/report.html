@@ -28,6 +28,12 @@
     .chip.low { border-color: var(--line); color: var(--dim); }
     .tag { font-size: 12px; color: var(--dim); }
     .big { font-size: 17px; }
+    .pp { display: grid; grid-template-columns: 340px 1fr; gap: 18px; align-items: start; }
+    .pp-frame { position: relative; width: 320px; height: 240px; border-radius: 8px; overflow: hidden; background: #000; }
+    .pp-frame img { width: 320px; height: 240px; display: block; }
+    .pp-dot { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; border: 2px solid #fff; }
+    .pp-score { font-size: 30px; font-weight: 700; color: var(--green); }
+    @media (max-width: 700px) { .pp { grid-template-columns: 1fr; } }
     #status { color: var(--cyan); }
     footer { padding: 8px 24px 24px; color: var(--dim); font-size: 13px; }
     @media print {
@@ -54,6 +60,7 @@
     <section id="notes" class="wide"></section>
     <section id="metrics" class="wide"></section>
     <section id="game" class="wide"></section>
+    <section id="perceptron" class="wide"></section>
   </main>
   <footer>Wellness observations, not a medical assessment.</footer>
   <script>
@@ -190,6 +197,55 @@
       $('meta').after(a);
     }).catch(() => {});
 
+    // Perceptron's second look: how often it agreed with the game on each flower, and its report on the walk (the
+    // moments it marked, a key frame with what it pointed at, its notes). Independent of the gait review.
+    function drawPerceptron(row) {
+      const agree = row.summary?.perceptron;
+      const look = row.perceptron;
+      if (!agree && !look) { fillSection('perceptron', '', []); return; }
+      const overhead = (look?.view || agree?.view) === 'overhead';
+      const things = overhead ? 'flowers' : 'steps';
+      const nodes = [];
+      const left = el('div');
+      if (look?.keyFrame) {
+        const frame = el('div', null, 'pp-frame');
+        const img = el('img'); img.src = look.keyFrame; img.alt = 'the key frame Perceptron looked at'; frame.append(img);
+        for (const p of look.points || []) {
+          const dot = el('span', null, 'pp-dot');
+          dot.style.left = `${p.point.x / 10}%`; dot.style.top = `${p.point.y / 10}%`;
+          dot.style.background = /flower/.test(p.mention) ? 'var(--yellow)' : 'var(--cyan)';
+          dot.title = p.mention;
+          frame.append(dot);
+        }
+        left.append(frame, el('div', (look.points || []).length ? 'Yellow: flowers · blue: shoes and feet it pointed at' : 'Key frame of the walk', 'hint'));
+      }
+      const right = el('div');
+      if (agree?.checked) {
+        right.append(el('div', `${agree.agree} / ${agree.checked}`, 'pp-score'));
+        right.append(el('p', `Perceptron agreed with the game on ${agree.agree} of ${agree.checked} ${things}` +
+          `${agree.agreePct != null ? ` (${agree.agreePct}%)` : ''}. Moments it could not see clearly are not counted.`));
+      } else if (agree) {
+        right.append(el('p', 'Perceptron was on for this walk but could not judge any step clearly.', 'hint'));
+      }
+      if (agree?.form) {
+        const f = agree.form;
+        right.append(para(overhead ? 'Feet on the belt · steady steps · holding a rail' : 'On the pad · steady steps · holding a rail',
+          `${f.onPad} · ${f.steady} · ${f.holdingRail}`));
+      }
+      if (look?.caption) right.append(el('p', `“${look.caption}”`, 'big'));
+      if (look?.clips?.length) {
+        right.append(el('h3', `Moments it marked (${look.clips.length})`));
+        const box = el('div');
+        for (const c of look.clips) box.append(el('span', `${c.mention} · ${c.t0.toFixed(1)}${c.t1 !== c.t0 ? `–${c.t1.toFixed(1)}` : ''} s`, 'chip'));
+        right.append(box);
+      }
+      right.append(...[para('Note', look?.gaitNote), para('Safety', look?.safety)].filter(Boolean));
+      const grid = el('div', null, 'pp');
+      grid.append(left, right);
+      nodes.push(grid, el('p', `Perceptron Mk1.5 · ${overhead ? 'the camera above the belt (shoes and flowers, no faces)' : 'the game camera, knees down'} · sent only with the family's consent`, 'hint'));
+      fillSection('perceptron', 'Perceptron second look', nodes);
+    }
+
     let timer = null;
     async function load() {
       clearTimeout(timer);
@@ -209,6 +265,7 @@
       $('meta').textContent = [row.player, row.ts && new Date(row.ts * 1000).toLocaleString(), s.shoeMode ? 'walking pad, shoe camera' : null]
         .filter(Boolean).join(' · ');
       drawGame(s);
+      drawPerceptron(row);
       const g = row.gaitReview;
       if (!g) { $('status').textContent = 'No side camera recorded this walk, so there is no gait review; the game results are below.'; return; }
       if (g.status === 'waiting' || g.status === 'reviewing') {

@@ -295,7 +295,7 @@ def test_session_subcall_failure_keeps_other_results(monkeypatch):
             "source": "perceptron", "clips": [{"mention": "left high step", "t0": 3.2, "t1": 3.2}],
             "tracks": None, "points": [{"mention": "foot", "point": {"x": 500, "y": 500}}],
             "keyFrame": JPEG + "middle", "caption": "A happy walk!", "gaitNote": "Even cadence. High steps are visible.",
-            "safety": "Rail not visible.", "usage": {"requests": 4},
+            "safety": "Rail not visible.", "usage": {"requests": 4}, "view": "legs",
         }
     assert peak == 4
     assert len(posts) == len(perceive._calls) == 24
@@ -313,3 +313,54 @@ def test_collection_mention_reaches_its_children():
     assert [(c["mention"], c["t0"], c["t1"]) for c in perceive.parse_clips(content)] == [
         ("left high step", 0.0, 1.5), ("left high step", 3.0, 3.0)]
     assert perceive.parse_tracks(content) == {"left foot": [{"t": 0.0, "box": [10.0, 20.0, 30.0, 40.0]}]}
+
+
+# ---------------------------------------------------------------- the overhead view (feet.py's camera above the belt)
+def test_overhead_questions_describe_a_top_down_view_without_trusting_left_and_right():
+    q = perceive.step_question("L", "flower", "overhead")
+    assert "top-down" in q and "rotated or mirrored" in q and "covers, the glowing flower" in q
+    assert perceive.step_question("R", "seed", "overhead").count("seed ball") == 1
+    assert "lower legs" in perceive.step_question("L", "flower")          # the camera view keeps its own wording
+    assert "unclear" in perceive.FORM_QUESTION_OVERHEAD
+
+
+def test_the_view_reaches_the_check(monkeypatch):
+    client.put("/api/player/Mia", json={"perceptronConsent": True})
+    seen = {}
+
+    async def fake_step(frames, foot, kind, view="legs"):
+        seen.update(foot=foot, kind=kind, view=view, n=len(frames))
+        return {"verdict": "yes", "source": "perceptron"}
+    monkeypatch.setattr(perceive, "check_step", fake_step)
+    client.post("/api/perceive", json={"player": "Mia", "kind": "step", "foot": "L", "thing": "flower", "frames": frames(), "view": "overhead"})
+    assert seen == {"foot": "L", "kind": "flower", "view": "overhead", "n": 3}
+    client.post("/api/perceive", json={"player": "Mia", "kind": "step", "foot": "L", "thing": "flower", "frames": frames(), "view": "drone"})
+    assert seen["view"] == "legs"                                           # anything else is the camera view
+
+
+async def test_overhead_walk_report_asks_about_stomps(monkeypatch):
+    monkeypatch.setenv("PERCEPTRON_API_KEY", "k")
+    bodies = []
+
+    async def fake(url, body, usage):
+        bodies.append((url, body))
+    monkeypatch.setattr(perceive, "ask_session", fake)
+    await perceive.session_report(perceive.clean_frames(frames(4), cap=32), "overhead")
+    text = json.dumps(bodies)
+    assert "flower stomp" in text and '"shoe"' in text and "top-down" in text and "high step" not in text
+
+
+def test_the_walk_report_is_kept_with_its_session(monkeypatch):
+    client.put("/api/player/Mia", json={"perceptronConsent": True})
+    sid = client.post("/api/session", json={"player": "Mia", "summary": {"seconds": 60, "act": "home", "steps": 90}}).json()["id"]
+
+    async def fake(frames, view="legs"):
+        return {"source": "perceptron", "view": view, "clips": [{"mention": "flower stomp", "t0": 3.0, "t1": 3.4}],
+                "tracks": {"left foot": []}, "points": [], "keyFrame": JPEG, "caption": "Stomp!", "gaitNote": "Even.", "safety": "Steady."}
+    monkeypatch.setattr(perceive, "session_report", fake)
+    out = client.post("/api/perceive/session", json={"player": "Mia", "frames": frames(4), "view": "overhead", "sessionId": sid}).json()
+    assert out["caption"] == "Stomp!"
+    look = client.get(f"/api/session/{sid}").json()["perceptron"]
+    assert look["view"] == "overhead" and look["caption"] == "Stomp!" and look["clips"][0]["mention"] == "flower stomp"
+    assert "tracks" not in look                                            # the walk's copy stays light
+    assert client.get("/api/player/Mia?reports=1").json()["perceptronReports"][0]["caption"] == "Stomp!"

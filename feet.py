@@ -173,7 +173,23 @@ class ShoeSender:
         self.marks = None   # the newest foot-on-mark sightings, likewise
         self.lock = threading.Condition()
         self.listeners = None
+        self.playing = False   # a game is running (the server has an active session): pictures go out faster
+        threading.Thread(target=self._watch_game, daemon=True).start()
         threading.Thread(target=self._run, daemon=True).start()
+
+    def _watch_game(self):
+        """Every 3 s: is a game running? During one the preview goes out 4 times a second, so Perceptron's step check
+        has several pictures of each step; otherwise twice a second is plenty for clicking calibration corners."""
+        while True:
+            try:
+                cls = http.client.HTTPSConnection if self.https else http.client.HTTPConnection
+                conn = cls(self.host, self.port, timeout=3)
+                conn.request("GET", "/api/session/active")
+                self.playing = bool(json.loads(conn.getresponse().read()).get("id"))
+                conn.close()
+            except Exception:  # noqa: BLE001 - server down or older: keep the slow rate
+                self.playing = False
+            time.sleep(3)
 
     def zone(self):
         """The belt part of the calibrated field (below the hit line) as camera fractions, or None.
@@ -337,7 +353,7 @@ def main():
         times.append(time.perf_counter() - t0)
         if sender:
             now = time.time()
-            with_frame = now - last_frame_sent > 0.5   # two pictures a second are enough to click corners on
+            with_frame = now - last_frame_sent > (0.25 if sender.playing else 0.5)   # 4/s in a game (Perceptron), else 2/s for the corners
             if with_frame:
                 last_frame_sent = now
             sender.send(feet, frame.shape[1], frame.shape[0], frame if with_frame else None, marks)

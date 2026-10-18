@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 import os
 import re
@@ -157,14 +158,33 @@ async def coach(inp: CoachIn) -> dict[str, Any]:
     player = await run_in_threadpool(store.player, inp.player)
     gait = player.get("gait") or {}
     live = gait_review.live_view(gait.get("summary")) if time.time() - float(gait.get("ts") or 0) < LIVE_GAIT_S else None
-    return await therapist.coach(inp.summary, player["limits"], live, share_side=player.get("aiReviewConsent", False))
+    return await therapist.coach(inp.summary, player["limits"], live, share_side=player.get("aiReviewConsent", False),
+                                 memory=player.get("memoryNote"))
 
 
 @router.get("/plan/{name}")
 async def plan(name: str) -> dict[str, Any]:
     player = await run_in_threadpool(store.player, name)
     recent = await run_in_threadpool(store.sessions, name, 5)
-    return await therapist.plan(player, recent)
+    out = await therapist.plan(player, recent)
+    if out.get("memory"):   # what Backboard said at the start of the walk: the coach's cues and the dashboard read it
+        await run_in_threadpool(store.update_player, name, memoryNote=out["memory"][:600], memoryTs=time.time())
+    return out
+
+
+@router.get("/memory/{name}")
+async def memory(name: str, refresh: bool = False) -> dict[str, Any]:
+    """What Maya remembers about the player (Backboard): the note saved at the last walk's start, or a fresh recall."""
+    player = await run_in_threadpool(store.player, name)
+    if refresh or not player.get("memoryNote"):
+        text = await therapist.recall(player)
+        if text:
+            await run_in_threadpool(store.update_player, name, memoryNote=text[:600], memoryTs=time.time())
+            return {"text": text[:600], "source": "backboard", "ts": time.time(), "fresh": True}
+    if player.get("memoryNote"):
+        return {"text": player["memoryNote"], "source": "backboard", "ts": player.get("memoryTs"), "fresh": False}
+    reason = "no BACKBOARD_API_KEY" if not os.environ.get("BACKBOARD_API_KEY") else "no memory yet: Maya remembers after the first walk"
+    return {"text": None, "source": "none", "reason": reason}
 
 
 # ---------------------------------------------------------------- session end: save, remember, report, reward
@@ -227,7 +247,7 @@ async def session(inp: SessionIn, background: BackgroundTasks) -> dict[str, Any]
     sid = inp.id if inp.id and SESSION_ID.fullmatch(inp.id) and not await run_in_threadpool(store.session, inp.id) else None
     extra = {"gaitReview": {"status": "waiting", "ts": time.time()}} if sid and side_camera_on(sid) else {}
     doc = await run_in_threadpool(store.add_session, name, inp.summary, inp.verified, note["note"], out["reward"] is not None,
-                                  sid, **extra)
+                                  sid, noteSource=note["source"], **extra)
     out["id"] = doc["id"]
     out["gaitReview"] = extra.get("gaitReview")
     if sid and (active_session() or {}).get("id") == sid:
@@ -469,6 +489,7 @@ class PerceiveIn(BaseModel):
     foot: str | None = None   # for step: "L" or "R"
     thing: str | None = None  # for step: "flower" or "seed"
     frames: list[Any] = Field(max_length=perceive.MAX_FRAMES * 4)   # bad frames are skipped one by one
+    view: str = "legs"        # "overhead": feet.py's camera above the belt; "legs": the game window's camera
 
 
 @router.post("/perceive")
@@ -477,16 +498,22 @@ async def perceive_frames(inp: PerceiveIn) -> dict[str, Any]:
     if not player.get("perceptronConsent"):
         return {"source": "no-consent"}   # nothing leaves the laptop without consent
     frames = perceive.clean_frames(inp.frames)
+    view = inp.view if inp.view in perceive.VIEWS else "legs"
     if inp.kind == "step" and inp.foot in {"L", "R"} and inp.thing in {"flower", "seed"}:
-        return await perceive.check_step(frames, inp.foot, inp.thing)
+        return await perceive.check_step(frames, inp.foot, inp.thing, view)
     if inp.kind == "form":
-        return await perceive.check_form(frames)
+        return await perceive.check_form(frames, view)
     return {"source": "bad-request"}
 
 
 class PerceiveSessionIn(BaseModel):
     player: str = "Player"
     frames: list[Any] = Field(max_length=perceive.MAX_SESSION_FRAMES * 4)
+    view: str = "legs"
+    sessionId: str | None = None   # the walk it belongs to: the dashboard and the report show it there
+
+
+SESSION_WAIT_S = 30   # the report usually takes longer than the save at Home; if not, it waits this long for the session
 
 
 @router.post("/perceive/session")
@@ -495,9 +522,16 @@ async def perceive_session(inp: PerceiveSessionIn) -> dict[str, Any]:
     if not player.get("perceptronConsent"):
         return {"source": "no-consent"}
     frames = perceive.clean_frames(inp.frames, cap=perceive.MAX_SESSION_FRAMES)
-    report = await perceive.session_report(frames)
+    report = await perceive.session_report(frames, inp.view if inp.view in perceive.VIEWS else "legs")
     if report["source"] == "perceptron":
         latest = await run_in_threadpool(store.player, inp.player)
         await run_in_threadpool(store.update_player, inp.player,
                                 perceptronReports=[report, *latest.get("perceptronReports", [])][:5])
+        if inp.sessionId and SESSION_ID.fullmatch(inp.sessionId):
+            # The walk's own copy, without the foot tracks (the panel's lab draws those from the player's reports).
+            look = {k: report.get(k) for k in ("view", "clips", "points", "keyFrame", "caption", "gaitNote", "safety")}
+            for _ in range(SESSION_WAIT_S):
+                if await run_in_threadpool(store.update_session, inp.sessionId, perceptron={**look, "ts": time.time()}):
+                    break
+                await asyncio.sleep(1)
     return report

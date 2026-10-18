@@ -80,8 +80,12 @@ async def backboard(content: str, assistant_id: str | None, memory: str, timeout
                 assistant_id = r.json()["assistant_id"]
             r = await client.post(f"/assistants/{assistant_id}/threads", json={})
             r.raise_for_status()
-            r = await client.post(f"/threads/{r.json()['thread_id']}/messages",
-                                  json={"content": content, "memory": memory, "stream": False})
+            body: dict[str, Any] = {"content": content, "memory": memory, "stream": False}
+            if os.environ.get("BACKBOARD_PROVIDER"):   # for example google + gemini-2.5-flash: Gemini answers from the memory
+                body["llm_provider"] = os.environ["BACKBOARD_PROVIDER"]
+                if os.environ.get("BACKBOARD_MODEL"):
+                    body["model_name"] = os.environ["BACKBOARD_MODEL"]
+            r = await client.post(f"/threads/{r.json()['thread_id']}/messages", json=body)
             r.raise_for_status()
             return str(r.json().get("content") or ""), assistant_id
     except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
@@ -165,11 +169,14 @@ def clamp_params(params: Any, limits: dict[str, Any]) -> dict[str, float]:
 
 
 async def coach(summary: dict[str, Any], limits: dict[str, Any], side: dict[str, Any] | None = None,
-                share_side: bool = False) -> dict[str, Any]:
-    """side: live side-camera numbers; they go to the model only with share_side (the player's AI review consent)."""
+                share_side: bool = False, memory: str | None = None) -> dict[str, Any]:
+    """side: live side-camera numbers; they go to the model only with share_side (the player's AI review consent).
+    memory: what Backboard remembers about the player (from the last plan), so a cue can build on earlier walks."""
     body: dict[str, Any] = {"summary": summary, "limits": limits}
     if side and share_side:
         body["sideCamera"] = side
+    if memory:
+        body["mayaRemembers"] = memory[:600]
     out = await gemini_json(COACH_SYSTEM, json.dumps(body))
     source = "gemini"
     if not out or not isinstance(out.get("say"), str):
@@ -188,7 +195,18 @@ def describe(summary: dict[str, Any]) -> str:
             + f"form {summary.get('formPct')}%, "
             f"high-step lift L {summary.get('highLiftAvgCm', {}).get('L')} cm R {summary.get('highLiftAvgCm', {}).get('R')} cm"
             + ("; shoe mode: the lift numbers are forward step swings seen by the camera, not heights" if summary.get("shoeMode") else "")
-            + (f"; side camera gait: {json.dumps(summary['sideCamera'])[:600]}" if summary.get("sideCamera") else ""))
+            + (f"; side camera gait: {json.dumps(summary['sideCamera'])[:600]}" if summary.get("sideCamera") else "")
+            + perceptron_line(summary))
+
+
+def perceptron_line(summary: dict[str, Any]) -> str:
+    """The Perceptron second look on this walk, for the coach, the note and the memory; empty when it did not run."""
+    p = summary.get("perceptron") or {}
+    checked = p.get("checked") if isinstance(p, dict) else None
+    if not isinstance(checked, (int, float)) or checked <= 0:
+        return ""
+    view = "camera above the belt" if p.get("view") == "overhead" else "leg camera"
+    return f"; Perceptron second look ({view}): agreed with the game on {p.get('agree', 0)} of {int(checked)} steps"
 
 
 async def plan(player: dict[str, Any], recent: list[dict[str, Any]]) -> dict[str, Any]:
@@ -200,7 +218,7 @@ async def plan(player: dict[str, Any], recent: list[dict[str, Any]]) -> dict[str
             "thing to focus on today, based on what you remember about earlier sessions. Wellness words only.",
             player["assistantId"], "Readonly", timeout=3)   # two calls; the game waits 8 s
         if res and res[0]:
-            return {"say": res[0], "source": "backboard"}
+            return {"say": res[0], "source": "backboard", "memory": res[0]}
     if recent:
         last = recent[0]["summary"]
         dodge = last.get("dodgePct")
@@ -212,6 +230,17 @@ async def plan(player: dict[str, Any], recent: list[dict[str, Any]]) -> dict[str
         return {"say": f"Welcome back {name}! Last time you walked {last.get('steps', 0)} steps. Today: {today}.",
                 "source": "history"}
     return {"say": f"Hi {name}! Let us walk home together.", "source": "rules"}
+
+
+async def recall(player: dict[str, Any], timeout: float = 8) -> str | None:
+    """What Backboard remembers about the player, in their coach's words; None without a key or a memory."""
+    if not player.get("assistantId"):
+        return None
+    res = await backboard(
+        f"In two or three short sentences, what do you remember about {player['name']}'s earlier walks: the trend, "
+        "what went well, and the focus for next time? Wellness words only. If you remember nothing, say so.",
+        player["assistantId"], "Readonly", timeout=timeout)
+    return res[0] if res and res[0] else None
 
 
 async def remember(player: dict[str, Any], summary: dict[str, Any]) -> str | None:

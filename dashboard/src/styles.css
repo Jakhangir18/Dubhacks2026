@@ -144,6 +144,16 @@ tr.low td { color: var(--dim); }
 .group summary { cursor: pointer; font-weight: 500; padding: 4px 0 10px; }
 .footer { text-align: center; margin-top: 40px; }
 
+/* Perceptron's second look */
+.pp { display: grid; grid-template-columns: 340px 1fr; gap: 24px; align-items: start; }
+.pp p { margin: 10px 0 0; }
+.pp-frame { position: relative; margin: 0; width: 320px; }
+.pp-frame img { width: 320px; height: 240px; display: block; border-radius: 14px; background: #000; }
+.pp-frame figcaption { margin-top: 8px; font-size: 12px; color: var(--dim); }
+.pp-dot { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; border: 2px solid #fff; background: #2de2ff; }
+.pp-dot.flower { background: #ffd166; }
+@media (max-width: 768px) { .pp { grid-template-columns: 1fr; } }
+
 /* entry: heavy fade-up, staggered by --i */
 .reveal { opacity: 0; transform: translateY(24px); filter: blur(6px); animation: rise 0.9s var(--spring) forwards; animation-delay: calc(var(--i) * 90ms); }
 @keyframes rise { to { opacity: 1; transform: none; filter: none; } }

@@ -190,3 +190,60 @@ def test_zero_seeds_means_no_seed_act():
     assert clean_limits({})["stormSeeds"] == 0
     assert clean_limits({"stormSeeds": 0})["stormSeeds"] == 0
     assert clean_limits({"stormSeeds": 4.4})["stormSeeds"] == 4
+
+
+# ---------------------------------------------------------------- sponsor technologies visible (sponsors/boost)
+PERCEPTRON_WALK = {"seconds": 60, "steps": 80, "cadence": 90, "stompPct": 70, "formPct": 80, "act": "home",
+                   "perceptron": {"checked": 8, "agree": 7, "view": "overhead", "agreePct": 88}}
+
+
+def test_describe_names_the_perceptron_check():
+    text = therapist.describe(PERCEPTRON_WALK)
+    assert "Perceptron second look (camera above the belt): agreed with the game on 7 of 8 steps" in text
+    assert "Perceptron" not in therapist.describe({"seconds": 1, "perceptron": {"checked": 0, "agree": 0}})
+
+
+def test_review_context_carries_the_perceptron_check():
+    from server import gait_review
+    view = gait_review.build_view(PERCEPTRON_WALK, {}, [], {"name": "Mia", "limits": {}})
+    check = view["context"]["perceptronCheck"]
+    assert check["stepsChecked"] == 8 and check["agreedWithGame"] == 7 and check["agreePct"] == 88
+    assert gait_review.model_input(view)["context"]["perceptronCheck"] == check
+    assert gait_review.build_view({"steps": 3}, {}, [], {"name": "Mia", "limits": {}})["context"]["perceptronCheck"] is None
+
+
+def test_maya_facts_name_the_perceptron_check():
+    from server import maya
+    assert "Perceptron second look agreed with the game on 7 of 8" in maya.facts({"summary": PERCEPTRON_WALK})
+
+
+def test_memory_endpoint_is_honest_without_backboard(offline):
+    out = client.get("/api/memory/Mia").json()
+    assert out == {"text": None, "source": "none", "reason": "no BACKBOARD_API_KEY"}
+
+
+def test_plan_saves_what_backboard_said_and_the_coach_reads_it(offline, monkeypatch):
+    async def fake_backboard(content, assistant_id, memory, timeout=20):
+        return ("Last week Mia walked steadier each time; the focus is the left knee.", "asst-1")
+    monkeypatch.setattr(therapist, "backboard", fake_backboard)
+    client.put("/api/player/Mia", json={})
+    api.store.update_player("Mia", assistantId="asst-1")
+    out = client.get("/api/plan/Mia").json()
+    assert out["source"] == "backboard"
+    mem = client.get("/api/memory/Mia").json()
+    assert mem["source"] == "backboard" and "left knee" in mem["text"] and mem["fresh"] is False
+
+    seen = {}
+    async def fake_gemini_json(system, user, timeout=4):
+        seen["user"] = user
+        # the rules answer; what matters is what the model would have been told
+    monkeypatch.setattr(therapist, "gemini_json", fake_gemini_json)
+    r = client.post("/api/coach", json={"player": "Mia", "summary": {"act": "walk", "cadence": 90}})
+    assert r.json()["source"] == "rules"
+    assert "left knee" in seen["user"] and "mayaRemembers" in seen["user"]
+
+
+def test_session_keeps_where_the_note_came_from(offline):
+    r = client.post("/api/session", json={"player": "Mia", "summary": {"seconds": 30, "act": "home", "steps": 20}})
+    doc = api.store.session(r.json()["id"])
+    assert doc["noteSource"] == "rules" and r.json()["noteSource"] == "rules"

@@ -10,7 +10,8 @@ Paste into the Devpost draft before **Sat 22:30**. Add every teammate as a contr
 
 - Title track: **Community Kitchen** (accessibility, healthcare, community support).
 - Sponsored side tracks (up to three): **Perceptron**, **SideShift**, **CloudForce: Most Viral** (VEYZL if the CloudForce brief does not fit).
-- MLH: **Best Use of Gemini API**, **Best Use of Backboard**, **Best Use of MongoDB Atlas** (only those whose keys are live in the demo), Commit Fellowship (fill its form).
+- MLH: **Best Use of Gemini API**, **Best Use of Backboard**, Commit Fellowship (fill its form).
+- Do not declare **Best Use of MongoDB Atlas**: the Atlas store in `server/store.py` is ready, but the live demo runs on the local JSON file.
 
 ## Inspiration
 
@@ -20,35 +21,40 @@ Children and teens who are given movement exercises do most of them at home, and
 
 A projector paints a garden on the floor. You are a zombie walking home.
 
-1. **Walk home:** keep a steady pace; the game measures your normal step height.
-2. **Stomp the flowers:** high-step onto the glowing flower in your foot's lane.
-3. **Seed storm:** lift the foot a seed is aiming at.
-4. **Home:** a report card, a note from the coach, and a reward from your family.
+1. **Intro:** the therapist presses Start (on the dashboard or Enter); Gus the zombie walks through a night garden toward the house where Maya, the AI therapist, waits. Then: "stand on the white strips".
+2. **Warm-up:** walk at a steady pace; the game learns your normal step.
+3. **Three rounds on the beat:** round 1 angry flowers, round 2 pea spitters, round 3 spikes. Every target arrives on an odd number of steps, alternating feet, so the game trains an even, rhythmic gait; every fourth one is golden, four hits make a bouquet. Each round is a little faster.
+4. **Between rounds:** the world stops, Maya speaks a short analysis of the round you just played (Gemini, using the side camera's numbers when the family consented), then 3-2-1 and the next round starts by itself.
+5. **Two endings:** stomp 60% or more and Gus gets home before sunrise and Maya opens the door; less, and he is almost home at dawn with Maya waving from the window. Never a "you failed".
+6. **Dashboard:** one page for the therapist and the family: links and a QR code for the phone camera, live checks that both cameras work, Start, Pause, Next round, End and speed controls, both camera feeds with the live skeleton, "moments" (annotated photos of a knee that stayed low, and of a good step, with a plain explanation), every walk with its review, and a chat with Maya about your own photos.
 
-A phone camera watches your feet. Stomps and dodges count only for a timed lift above your own normal step, and only while you are really walking. The AI coach speaks one short cue at a time and adapts the game, but only inside limits your therapist sets in a panel. Perceptron Mk1.5 double-checks the camera: it watches a few leg-only frames around each stomp and dodge, answers in a fixed JSON shape, and the agreement rate goes into the report. The coach remembers every session (Backboard) and writes a note for parents and the therapist (Gemini). Every walk ends with a shareable game clip and a QR code, and a completed session unlocks a reward the parents chose.
+A camera above the belt finds your shoes (YOLO-World), and a phone at the side measures your knees and steps (MediaPipe Pose). Stomps and dodges count only for a timed lift above your own normal step, and only while you are really walking. The AI coach (Gemini) speaks one short cue at a time and adapts the game, but only inside limits your therapist sets in a panel. With the family's Perceptron consent, Perceptron Mk1.5 double-checks the camera: it looks at a few frames of the feet around each stomp and dodge, answers in a fixed JSON shape, and the agreement count shows on the Home screen and in the therapist panel. The coach remembers each player across sessions (Backboard) and, after the walk, writes a gait review with notes for the player, the parent and the therapist (Gemini). Maya, the AI therapist on the dashboard, answers questions about the walk and, with consent, looks at the side camera's annotated leg photos. With sharing switched on (`?share=1`), the walk ends with a short game clip and a QR code; a completed session picks a reward the parents chose, through a Visa checkout that is a labelled mock (no payment).
 
 ## How we built it
 
 - **Game:** Phaser 3 in the browser, own art drawn in code, high contrast for a dim projector; four-corner calibration warps the game onto the mat.
-- **Camera:** MediaPipe Pose in the browser on a phone used as a webcam; our step detector turns landmarks into lift and strike events (per-foot ground level, clearance at the lowest point of the foot, scale from the player's height).
-- **Perceptron:** after each flower or seed, up to eight timestamped frames of the lower legs (cropped at the knees, no face) go to `perceptron-mk1.5` as `video_frames` with a strict JSON schema; a second schema checks form every 10 s. Only with the parent's or therapist's consent.
-- **Perceptron lab:** at the end of each walk a leg-only sample (up to 32 frames) goes through four Perceptron capabilities at once: video clipping marks every high step on a timeline, object tracking follows both feet, the Detect API points at feet, flowers and seeds on a key frame, and Multilook writes a share caption, a gait note for the therapist and a safety line. The therapist panel draws all of it on the frame.
+- **Cameras:** an overhead camera runs YOLO-World locally (`feet.py`) to find the shoes, with a bright-blob fallback for a dark room. A phone at the side streams frames to the server, where `gait.py` runs MediaPipe Pose: knee bend, stride, step time, left-right balance, a live skeleton for the dashboard, and annotated photos of notable steps. A browser MediaPipe tracker (`web/vision.js`) turns landmarks into lift and strike events when the game uses its own camera.
+- **Gemini:** the coach's cues and rest-time coaching, the gait review (every point must cite a measured number, suggestions clamped to the therapist's ranges), Maya's chat, and the coach's voice (Gemini text-to-speech). Side-camera numbers and photos go to Gemini only with the family's consent; rule-based answers and the browser voice cover a missing key.
+- **Perceptron:** after each flower or seed, up to eight timestamped frames of the feet (the overhead view, or the game camera cropped at the knees; no face) go to `perceptron-mk1.5` as `video_frames` with a strict JSON schema; a second schema checks form every 10 s. Only with the parent's or therapist's consent.
+- **Perceptron lab:** at the end of a walk, with consent, a leg-only sample (up to 32 frames) goes through four Perceptron capabilities at once: video clipping marks every high step on a timeline, object tracking follows both feet, the Detect API points at feet, flowers and seeds on a key frame, and Multilook writes a share caption, a gait note for the therapist and a safety line. The therapist panel draws all of it on the frame.
 - **Projection zone:** the player marks the walking zone's four corners on the floor at the start (front corners first); the game is warped into that trapezoid and an animated garden fills the rest of the projection.
 - **Raspberry Pi path:** any camera computer can post the same foot events to the laptop server (HTTP or WebSocket).
-- **Server:** FastAPI relays events, runs the coach, stores players and sessions (MongoDB Atlas), keeps long-term memory per player (Backboard), calls Perceptron, and serves the clip and QR code.
-- **Safety and honesty:** limits clamp everything the model proposes; wellness wording only (coordination, balance, mobility); children play on the floor, never on a treadmill; camera video never leaves the device.
-- **Tests:** 68 automated tests (49 server, 19 game rules and step detector), plus end-to-end runs in headless Chromium with a fake camera.
+- **Server:** FastAPI relays events, runs the coach, stores players and sessions (a local JSON file in the demo; MongoDB Atlas when `MONGODB_URI` is set), keeps long-term memory per player (Backboard), calls Perceptron, serves the Next.js dashboard at `/app/`, and serves the clip and QR code when sharing is on. Tailscale Funnel gives the demo its public HTTPS link.
+- **Safety and honesty:** limits clamp everything the model proposes; wellness wording only (coordination, balance, mobility); on the walking pad only teens and adults within the pad's rated age, with a person beside them; the server keeps no video, and pictures leave the laptop only with consent (leg-only frames to Perceptron, annotated leg photos to Gemini for Maya).
+- **Tests:** 142 server tests (offline, no keys) and 46 game-rule and step-detector tests.
 
 ## Challenges
 
 - Walking in place lands every step in its own lane, so plain walking scored everything. We switched to timed high steps measured against each player's own normal step.
 - A single camera cannot measure millimetre toe clearance, so we measure what it can (centimetre lifts, step timing) and say so.
 - A 150-lumen projector in a lit hall: high-contrast art on a white mat.
+- **The physical setup is the hard part, and it is fragile.** Every time we rebuild the rig, five things must line up: the projector's four corners on the belt (the field is warped to them, and the real projection is rotated 90°, so the garden layout had to adapt to any corner geometry), the overhead camera's calibration to the same field, the shoe detector's sensitivity to the room's light (a brighter hall turns the detector's view of two feet into one bright spot), the phone at knee height with the whole body in frame, and the browser's audio permissions. We hit each of these on the pad today: a Continuity iPhone silently renumbered the Mac's cameras so the shoe detector opened the laptop webcam; Chrome blocked the coach's voice until someone clicked the game window; the free Gemini text-to-speech tier rate-limited the voice mid-game. Our answers: the dashboard's pre-flight shows game screen, top camera and phone as green or amber with a one-line fix each; the therapist can start the walk from the dashboard even when the floor camera misses the first steps; the camera page picks the stand camera by name; one script starts or restarts every service on the server.
+- Speech timing: the voice needs about 4 s to arrive and the rest countdown waits for it, so a safety timer that was too short cut lines mid-sentence until we sized it to the line.
 
 ## Accomplishments
 
 - The first time a projected flower splashed under a real foot on the walking pad.
-- Perceptron agreeing with our own camera step by step, with every frame cropped below the knees.
+- Perceptron agreeing with our own camera step by step, from frames that never show a face.
 - A therapist's limits that the AI cannot exceed.
 
 ## What we learned
@@ -61,7 +67,7 @@ Clinician pilots, Perceptron pointing at the projected target to confirm the foo
 
 ## Built with
 
-phaser, mediapipe, perceptron, javascript, python, fastapi, gemini-api, backboard, mongodb-atlas, projector
+phaser, mediapipe, yolo-world, perceptron, javascript, typescript, python, fastapi, next.js, gemini-api, backboard, tailscale, projector
 
 ## Links
 
