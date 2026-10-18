@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Превью арта</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root { --bg: #0b1016; --card: #141d24; --line: #26343d; --text: #e8f3ec; --dim: #8aa39a; --lime: #9cff5a; --yellow: #ffe44d; --cyan: #2de2ff; --pink: #ff5fa2; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; padding: 20px 24px 60px; }
+    h1 { margin: 0 0 6px; font-size: 26px; } h1 b { color: var(--lime); }
+    h2 { margin: 36px 0 10px; font-size: 20px; color: var(--yellow); }
+    p.lead { color: var(--dim); margin: 0 0 18px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+    figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+    figure img { width: 100%; border-radius: 8px; display: block; background: #000; }
+    figcaption { font-size: 14px; color: var(--dim); margin-top: 8px; } figcaption b { color: var(--text); }
+    .choice { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
+    .choice h3 { margin: 0 0 6px; font-size: 17px; } .choice .q { color: var(--cyan); font-weight: 600; }
+    ol, ul { margin: 6px 0; padding-left: 22px; }
+    .swatches { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+    .sw { width: 92px; height: 60px; border-radius: 8px; display: flex; align-items: flex-end; padding: 6px; font-size: 11px; color: #000; box-sizing: border-box; border: 1px solid #000; }
+    .black { background: #000; border: 1px dashed #444; padding: 14px; border-radius: 12px; }
+    .black .sw { border-color: #333; }
+    .tag { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--dim); margin-left: 6px; }
+  </style>
+</head>
+<body>
+  <h1><b>Zombie Walk Home</b> · превью арта и выборы</h1>
+  <p class="lead">Ничего из этого не в игре на проекторе. Ветка <code>art/pvz-look</code> на GitHub. Ответь по каждому пункту «Решение»: цифра варианта или «переделать: …».</p>
+
+  <h2>1. Было → стало</h2>
+  <div class="grid">
+    <figure><img src="art/before-title.jpg" alt="старый стартовый экран"><figcaption><b>Старт, было.</b> Яркий фон книжки, старый Гас.</figcaption></figure>
+    <figure><img src="art/after-title.jpg" alt="новый стартовый экран"><figcaption><b>Старт, стало.</b> Дом с грядкой цветов, забор и огород по краям, зомби из концепта.</figcaption></figure>
+    <figure><img src="art/before-play.jpg" alt="старое поле"><figcaption><b>Поле, было.</b> Метры по бокам.</figcaption></figure>
+    <figure><img src="art/after-play.jpg" alt="новое поле"><figcaption><b>Поле, стало.</b> Две дорожки, забор и огород, без метров. Подсказки READY / NOW!, лепестки сверху.</figcaption></figure>
+    <figure><img src="art/after-home.jpg" alt="финиш"><figcaption><b>Финиш.</b> Пока старый фон, новый зомби. Две концовки ниже, пункт 4.</figcaption></figure>
+    <figure><img src="art/after-zone.jpg" alt="разметка зоны"><figcaption><b>Разметка зоны (Z).</b> Забор виден и здесь.</figcaption></figure>
+  </div>
+  <div class="choice"><h3>Решение 1 <span class="tag">арт</span></h3>
+    <p class="q">Забираем это в игру?</p>
+    <ol><li>Да, как есть.</li><li>Да, но забор по краям темнее / светлее (напиши).</li><li>Зомби оставить, забор убрать.</li><li>Переделать: …</li></ol>
+    <p>Что знаю заранее: на чёрном полотне тёмные края забора почти пропадут, останутся светлые штакетины и цветы. Это нормально: главное, что дорожки и цветы ярче всего остального.</p>
+  </div>
+
+  <h2>2. Палитра для тусклого проектора</h2>
+  <p class="lead">Чёрное полотно съедает всё тёмное. Ниже те же цвета на чёрном: что видно, то и будет на полу.</p>
+  <div class="black"><div class="swatches">
+    <div class="sw" style="background:#ffe44d">#ffe44d жёлтый</div>
+    <div class="sw" style="background:#9cff5a">#9cff5a лайм</div>
+    <div class="sw" style="background:#2de2ff">#2de2ff циан</div>
+    <div class="sw" style="background:#ffffff">#ffffff белый</div>
+    <div class="sw" style="background:#ff5fa2">#ff5fa2 розовый</div>
+    <div class="sw" style="background:#ffb21e">#ffb21e янтарь</div>
+    <div class="sw" style="background:#ff9a1f">#ff9a1f оранж</div>
+    <div class="sw" style="background:#9b6bff">#9b6bff фиолет</div>
+    <div class="sw" style="background:#295d45; color:#fff">#295d45 зелень фона</div>
+    <div class="sw" style="background:#19352f; color:#fff">#19352f тёмная зелень</div>
+    <div class="sw" style="background:#3a2a4a; color:#fff">#3a2a4a ночь концепта</div>
+  </div></div>
+  <div class="choice"><h3>Решение 2 <span class="tag">палитра</span></h3>
+    <p class="q">Правило для пола: яркое и насыщенное только для того, на что ступают и что нужно прочитать (цветы, линия, подсказки, лепестки); всё остальное (забор, огород, дом) тёмное и тусклое, как декорация. Согласен?</p>
+    <ol><li>Да.</li><li>Хочу ярче декорации, пусть мешают.</li><li>Переделать: …</li></ol>
+    <p id="palette-note">Отчёт исследования по проекции на тёмную поверхность добавлю сюда, как только он придёт (минимальная толщина линий, размер текста, какие цвета пропадают).</p>
+  </div>
+
+  <h2>3. Вступление перед ходьбой</h2>
+  <p class="lead">Раскадровка игровой кат-сцены на Phaser из вырезок концепта (видео-генератора в этой сессии нет). Пропуск по Enter или по первому шагу. 10–12 секунд.</p>
+  <ol>
+    <li><b>Ночь, дом.</b> Дом с тёплыми окнами, луна, забор. Бабушка Роза у калитки с лейкой. Текст на полу: «Роза защищает свой огород».</li>
+    <li><b>Цветы оживают.</b> Грядка цветов с сердитыми лицами вырастает по дорожке, подпрыгивают. Текст: «Её цветы кусаются».</li>
+    <li><b>Гас.</b> Зомби в пижаме выходит снизу, топает по цветку, лепестки взрывом. Текст: «Наступай на цветы, чтобы дойти до дома».</li>
+    <li><b>Старт.</b> Камера отъезжает на две дорожки, линия загорается. Текст: «Иди на месте. Шаг, шаг, цветок».</li>
+  </ol>
+  <div class="choice"><h3>Решение 3 <span class="tag">вступление</span></h3>
+    <ol><li>Делать кат-сцену на Phaser по раскадровке.</li><li>Ты генерируешь видео в Higgsfield по моему промпту, я встраиваю mp4 (нужен файл до 30 МБ).</li><li>Без вступления, только стартовый экран.</li></ol>
+  </div>
+
+  <h2>4. Две концовки</h2>
+  <p class="lead">По результату терапевтических задач: темп ≥ минимума большую часть времени, обе ноги ровно, попадания ≥ 60 %.</p>
+  <div class="grid">
+    <div class="choice"><h3>Хорошо: «Дошёл домой»</h3><p>Гас доходит до двери, окна зажигаются одно за другим, Роза машет с крыльца, лепестки-конфетти, надпись HOME! и счёт. Голос коуча: «Отличная прогулка». Озвучка позже.</p></div>
+    <div class="choice"><h3>Плохо: «Цветы поймали»</h3><p>По-детски: цветы обвивают Гаса за тапки, он застревает на дорожке, вздыхает, надпись «Цветы победили… завтра дойдём!» и три совета коуча. Без «смерти», без крови.</p></div>
+  </div>
+  <div class="choice"><h3>Решение 4 <span class="tag">концовки</span></h3>
+    <ol><li>Да, обе как описано.</li><li>Плохую концовку жёстче («Гаса съели»).</li><li>Только хорошая концовка.</li></ol>
+  </div>
+
+  <h2>5. Что ещё заметил</h2>
+  <ul>
+    <li>На новом поле подсказки NOW! огромные (110 px): на тусклом проекторе это плюс.</li>
+    <li>Лепестки-счётчик сверху наезжали на заголовок акта, переставил ниже (в следующем деплое).</li>
+    <li>Финишный экран ещё со старым фоном.</li>
+  </ul>
+</body>
+</html>

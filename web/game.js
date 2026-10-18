@@ -1067,12 +1067,12 @@ class Play extends Phaser.Scene {
     h.clear();
     // The petal bank at the top: four petals fill as flowers are hit (a full bouquet shows whole), never emptied by a miss.
     const petals = g.stats.petals, filled = petals && petals % RULES.bouquetPetals === 0 ? RULES.bouquetPetals : petals % RULES.bouquetPetals;
-    for (let i = 0; i < RULES.bouquetPetals; i++) {
-      const x = L.W / 2 + (i - (RULES.bouquetPetals - 1) / 2) * 64;
-      h.fillStyle(C.yellow, i < filled ? 1 : 0.22); h.fillCircle(x, 46, 22);
-      h.lineStyle(4, C.yellow, 0.9); h.strokeCircle(x, 46, 22);
+    for (let i = 0; i < RULES.bouquetPetals; i++) {   // under the act title, above the field's top edge
+      const x = L.W / 2 + (i - (RULES.bouquetPetals - 1) / 2) * 44;
+      h.fillStyle(C.yellow, i < filled ? 1 : 0.22); h.fillCircle(x, 88, 15);
+      h.lineStyle(3, C.yellow, 0.9); h.strokeCircle(x, 88, 15);
     }
-    this.bouquetText.setText(g.stats.bouquets ? `x${g.stats.bouquets}` : '').setPosition(L.W / 2 + 2.5 * 64, 46);
+    this.bouquetText.setText(g.stats.bouquets ? `x${g.stats.bouquets}` : '').setPosition(L.W / 2 + 2.3 * 44, 88).setScale(0.7);
 
     const gated = out.pace.gated;
     const beat = g.t * (g.limits.minCadence + 20) / 60;
