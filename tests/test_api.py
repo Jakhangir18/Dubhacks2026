@@ -176,3 +176,9 @@ def test_rounds_limit_is_a_whole_number_of_at_least_one():
     assert clean_limits({"rounds": 0})["rounds"] == 1
     assert clean_limits({"rounds": 3.6})["rounds"] == 4
     assert clean_limits({})["rounds"] == 2
+
+
+def test_zero_seeds_means_no_seed_act():
+    assert clean_limits({})["stormSeeds"] == 0
+    assert clean_limits({"stormSeeds": 0})["stormSeeds"] == 0
+    assert clean_limits({"stormSeeds": 4.4})["stormSeeds"] == 4
