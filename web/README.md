@@ -2,11 +2,28 @@
 
 ## Play the game
 
+With the server (needed for the Raspberry Pi bridge; the AI coach and saving come next):
+
 ```bash
-cd web
-python3 -m http.server 8000      # any static server works; modules need http, not file://
-# open http://localhost:8000 in Chrome (on the projector window), press F
+python3 -m venv .venv && .venv/bin/pip install -r server/requirements.txt     # once, from the repo root
+.venv/bin/uvicorn server.app:app --host 0.0.0.0 --port 8000
+# open http://localhost:8000 in Chrome on the projector window, press F
 ```
+
+Without the server (keyboard and camera still work): `cd web && python3 -m http.server 8000`.
+
+## Camera (press V in the game)
+
+1. Connect the phone as a webcam (Mac: Continuity Camera; Windows: an app such as Camo) or plug in a webcam.
+2. Press **V**, enter the player's height, click **Start**, pick the camera in the list. The first start downloads the pose model (needs internet once).
+3. Place the camera in front of the player at about 45°, at knee height, both lower legs in view, good light.
+4. The panel shows fps and live lift per foot. Walk in place: lift numbers should rise and fall with each step.
+
+The camera sends the same foot events as the keyboard, so you can mix them while testing.
+
+## Raspberry Pi or another camera computer
+
+See [../vision/CONTRACT.md](../vision/CONTRACT.md): POST foot events to `http://<laptop-ip>:8000/api/events` (or the `/ws/events` WebSocket). `python3 vision/pi_sender.py --server http://<laptop-ip>:8000 --demo` simulates a walk. The key bar shows "bridge connected" when the game is listening.
 
 Keyboard play (no camera needed): **A / D** normal step, **Q / E** high step (stomp a flower, dodge a seed), **W** auto-walk, **Space** pause, **C** drag the corners onto the mat (same calibration as the check page), **M** voice on or off.
 
@@ -14,7 +31,7 @@ Useful URLs: `?demo=1` short game for judges, `?scene=play&act=garden&auto=1` ju
 
 How it plays: act 1 walk home (keep at least 80 steps per minute; your normal step height is measured here), act 2 high-step onto the flowers in your foot's lane, act 3 lift the foot the seed is aiming at. Heights are relative to your own normal step, and the lift bars beside the footprints show your lift against the line you need.
 
-Files: `logic.js` rules (tested), `game.js` Phaser scenes and art, `bus.js` foot events (keyboard now, camera and Raspberry Pi next), `warp.js` projector corners.
+Files: `logic.js` rules (tested), `game.js` Phaser scenes and art, `bus.js` foot events, `vision.js` camera step detector (tested), `camera-panel.js` the V panel, `bridge.js` events from the server, `warp.js` projector corners.
 
 ## Projector check (works now, no server needed)
 
