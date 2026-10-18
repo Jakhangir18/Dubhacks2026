@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Projector Check</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; color: #fff; overflow: hidden;
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
+    #stage { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; }
+    #c { display: block; width: 100%; height: 100%; }
+    #handles { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+    .warp-handle { position: absolute; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%;
+      background: #ff2d95; border: 3px solid #fff; color: #fff; font: 700 12px system-ui; display: grid;
+      place-items: center; cursor: grab; pointer-events: auto; touch-action: none; }
+    #help { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 20;
+      background: rgba(20,20,20,.88); border: 1px solid #444; border-radius: 10px; padding: 10px 14px;
+      font-size: 14px; line-height: 1.5; max-width: 92vw; }
+    #help b { color: #7CFF4F; }
+    #cam { position: fixed; right: 16px; top: 16px; z-index: 20; background: rgba(20,20,20,.9);
+      border: 1px solid #444; border-radius: 10px; padding: 8px; width: 340px; font-size: 13px; }
+    #cam video { width: 100%; border-radius: 6px; background: #111; display: block; }
+    #cam select { width: 100%; margin: 6px 0; }
+  </style>
+</head>
+<body>
+  <div id="stage"><canvas id="c"></canvas></div>
+  <div id="handles"></div>
+  <div id="help">
+    <b>1</b> grid · <b>2</b> colours · <b>3</b> text sizes · <b>4</b> full white · <b>5</b> lanes preview ·
+    <b>C</b> drag corners onto the mat · <b>R</b> reset corners · <b>F</b> fullscreen · <b>V</b> camera check · <b>H</b> hide this
+  </div>
+  <div id="cam" hidden>
+    <select id="devices"></select>
+    <video id="video" playsinline muted></video>
+    <div id="camstats">no camera</div>
+  </div>
+  <script src="warp.js"></script>
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    const stage = document.getElementById('stage');
+    const handleLayer = document.getElementById('handles');
+    let mode = Number(new URLSearchParams(location.search).get('mode')) || Warp.store.get('zombiewalk.checkmode', 1);
+    let corners = Warp.store.get(Warp.CORNERS_KEY, null);
+    let editing = false;
+
+    function resize() {
+      canvas.width = innerWidth * devicePixelRatio;
+      canvas.height = innerHeight * devicePixelRatio;
+      ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      Warp.apply(stage, corners);
+      draw();
+    }
+
+    const W = () => innerWidth;
+    const H = () => innerHeight;
+
+    function label(text, x, y, size = 22, color = '#fff', align = 'center') {
+      ctx.font = `700 ${size}px system-ui, sans-serif`;
+      ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle';
+      ctx.fillText(text, x, y);
+    }
+
+    function drawGrid() {
+      const w = W(), h = H();
+      ctx.strokeStyle = '#2bd94a'; ctx.lineWidth = 2;
+      for (let i = 1; i < 10; i++) {
+        ctx.beginPath(); ctx.moveTo((w * i) / 10, 0); ctx.lineTo((w * i) / 10, h); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, (h * i) / 10); ctx.lineTo(w, (h * i) / 10); ctx.stroke();
+      }
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 10; ctx.strokeRect(5, 5, w - 10, h - 10);
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(w / 2 - 40, h / 2); ctx.lineTo(w / 2 + 40, h / 2);
+      ctx.moveTo(w / 2, h / 2 - 40); ctx.lineTo(w / 2, h / 2 + 40); ctx.stroke();
+      for (const [fx, fy] of [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]]) {
+        ctx.beginPath(); ctx.arc(w * fx, h * fy, Math.min(w, h) * 0.08, 0, Math.PI * 2); ctx.stroke();
+      }
+      label('TL', 40, 40); label('TR', w - 40, 40); label('BR', w - 40, h - 40); label('BL', 40, h - 40);
+      label('Grid: lines should look straight and the white border should sit on the mat edges', w / 2, h * 0.12, 20, '#ffe44d');
+    }
+
+    function drawPatches() {
+      const w = W(), h = H();
+      const colours = [['#ffffff', 'white'], ['#7CFF4F', 'neon green'], ['#ffe44d', 'yellow'],
+        ['#ff2d95', 'magenta'], ['#2de2ff', 'cyan'], ['#ff4d4d', 'red'], ['#9b6bff', 'violet'], ['#ff9a1f', 'orange']];
+      const cols = 4, rows = 2, pad = 24;
+      const cw = (w - pad * (cols + 1)) / cols, ch = (h - pad * (rows + 1)) / rows;
+      colours.forEach(([c, name], i) => {
+        const x = pad + (i % cols) * (cw + pad), y = pad + Math.floor(i / cols) * (ch + pad);
+        ctx.fillStyle = c; ctx.fillRect(x, y, cw, ch);
+        label(name, x + cw / 2, y + ch / 2, 26, '#000');
+      });
+    }
+
+    function drawText() {
+      const w = W(), h = H();
+      const sizes = [18, 28, 40, 56, 80, 110];
+      let y = h * 0.1;
+      for (const s of sizes) {
+        label(`${s}px  STEP ON THE FLOWER  7 + 5 = ?`, w / 2, y, s, '#fff');
+        y += s * 1.35;
+      }
+    }
+
+    function drawWhite() {
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W(), H());
+      label('Full white: maximum brightness. Is the mat clearly lit in hall light?', W() / 2, H() / 2, 28, '#000');
+    }
+
+    function drawLanes() {
+      const w = W(), h = H();
+      const lanes = [w * 0.3, w * 0.7];
+      ctx.strokeStyle = '#2bd94a'; ctx.lineWidth = 6; ctx.setLineDash([24, 18]);
+      ctx.beginPath(); ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(124,255,79,0.18)'; ctx.fillRect(0, h * 0.72, w, h * 0.28);
+      label('WALKING ZONE', w / 2, h * 0.86, 30, '#7CFF4F');
+      // flowers to stomp
+      for (const [x, y] of [[lanes[0], h * 0.18], [lanes[1], h * 0.45]]) {
+        ctx.fillStyle = '#ffe44d';
+        for (let k = 0; k < 8; k++) {
+          const a = (k * Math.PI) / 4;
+          ctx.beginPath(); ctx.ellipse(x + Math.cos(a) * 34, y + Math.sin(a) * 34, 22, 12, a, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = '#ff9a1f'; ctx.beginPath(); ctx.arc(x, y, 24, 0, Math.PI * 2); ctx.fill();
+      }
+      // seed ball
+      ctx.fillStyle = '#ff2d95'; ctx.beginPath(); ctx.arc(lanes[1], h * 0.64, 18, 0, Math.PI * 2); ctx.fill();
+      label('L', lanes[0], h * 0.95, 34); label('R', lanes[1], h * 0.95, 34);
+    }
+
+    const painters = { 1: drawGrid, 2: drawPatches, 3: drawText, 4: drawWhite, 5: drawLanes };
+
+    function draw() {
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W(), H());
+      (painters[mode] || drawGrid)();
+    }
+
+    function setEditing(on) {
+      editing = on;
+      if (on) {
+        corners = corners || Warp.defaultCorners(innerWidth, innerHeight);
+        Warp.handles(handleLayer, corners, (c) => { corners = c; Warp.store.set(Warp.CORNERS_KEY, c); Warp.apply(stage, c); });
+        Warp.apply(stage, corners);
+      } else {
+        handleLayer.innerHTML = '';
+      }
+    }
+
+    // ---------- camera check (phone as webcam, or the webcam) ----------
+    const camBox = document.getElementById('cam');
+    const video = document.getElementById('video');
+    const select = document.getElementById('devices');
+    const stats = document.getElementById('camstats');
+    let frames = 0, lastCount = performance.now();
+
+    async function startCamera(deviceId) {
+      if (video.srcObject) video.srcObject.getTracks().forEach((t) => t.stop());
+      const constraints = { video: deviceId ? { deviceId: { exact: deviceId }, frameRate: { ideal: 60 } } : { frameRate: { ideal: 60 } } };
+      video.srcObject = await navigator.mediaDevices.getUserMedia(constraints);
+      await video.play();
+      const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+      const current = video.srcObject.getVideoTracks()[0].getSettings().deviceId;
+      select.innerHTML = devices.map((d, i) => `<option value="${d.deviceId}">${d.label || 'camera ' + (i + 1)}</option>`).join('');
+      select.value = current;
+      countFrames();
+    }
+
+    function countFrames() {
+      if (!video.requestVideoFrameCallback) return;
+      video.requestVideoFrameCallback(() => {
+        frames++;
+        const now = performance.now();
+        if (now - lastCount > 1000) {
+          const s = video.srcObject?.getVideoTracks()[0]?.getSettings() || {};
+          stats.textContent = `${s.width || '?'}x${s.height || '?'} · ${Math.round((frames * 1000) / (now - lastCount))} fps measured`;
+          frames = 0; lastCount = now;
+        }
+        if (video.srcObject) countFrames();
+      });
+    }
+
+    select.addEventListener('change', () => startCamera(select.value).catch((e) => { stats.textContent = e.message; }));
+
+    // ---------- keys ----------
+    window.addEventListener('keydown', (e) => {
+      const k = e.key.toLowerCase();
+      if (['1', '2', '3', '4', '5'].includes(k)) { mode = Number(k); Warp.store.set('zombiewalk.checkmode', mode); draw(); }
+      else if (k === 'c') setEditing(!editing);
+      else if (k === 'r') { corners = null; Warp.store.set(Warp.CORNERS_KEY, null); Warp.apply(stage, null); if (editing) setEditing(true); }
+      else if (k === 'f') { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); }
+      else if (k === 'h') { const h = document.getElementById('help'); h.hidden = !h.hidden; }
+      else if (k === 'v') {
+        camBox.hidden = !camBox.hidden;
+        if (!camBox.hidden && !video.srcObject) startCamera().catch((err) => { stats.textContent = `camera error: ${err.message}`; });
+      } else return;
+      e.preventDefault();
+    });
+
+    window.addEventListener('resize', resize);
+    resize();
+  </script>
+</body>
+</html>
