@@ -21,3 +21,9 @@ export const ACTS = {
 };
 
 export const ENDING = 'Home before sunrise! Rosa wants her slippers back.';
+
+// Spoken when a later round of flowers begins (each round is a little faster; every fourth flower is golden).
+export const ROUND_LINES = {
+  2: 'Round two! A little faster. Golden flowers count triple!',
+  3: 'Round three! Faster still. Fill the bouquet!',
+};

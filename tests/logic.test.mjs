@@ -137,18 +137,56 @@ test('the first flower of an act appears on a landing, a whole number of steps o
   assert.ok(Math.abs(odd.first.distCm - 420) < 10 && odd.first.distCm <= 420, `placed ${odd.first.distCm} cm out`);
 });
 
+test('every fourth flower is golden and scores triple; petals bank every hit and never burn; rounds speed up', () => {
+  const g = toGarden({ gardenPlants: 5, rounds: 2 });
+  const feed = () => {   // the shoe sits on every flower that crosses, except the fifth: a miss between hits
+    const th = g.things.find((t) => !t.result);
+    const on = th && g.log.length !== 4 && th.distCm < 30;
+    addShoes(g, [on ? { xFrac: th.lane === 'L' ? 0.3 : 0.7, nearCm: th.distCm + 10, farCm: th.distCm - 10 } : { xFrac: 0.5, nearCm: 600, farCm: 580 }]);
+  };
+  const untilLog = (n) => walkUntil(g, () => { feed(); return g.log.length >= n; }, 90);
+  untilLog(4);
+  assert.deepEqual(g.log.map((l) => !!l.golden), [false, false, false, true]);   // the fourth flower is golden
+  assert.ok(g.log.every((l) => l.result === 'hit'));
+  assert.deepEqual(g.stats.golden, [1, 1]);
+  assert.equal(g.stats.petals, 4);
+  assert.equal(g.stats.bouquets, 1);
+  untilLog(5);
+  assert.equal(g.log[4].result, 'miss');
+  assert.equal(g.stats.petals, 4, 'a miss burns no petals');
+  assert.equal(g.stats.bouquets, 1);
+  walkUntil(g, () => { feed(); return g.round === 2; }, 60);
+  assert.ok(Math.abs(speedScale(g) - 0.9) < 1e-9, `round 2 is faster: ${speedScale(g)}`);
+});
+
+test('a golden hit scores three times a plain one at the same form and streak', () => {
+  const at = (golden) => {
+    const g = toGarden({ gardenPlants: 1 });
+    walkUntil(g, () => g.things.length > 0);
+    const th = g.things[0];
+    th.golden = golden;
+    const x = th.lane === 'L' ? 0.3 : 0.7;
+    walkUntil(g, () => { addShoes(g, [{ xFrac: x, nearCm: th.distCm + 10, farCm: th.distCm - 10 }]); return th.result !== null; }, 30);
+    assert.equal(th.result, 'hit');
+    return g.score;
+  };
+  const plain = at(false), gold = at(true);
+  assert.ok(plain > 0);
+  assert.ok(Math.abs(gold - 3 * plain) <= 2, `golden ${gold} vs plain ${plain}`);   // rounding only
+});
+
 test('with no seeds the rounds are flowers only, lanes alternate, and each flower comes an odd number of steps after the last', () => {
   const g = newGame({ walkSeconds: 1, gardenPlants: 4, rounds: 2 });   // stormSeeds defaults to 0
-  const acts = [g.act];
+  const acts = [g.act], roundStarts = new Set();
   const beat = beatCm(g);
   assert.equal(beat, 3 * RULES.strideCm * 0.7);   // 140 cm at the default plant speed snaps to 3 steps
   let gaps = 0;
   walkUntil(g, () => {
     const key = g.act === 'garden' ? `garden ${g.round}` : g.act;
-    if (key !== acts[acts.length - 1]) acts.push(key);
-    const live = g.things.filter((th) => !th.result);
+    if (key !== acts[acts.length - 1]) { acts.push(key); roundStarts.add(g.log.length); }   // a round's first flower follows the foot
+    const live = g.things.filter((th) => !th.result), beatNow = beatCm(g);   // round 2 is faster: a longer beat in cm
     for (let i = 1; i < live.length; i++) {   // things on the floor sit exactly one beat apart, whatever the frame
-      assert.ok(Math.abs(live[i].distCm - live[i - 1].distCm - beat) < 1e-6, `gap ${live[i].distCm - live[i - 1].distCm}`);
+      assert.ok(Math.abs(live[i].distCm - live[i - 1].distCm - beatNow) < 1e-6, `gap ${live[i].distCm - live[i - 1].distCm}`);
       gaps += 1;
     }
     return g.act === 'home';
@@ -157,8 +195,8 @@ test('with no seeds the rounds are flowers only, lanes alternate, and each flowe
   assert.deepEqual(acts, ['walk', 'garden 1', 'garden 2', 'home']);
   assert.equal(g.log.length, 8);
   assert.ok(g.log.every((l) => l.kind === 'flower'));
-  for (let i = 1; i < g.log.length; i++) assert.notEqual(g.log[i].lane, g.log[i - 1].lane, 'lanes alternate');
-  assert.equal(summary(g).beatCm, 105);      // the spacing as played
+  for (let i = 1; i < g.log.length; i++) if (!roundStarts.has(i)) assert.notEqual(g.log[i].lane, g.log[i - 1].lane, 'lanes alternate');
+  assert.equal(summary(g).beatCm, 135);      // the spacing as played in round 2: 3 steps at plant speed 0.9
   assert.equal(summary(g).spacingCm, 140);   // the therapist's setting, untouched
   assert.equal(summary(g).seedAct, false);
 });

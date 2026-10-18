@@ -4,7 +4,7 @@ import { ease, plan, newGame, step, addEvent, addShoes, shoesLive, resetShoes, m
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
 import { connectBridge, SHOES_EVENT, FRAME_EVENT, MARKS_EVENT } from './bridge.js';
-import { ACTS, ENDING } from './lore.js';
+import { ACTS, ENDING, ROUND_LINES } from './lore.js';
 import { GardenSound } from './sound.js';
 import { WalkClip, uploadClip } from './clip.js';
 import { WalkingZone } from './zone.js';
@@ -51,7 +51,7 @@ async function api(path, body) {
 }
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error('timeout')), ms))]);
 
-const DEMO = { walkSeconds: 8, gardenPlants: 6, stormSeeds: 0, rounds: 2 };
+const DEMO = { walkSeconds: 8, gardenPlants: 6, stormSeeds: 0, rounds: 3 };
 const RING_SNAP_PX = 60;   // shoe-box jitter on the field stays under this; a bigger move is a real step and snaps
 const RING_EASE_S = 0.08;  // how the ring settles under the jitter
 const SHARE = params.get('share') === '1';   // the clip and QR code are off unless asked for
@@ -650,6 +650,7 @@ class Play extends Phaser.Scene {
     // One cue word per lane above the nearest thing: READY while it approaches, NOW! while its window is open.
     this.cueText = {};
     for (const lane of ['L', 'R']) this.cueText[lane] = this.add.text(0, 0, '', txt(110, C.yellow)).setOrigin(0.5).setDepth(20).setVisible(false);
+    this.bouquetText = this.add.text(0, 46, '', txt(40, C.yellow)).setOrigin(0, 0.5).setDepth(20);   // bouquets banked, beside the petals
     this.lastShoes = 0;
     perceiver = cameraWindowAlive() ? remotePerceiver : localPerceiver;
     perceiver.reset(settings.perceptron, settings.player, () => this.paused || this.sys.isPaused());
@@ -798,7 +799,7 @@ class Play extends Phaser.Scene {
     this.actIntroUntil = this.g.t + 4.4;
     this.coachLine = shoesLive(this.g) ? a.how : a.hint;   // shoe mode: say what to do with the foot, plainly
     this.nextGardenUpdate = 0;
-    say(a.intro.join(' '));
+    say(this.g.round > 1 ? ROUND_LINES[this.g.round] || `Round ${this.g.round}!` : a.intro.join(' '));
   }
 
   showFeedback(text, color) {
@@ -829,10 +830,10 @@ class Play extends Phaser.Scene {
     // A hit lights the whole lane white: on a dim projector over a black belt it is the one thing nobody can miss.
     if (th.result === 'hit') this.laneFlash(th.lane, C.white, 350, L, 0.9); else this.laneFlash(th.lane, C.amber, 400, L);
     if (th.kind === 'flower' && th.result === 'hit') {
-      this.fx.petals.explode(140, x, y);
-      this.showFeedback('SMASH!', C.yellow);
-      this.burst(x, y, C.yellow, 'SMASH!');
-      this.cameras.main.shake(120, 0.006);
+      this.fx.petals.explode(th.golden ? 220 : 140, x, y);
+      this.showFeedback(th.golden ? `GOLDEN! x${RULES.goldenX}` : 'SMASH!', C.yellow);
+      this.burst(x, y, C.yellow, th.golden ? `x${RULES.goldenX}!` : 'SMASH!');
+      this.cameras.main.shake(120, th.golden ? 0.009 : 0.006);
       const size = PLANT_SCALE * Math.min(1.15, L.W / FIELD.width);
       const stamp = this.add.image(x, y, this.flowerKey(th.id)).setScale(size, size * 1.25);
       this.leaveStamp(stamp, y);
@@ -954,6 +955,11 @@ class Play extends Phaser.Scene {
         touch: th.touchedT === undefined ? null : Math.round((th.touchedT - th.arriveT) * 100) / 100 });
     }
     if (out.actChanged) logRemote({ what: 'act', act: g.act, round: g.round, t: Math.round(g.t) });
+    if (out.bouquet) {   // four petals banked: both lanes light up gold
+      this.showFeedback('BOUQUET!', C.yellow);
+      for (const lane of ['L', 'R']) this.laneFlash(lane, C.yellow, 500, L, 0.8);
+      sound.play('act');
+    }
     if (Math.floor(g.t / 5) !== Math.floor((g.t - dt) / 5)) logRemote({ what: 'pace', cadence: out.pace.cadence, steps: g.stats.steps, form: Math.round(out.form * 100), shoes: shoesLive(g), base: g.base, t: Math.round(g.t) });
 
     // coach cue every 20 s: the server therapist (Gemini inside the therapist's limits), local rules offline
@@ -994,8 +1000,10 @@ class Play extends Phaser.Scene {
         const arc = this.add.graphics({ x: 0, y: 34 }).setScale(1, 0.48);
         const plant = this.add.image(0, 0, th.kind === 'flower' ? this.flowerKey(th.id) : 'seed')
           .setScale(th.kind === 'flower' ? PLANT_SCALE : 2.0);
+        if (th.golden) plant.setTint(0xffe44d);
+        const halo = this.add.ellipse(0, 20, 270, 160).setStrokeStyle(18, C.yellow, 1).setVisible(!!th.golden);   // a golden flower's ring
         // Pads travel with the exact rules position; tile decoration never snaps an obstacle's distance.
-        s = this.add.container(L.lanes[th.lane], L.top, [mark, pad, plant, arc]).setDepth(5);
+        s = this.add.container(L.lanes[th.lane], L.top, [mark, pad, plant, arc, halo]).setDepth(5);
         this.sprites.set(th.id, s);
         if (th.kind === 'seed') {
           sound.play('seed');
@@ -1031,6 +1039,7 @@ class Play extends Phaser.Scene {
       }
       s.windowOpen = windowOpen;
       plant.setVisible(!(th.kind === 'flower' && th.result === 'hit'));
+      if (th.golden) s.list[4].setScale(1 + 0.08 * Math.sin(g.t * Math.PI * 4)).setVisible(!th.result);
       if (th.kind === 'seed' && !th.result) plant.setRotation(plant.rotation + 0.15);
       else plant.setAngle(Math.sin(g.t * 3 + th.id) * 5);
     }
@@ -1056,6 +1065,14 @@ class Play extends Phaser.Scene {
     const g = this.g;
     const h = this.hud;
     h.clear();
+    // The petal bank at the top: four petals fill as flowers are hit (a full bouquet shows whole), never emptied by a miss.
+    const petals = g.stats.petals, filled = petals && petals % RULES.bouquetPetals === 0 ? RULES.bouquetPetals : petals % RULES.bouquetPetals;
+    for (let i = 0; i < RULES.bouquetPetals; i++) {
+      const x = L.W / 2 + (i - (RULES.bouquetPetals - 1) / 2) * 64;
+      h.fillStyle(C.yellow, i < filled ? 1 : 0.22); h.fillCircle(x, 46, 22);
+      h.lineStyle(4, C.yellow, 0.9); h.strokeCircle(x, 46, 22);
+    }
+    this.bouquetText.setText(g.stats.bouquets ? `x${g.stats.bouquets}` : '').setPosition(L.W / 2 + 2.5 * 64, 46);
 
     const gated = out.pace.gated;
     const beat = g.t * (g.limits.minCadence + 20) / 60;
@@ -1125,6 +1142,7 @@ class Home extends Phaser.Scene {
       `Score ${s.score}   ·   Form ${s.formPct}%`,
       `${s.steps} steps   ·   ${s.cadence} steps/min`,
       `Flowers stomped ${s.stompPct ?? 0}%${s.dodgePct == null ? '' : `   ·   Seeds dodged ${s.dodgePct}%`}`,
+      `Petals ${s.petals ?? 0}   ·   Bouquets ${s.bouquets ?? 0}${s.goldenPct == null ? '' : `   ·   Golden ${s.goldenPct}%`}`,
       s.shoeMode ? `Long steps  left ${s.highLiftAvgCm?.L ?? '-'}   right ${s.highLiftAvgCm?.R ?? '-'}  (swing, camera)`
         : `High steps  left ${s.highLiftAvgCm?.L ?? '-'} cm   right ${s.highLiftAvgCm?.R ?? '-'} cm`,
     ];

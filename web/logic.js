@@ -55,6 +55,13 @@ export const RULES = {
   paceWarnOff: 0.3,
   paceGraceS: 3,
   points: { stomp: 10, dodge: 15 },
+  // Rounds stay interesting: every goldenEvery-th flower is golden (goldenX points, same beat), every flower hit is a
+  // petal and bouquetPetals petals make a bouquet (petals never burn on a miss), and each round after the first adds
+  // roundSpeedUp to the plant speed.
+  goldenEvery: 4,
+  goldenX: 3,
+  bouquetPetals: 4,
+  roundSpeedUp: 0.2,
   // Shoe mode (feet.py boxes on the camera): a flower is smashed when a shoe covers it, a seed splats; a thing
   // that passes the toes resolves the other way. Distances are world cm on the field.
   shoeReachCm: 30,               // margin around the shoe's span when matching a thing
@@ -96,7 +103,8 @@ export function newGame(limits = {}) {
     score: 0,
     streak: 0,
     formSum: 0, formN: 0,
-    stats: { stomp: [0, 0], dodge: [0, 0], lifts: { L: [], R: [] }, steps: 0, stepsByFoot: { L: 0, R: 0 } },
+    stats: { stomp: [0, 0], dodge: [0, 0], golden: [0, 0], petals: 0, bouquets: 0, lifts: { L: [], R: [] }, steps: 0, stepsByFoot: { L: 0, R: 0 } },
+    flowerN: 0,                  // flowers spawned so far: every goldenEvery-th is golden
     walkLifts: { L: [], R: [] },   // act 1 lifts: the player's normal step height
     base: null,                    // {L, R} normal step height, set when act 1 ends
     shoeMode: false,               // shoes were seen in this game (for the report); shoesLive() says whether they drive it now
@@ -260,7 +268,8 @@ export function form(p) {
 function spawnThing(g, lane, distCm) {
   g.lastLane = lane;
   const kind = g.act === 'garden' ? 'flower' : 'seed';
-  const th = { id: g.nextId++, kind, lane, distCm, arriveT: null, result: null };
+  const golden = kind === 'flower' && ++g.flowerN % RULES.goldenEvery === 0;
+  const th = { id: g.nextId++, kind, lane, distCm, arriveT: null, result: null, ...(golden && { golden: true }) };
   g.things.push(th);
   g.spawned += 1;
   return th;
@@ -411,14 +420,20 @@ function resolve(g, th, result, f, out, extra = null) {
   th.resolvedT = g.t;
   const key = th.kind === 'flower' ? 'stomp' : 'dodge';
   g.stats[key][1] += 1;
+  if (th.golden) g.stats.golden[1] += 1;
   if (result === 'hit') {
     g.stats[key][0] += 1;
     g.streak += 1;
-    g.score += Math.round(RULES.points[key] * (0.5 + 0.5 * f) * (g.streak >= 5 ? 2 : 1));
+    g.score += Math.round(RULES.points[key] * (0.5 + 0.5 * f) * (g.streak >= 5 ? 2 : 1) * (th.golden ? RULES.goldenX : 1));
+    if (th.golden) g.stats.golden[0] += 1;
+    if (th.kind === 'flower') {   // a petal for the bank; a full bouquet is announced once
+      g.stats.petals += 1;
+      if (g.stats.petals % RULES.bouquetPetals === 0) { g.stats.bouquets += 1; out.bouquet = true; }
+    }
   } else {
     g.streak = 0;
   }
-  g.log.push({ id: th.id, kind: th.kind, lane: th.lane, result, t: g.t,
+  g.log.push({ id: th.id, kind: th.kind, lane: th.lane, result, t: g.t, ...(th.golden && { golden: true }),
     ...(th.placeCm !== undefined && { placementCm: Math.round(th.placeCm) }), ...extra });
   g.actResolved += 1;
   out.resolved.push(th);
@@ -433,7 +448,11 @@ function nextAct(g, out) {
   }
   const { rounds, seeds } = plan(g);
   const roundEnd = seeds ? 'storm' : 'garden';
-  if (g.act === roundEnd && g.round < rounds) { g.round += 1; g.act = 'garden'; }   // another round
+  if (g.act === roundEnd && g.round < rounds) {   // another round, a little faster
+    g.round += 1;
+    g.act = 'garden';
+    g.limits.speedScale = Math.min(SPEED_RANGE[1], speedScale(g) + RULES.roundSpeedUp);
+  }
   else g.act = { walk: 'garden', garden: seeds ? 'storm' : 'home', storm: 'home' }[g.act];
   g.actT = 0;
   g.actResolved = 0;
@@ -484,6 +503,9 @@ export function summary(g) {
     cadence: p.cadence,
     asymmetryPct: p.asym === null ? null : Math.round(p.asym * 100),
     stompPct: pct(g.stats.stomp),
+    goldenPct: pct(g.stats.golden),
+    petals: g.stats.petals,
+    bouquets: g.stats.bouquets,
     dodgePct: pct(g.stats.dodge),
     liftAvgCm: { L: avg(g.stats.lifts.L), R: avg(g.stats.lifts.R) },
     liftMaxCm: { L: g.stats.lifts.L.length ? Math.max(...g.stats.lifts.L) : null, R: g.stats.lifts.R.length ? Math.max(...g.stats.lifts.R) : null },
