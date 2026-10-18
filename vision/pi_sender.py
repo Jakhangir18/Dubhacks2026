@@ -37,18 +37,29 @@ class Sender:
 
     def send(self, events: list[dict]) -> dict | None:
         body = json.dumps({"events": events})
-        for _attempt in range(2):  # one reconnect if the kept-alive connection went stale
+        for attempt in range(2):
             try:
                 if self.conn is None:
                     self.conn = self._connect()
                 self.conn.request("POST", "/api/events", body=body, headers={"content-type": "application/json"})
                 return json.loads(self.conn.getresponse().read())
+            except (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError):
+                # The kept-alive connection was already closed by the server, so nothing was delivered:
+                # reconnect and send once more.
+                self._drop()
+                if attempt == 1:
+                    break
             except (OSError, http.client.HTTPException, ValueError):
-                if self.conn is not None:
-                    self.conn.close()
-                self.conn = None
+                # Timeout or bad reply: the server may already have the events, so never resend (no double steps).
+                self._drop()
+                break
         self.errors += 1
         return None
+
+    def _drop(self) -> None:
+        if self.conn is not None:
+            self.conn.close()
+        self.conn = None
 
     def lift(self, foot: str, lift_cm: float) -> dict | None:
         return self.send([{"foot": foot, "kind": "lift", "liftCm": round(lift_cm, 1), "source": self.source}])

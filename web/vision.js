@@ -103,7 +103,7 @@ export class FootTracker {
       const st = this.state[f];
       if (!ok(IDX[f].heel) || !ok(IDX[f].toe)) {
         // Foot out of view while lifted: drop the step rather than land it late.
-        if (st.lifted && t - (st.lastSeen ?? t) > TUNING.lostAfterS) st.lifted = false;
+        if (st.lifted && t - (st.lastSeen ?? t) > TUNING.lostAfterS) { st.lifted = false; st.lastSeen = undefined; }
         continue;
       }
       st.lastSeen = t;
