@@ -65,7 +65,8 @@ async def cap_perceive_body(request: Request, call_next):
     limits = {"/api/perceive": MAX_PERCEIVE_BYTES, "/api/perceive/session": MAX_SESSION_BYTES, "/api/events": MAX_EVENTS_BYTES}
     if request.method == "POST" and request.url.path in limits:
         size = request.headers.get("content-length")
-        if size is None or not size.isdigit() or int(size) > limits[request.url.path]:
+        strict = request.url.path != "/api/events"   # a chunked event sender has no length; the paid routes must declare one
+        if (size is None and strict) or (size is not None and (not size.isdigit() or int(size) > limits[request.url.path])):
             return Response(status_code=413)
     return await call_next(request)
 

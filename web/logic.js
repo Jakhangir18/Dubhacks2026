@@ -107,7 +107,7 @@ export function addEvent(g, ev) {
 export function addShoes(g, shoes, t = g.t) {
   const seen = shoes.filter((s) => [s.xFrac, s.nearCm, s.farCm].every(Number.isFinite)).slice(0, 2)
     .sort((a, b) => a.xFrac - b.xFrac);
-  if (!seen.length) return [];   // an empty frame changes nothing: no mode switch, no stale shoes refreshed
+  if (!seen.length) { g.shoes = []; return []; }   // the feet left the picture: no mode switch, but no stale shoes either
   if (g.lastShoeT !== null && t - g.lastShoeT > RULES.shoeGapS) resetShoes(g);   // the feet were out of view
   g.shoeMode = true;
   g.lastShoeT = t;
@@ -141,6 +141,7 @@ export function shoesLive(g) {
 // After a pause or a gap: forget the sightings and the half-finished swings, so nothing lands on stale geometry.
 export function resetShoes(g) {
   g.shoes = [];
+  g.lastShoeT = null;   // shoes drive the game again only from the next sighting
   for (const lane of ['L', 'R']) g.shoeTrack[lane] = { phase: 'back', max: -Infinity, min: Infinity };
 }
 
@@ -257,7 +258,11 @@ export function step(g, dt) {
       if (shoeOn(g, th)) resolve(g, th, th.kind === 'flower' ? 'hit' : 'miss', f, out);
       else if (th.distCm < -g.toeCm) resolve(g, th, th.kind === 'flower' ? 'miss' : 'hit', f, out);
     } else if (th.arriveT !== null && g.t - th.arriveT > RULES.afterS) {
-      resolve(g, th, judge(g, th) ? 'hit' : 'miss', f, out);
+      if (judge(g, th)) resolve(g, th, 'hit', f, out);
+      // A game the shoes have driven keeps the toe rule when they drop out: no lift was ever asked for, so a thing
+      // past the line is not a miss until it passes the toes (a seed in a clear lane is still a dodge).
+      else if (!g.shoeMode) resolve(g, th, 'miss', f, out);
+      else if (th.distCm < -g.toeCm) resolve(g, th, th.kind === 'flower' ? 'miss' : 'hit', f, out);
     }
   }
   g.things = g.things.filter((th) => !th.result || g.t - th.resolvedT < 1.5);

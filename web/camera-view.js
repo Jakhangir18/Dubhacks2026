@@ -12,7 +12,7 @@ const CORNERS = ['FRONT-LEFT', 'FRONT-RIGHT', 'BACK-RIGHT', 'BACK-LEFT'];
 
 const store = window.Warp.store;
 // The saved shoe calibration, read once and after each save (this window is the only writer).
-let saved = { points: store.get(CAM_KEY + '.points', null), picture: store.get(CAM_KEY + '.picture', 'local') };
+let saved = { points: store.get(CAM_KEY + '.points', null), picture: store.get(CAM_KEY + '.picture', null) };   // picture null: unknown, shown anywhere
 // A newer calibration on the server (another window, or set by hand) replaces the local one.
 async function pullShoeCal() {
   try {
@@ -69,7 +69,7 @@ function drawShoes(w, h) {
   }
   const pts = calib.active ? calib.points : (Array.isArray(saved.points) ? saved.points : []);
   const picture = feedLive() ? 'feed' : 'local';
-  if (!calib.active && saved.picture !== picture) return;   // clicked on the other camera's picture: not shown over this one
+  if (!calib.active && saved.picture && saved.picture !== picture) return;   // clicked on the other camera's picture: not shown over this one
   octx.strokeStyle = '#ff2d95'; octx.fillStyle = '#ff2d95'; octx.lineWidth = 4;
   pts.forEach(([x, y], i) => {
     octx.beginPath(); octx.arc(x * w, y * h, 10, 0, Math.PI * 2); octx.fill();
@@ -240,7 +240,7 @@ $('pose').onchange = () => { tracker.emit = $('pose').checked; store.set('zombie
 
 // Shoe calibration: click the four projected zone corners in the camera picture, in the zone's own order.
 // The homography maps normalised camera coordinates onto the 720 x 1280 game field; the game reads it from storage.
-const FIELD = [[0, 0], [720, 0], [720, 1280], [0, 1280]];
+const FIELD = [[0, 0], [window.Warp.FIELD.width, 0], [window.Warp.FIELD.width, window.Warp.FIELD.height], [0, window.Warp.FIELD.height]];
 const help = $('calib-help');
 $('calib').onclick = () => {
   calib = { points: [], active: true };
@@ -270,7 +270,7 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && calib.acti
 setInterval(() => {
   const live = performance.now() - shoes.at < 1500;
   const picture = feedLive() ? 'feed' : 'local';
-  const calibrated = saved.points ? (saved.picture === picture ? 'calibrated' : 'calibrated on the other camera: calibrate again') : 'not calibrated';
+  const calibrated = saved.points ? (!saved.picture || saved.picture === picture ? 'calibrated' : 'calibrated on the other camera: calibrate again') : 'not calibrated';
   $('st-shoes').textContent = live ? `shoes ${shoes.boxes.length} · ${calibrated}` : `shoes: ${calibrated}, none seen`;
   $('st-shoes').classList.toggle('on', live);
   // feet.py's picture in, the local video out, and the overlay redrawn when no tracker frame will do it.

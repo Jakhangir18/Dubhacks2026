@@ -128,14 +128,16 @@ if (params.has('scene')) window.zombiewalk = { perceiver: localPerceiver, tracke
 // checked before any calibration), then onto the field: into the game being played, or, on the title and home
 // screens, into a scratch game whose derived steps reach the bus, so walking on the pad starts the game.
 const scratch = newGame();
+const scratchLayout = floorLayout(FIELD.width, FIELD.height);
 window.addEventListener(SHOES_EVENT, (e) => {
   if (cameraWindowAlive()) send('shoes-seen', { boxes: e.detail.boxes });
   if (!camH) return;
   const play = window.zombieGame?.scene.getScene('play');
   if (play?.sys.isActive() && !play.paused && !zone.active) { play.feedShoes(e.detail.boxes); return; }
+  if (!window.zombieGame?.scene.isActive('title') || zone.active) return;   // only the title's walk-to-start needs steps
   const before = scratch.stats.steps;
   scratch.t = performance.now() / 1000;
-  addShoes(scratch, mapShoes(e.detail.boxes, floorLayout(FIELD.width, FIELD.height)));
+  addShoes(scratch, mapShoes(e.detail.boxes, scratchLayout));
   if (scratch.stats.steps > before) emitFoot({ foot: scratch.strikes[scratch.strikes.length - 1].foot, kind: 'strike', source: 'feet' });
 });
 
@@ -242,7 +244,7 @@ function openZone() {
   zone.open(() => {
     game.scene.stop('zone');
     for (const scene of scenes) { scene.scene.resume(); scene.scene.setVisible(true); }
-    if (play) play.frameWall = performance.now();
+    if (play) { play.frameWall = performance.now(); resetShoes(play.g); }   // sightings from before the setup are stale
     // A session response or clip upload may have completed while Home was paused.
     if (home) {
       home.showLab();
