@@ -48,7 +48,7 @@ import numpy as np
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision
 
-from feet import open_camera  # noqa: F401  (re-exported so callers need one import)
+from feet import ShoeSender, open_camera
 
 MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
              "pose_landmarker_{0}/float16/latest/pose_landmarker_{0}.task")  # lite ~6 MB, full ~9 MB, heavy ~30 MB
@@ -865,6 +865,7 @@ def main():
                                     "one's gait summary for the AI review (with --video: needs --session-id)")
     p.add_argument("--player", help="with --server: follow only this player's sessions (default: every player)")
     p.add_argument("--once", action="store_true", help="with --server: stop after the first finished session")
+    p.add_argument("--no-preview", action="store_true", help="no preview window: with --server the dashboard shows the picture")
     p.add_argument("--session-id", help="with --video and --server: the game session this recording belongs to")
     p.add_argument("--offset", type=float, default=0.0,
                    help="with --session-id: video seconds at which that session started")
@@ -893,10 +894,18 @@ def main():
     if args.server and not args.video:
         follower = SessionFollower(args.server, rec, base, args.player, args.once)
         threading.Thread(target=follower.run, daemon=True).start()
+    sender = ShoeSender(args.server, source="side") if args.server and not args.video else None   # the dashboard's side view
+    last_post = 0.0
     try:
         while not rec.stop.is_set() and rec.capturing():
             frame = rec.preview
             if frame is None:
+                time.sleep(0.03)
+                continue
+            if sender is not None and time.time() - last_post >= 0.5:   # two pictures a second, like feet.py
+                sender.preview(frame)
+                last_post = time.time()
+            if args.no_preview:
                 time.sleep(0.03)
                 continue
             cv2.imshow("gait (q to stop)", cv2.resize(frame, (PREVIEW_W, PREVIEW_W * frame.shape[0] // frame.shape[1])))

@@ -188,6 +188,10 @@ class ShoeSender:
         except Exception:  # noqa: BLE001 - no calibration yet, or offline
             return None
 
+    def preview(self, frame):
+        """The newest picture alone, for a camera that finds no shoes (the side camera): the dashboard shows it."""
+        self.send([], frame.shape[1], frame.shape[0], frame=frame)
+
     def send(self, boxes, w, h, frame=None, marks=None):
         event = {"kind": "shoes", "source": self.source,
                  "boxes": [[round(f.x1 / w, 4), round(f.y1 / h, 4), round(f.x2 / w, 4), round(f.y2 / h, 4), round(f.conf, 3)]

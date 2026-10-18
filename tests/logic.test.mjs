@@ -192,7 +192,7 @@ test('with no seeds the rounds are flowers only, lanes alternate, and each flowe
     return g.act === 'home';
   }, 120);
   assert.ok(gaps > 0);
-  assert.deepEqual(acts, ['walk', 'garden 1', 'garden 2', 'home']);
+  assert.deepEqual(acts, ['walk', 'garden 1', 'rest', 'garden 2', 'home']);   // a rest between rounds, walked through
   assert.equal(g.log.length, 8);
   assert.ok(g.log.every((l) => l.kind === 'flower'));
   for (let i = 1; i < g.log.length; i++) if (!roundStarts.has(i)) assert.notEqual(g.log[i].lane, g.log[i - 1].lane, 'lanes alternate');
@@ -482,7 +482,7 @@ test('rounds: flowers and seeds repeat before home, and the summary counts them'
   const g = newGame({ walkSeconds: 2, gardenPlants: 2, stormSeeds: 2, rounds: 2 });
   const acts = [];
   walkUntil(g, () => { if (acts[acts.length - 1] !== g.act) acts.push(g.act); return g.act === 'home'; }, 300);
-  assert.deepEqual(acts, ['walk', 'garden', 'storm', 'garden', 'storm', 'home']);
+  assert.deepEqual(acts, ['walk', 'garden', 'storm', 'rest', 'garden', 'storm', 'home']);   // a rest between rounds, walked through
   assert.equal(summary(g).rounds, 2);
 });
 

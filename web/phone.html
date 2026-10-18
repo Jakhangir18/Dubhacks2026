@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Side Camera</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { margin: 0; background: #070b10; color: #e8f3ec; font: 16px/1.4 system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; min-height: 100vh; }
+    header { padding: 12px 16px; display: flex; gap: 10px; align-items: center; }
+    h1 { margin: 0; font-size: 18px; } h1 b { color: #9cff5a; }
+    .chip { font-size: 12px; padding: 3px 10px; border-radius: 99px; border: 1px solid #24343a; color: #8aa39a; }
+    .chip.on { color: #000; background: #9cff5a; border-color: #9cff5a; }
+    main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 12px; }
+    video { width: 100%; max-height: 60vh; background: #000; border-radius: 12px; }
+    button { font: inherit; font-size: 20px; padding: 14px 28px; border-radius: 12px; border: 0; background: #9cff5a; color: #000; }
+    p { margin: 0; color: #8aa39a; font-size: 14px; text-align: center; }
+  </style>
+</head>
+<body>
+  <header><h1><b>Zombie Walk Home</b> · side camera</h1><span id="st" class="chip">idle</span></header>
+  <main>
+    <video id="v" playsinline muted autoplay></video>
+    <button id="go">Start the camera</button>
+    <p>Put the phone on a stand at the side of the pad, knee height, the whole body in view. Keep this page open; the dashboard shows the picture.</p>
+  </main>
+  <canvas id="c" hidden></canvas>
+  <script>
+    // The phone's camera, as pictures to the game server: five a second, 480 px on the long side. No video is stored.
+    const $ = (id) => document.getElementById(id);
+    const FPS = 5, LONG = 480;
+    let timer = null, busy = false, sent = 0;
+    async function start() {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+      $('v').srcObject = stream;
+      $('go').hidden = true;
+      try { await navigator.wakeLock?.request('screen'); } catch { /* the screen may still dim */ }
+      timer = setInterval(shot, 1000 / FPS);
+    }
+    async function shot() {
+      const v = $('v');
+      if (busy || !v.videoWidth) return;
+      busy = true;
+      try {
+        const scale = LONG / Math.max(v.videoWidth, v.videoHeight);
+        const c = $('c'); c.width = Math.round(v.videoWidth * scale); c.height = Math.round(v.videoHeight * scale);
+        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+        const jpeg = c.toDataURL('image/jpeg', 0.6);
+        const r = await fetch('/api/events', { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ events: [{ kind: 'frame', source: 'side', jpeg }] }) });
+        sent += 1;
+        $('st').textContent = r.ok ? `sending · ${sent}` : `server ${r.status}`;
+        $('st').classList.toggle('on', r.ok);
+      } catch (e) {
+        $('st').textContent = 'no connection'; $('st').classList.remove('on');
+      } finally { busy = false; }
+    }
+    $('go').onclick = () => start().catch((e) => { $('st').textContent = `camera: ${e.message}`; });
+  </script>
+</body>
+</html>

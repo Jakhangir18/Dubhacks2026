@@ -62,6 +62,11 @@ export const RULES = {
   goldenX: 3,
   bouquetPetals: 4,
   roundSpeedUp: 0.2,
+  // Between rounds the game rests: the world stops, the coach speaks, and restStepsN steps within restWindowS
+  // (after restGraceS, so the last steps of the round do not count) start the next round.
+  restStepsN: 4,
+  restWindowS: 3,
+  restGraceS: 1,
   // Shoe mode (feet.py boxes on the camera): a flower is smashed when a shoe covers it, a seed splats; a thing
   // that passes the toes resolves the other way. Distances are world cm on the field.
   shoeReachCm: 30,               // margin around the shoe's span when matching a thing
@@ -105,6 +110,8 @@ export function newGame(limits = {}) {
     formSum: 0, formN: 0,
     stats: { stomp: [0, 0], dodge: [0, 0], golden: [0, 0], petals: 0, bouquets: 0, lifts: { L: [], R: [] }, steps: 0, stepsByFoot: { L: 0, R: 0 } },
     flowerN: 0,                  // flowers spawned so far: every goldenEvery-th is golden
+    restT: null,                 // when the current rest between rounds began
+    roundStats: [0, 0],          // [hit, judged] flowers in the current round, for the coach's word between rounds
     walkLifts: { L: [], R: [] },   // act 1 lifts: the player's normal step height
     base: null,                    // {L, R} normal step height, set when act 1 ends
     shoeMode: false,               // shoes were seen in this game (for the report); shoesLive() says whether they drive it now
@@ -360,7 +367,7 @@ export function step(g, dt) {
   const scale = speedScale(g);
   const walking = p.cadence > 0;
   const cadence = p.ok ? p.cadence : walking ? Math.max(p.cadence, g.limits.minCadence * RULES.slowFloor) : 0;
-  const target = (cadence / 60) * RULES.strideCm * scale;   // slow walking slows the world a little; standing still stops it
+  const target = g.act === 'rest' ? 0 : (cadence / 60) * RULES.strideCm * scale;   // slow walking slows the world a little; standing still (or a rest) stops it
   // A stop glides to rest over about slowDownS of travel: a thing that close to the line still arrives and is judged
   // against the standing player, which is the feedback for breaking the beat.
   g.speed += (target - g.speed) * ease(dt, target > g.speed ? RULES.speedUpS : RULES.slowDownS);
@@ -382,6 +389,11 @@ export function step(g, dt) {
     return out;
   }
   if (g.act === 'home') return out;
+  if (g.act === 'rest') {   // between rounds: walking again (after the grace) starts the next round
+    const recent = g.strikes.filter((s) => s.t > g.restT + RULES.restGraceS && s.t > g.t - RULES.restWindowS);
+    if (recent.length >= RULES.restStepsN) beginRound(g, out);
+    return out;
+  }
 
   for (const th of g.things) {
     if (th.result) continue;
@@ -423,8 +435,10 @@ function resolve(g, th, result, f, out, extra = null) {
   const key = th.kind === 'flower' ? 'stomp' : 'dodge';
   g.stats[key][1] += 1;
   if (th.golden) g.stats.golden[1] += 1;
+  if (key === 'stomp') g.roundStats[1] += 1;
   if (result === 'hit') {
     g.stats[key][0] += 1;
+    if (key === 'stomp') g.roundStats[0] += 1;
     g.streak += 1;
     g.score += Math.round(RULES.points[key] * (0.5 + 0.5 * f) * (g.streak >= 5 ? 2 : 1) * (th.golden ? RULES.goldenX : 1));
     if (th.golden) g.stats.golden[0] += 1;
@@ -450,16 +464,28 @@ function nextAct(g, out) {
   }
   const { rounds, seeds } = plan(g);
   const roundEnd = seeds ? 'storm' : 'garden';
-  if (g.act === roundEnd && g.round < rounds) {   // another round, a little faster (speedScale reads g.round)
+  if (g.act === roundEnd && g.round < rounds) {   // another round, a little faster (speedScale reads g.round): rest first
     g.round += 1;
-    g.act = 'garden';
+    g.act = 'rest';
+    g.restT = g.t;
   }
   else g.act = { walk: 'garden', garden: seeds ? 'storm' : 'home', storm: 'home' }[g.act];
+  resetAct(g, out);
+}
+
+// The next round of flowers begins (after a rest): the coach has spoken, the player walks again.
+function beginRound(g, out) {
+  g.act = 'garden';
+  resetAct(g, out);
+}
+
+function resetAct(g, out) {
   g.actT = 0;
   g.actResolved = 0;
   g.spawned = 0;
   g.nextSpawnCm = g.travelledCm + 60;
   g.things = [];
+  if (g.act === 'garden') g.roundStats = [0, 0];
   out.actChanged = true;
 }
 
@@ -507,6 +533,7 @@ export function summary(g) {
     goldenPct: pct(g.stats.golden),
     petals: g.stats.petals,
     bouquets: g.stats.bouquets,
+    thisRound: { round: g.round, hit: g.roundStats[0], n: g.roundStats[1] },   // at a rest: the round just played (round is already the next)
     dodgePct: pct(g.stats.dodge),
     liftAvgCm: { L: avg(g.stats.lifts.L), R: avg(g.stats.lifts.R) },
     liftMaxCm: { L: g.stats.lifts.L.length ? Math.max(...g.stats.lifts.L) : null, R: g.stats.lifts.R.length ? Math.max(...g.stats.lifts.R) : null },

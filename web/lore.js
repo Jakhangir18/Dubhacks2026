@@ -12,6 +12,12 @@ export const ACTS = {
     hint: 'High step onto the glowing flower',
     how: 'Step on the flower when it reaches your foot',
   },
+  rest: {
+    title: 'ROUND DONE · CATCH YOUR BREATH',
+    intro: ['Nice round!', 'Walk when you are ready.'],
+    hint: 'Walk in place to start the next round',
+    how: 'Walk in place to start the next round',
+  },
   storm: {
     title: 'ACT 3 · PIP’S HICCUPS',
     intro: ['Rosa’s pod has seed hiccups.', 'Lift over the seeds!'],

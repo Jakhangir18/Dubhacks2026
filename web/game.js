@@ -39,7 +39,7 @@ const BOARD = params.get('floor') === '1';
 // On the pad the feet stand well down the belt, so the default line (0.54) can be out of their reach: ?line=0.68.
 const LINE = Math.min(0.85, Math.max(0.4, Number(params.get('line')) || 0.54));
 const settings = {
-  voice: Warp.store.get('zombiewalk.voiceOn', false),   // spoken lines are off until the team picks a voice (M)
+  voice: Warp.store.get('zombiewalk.voiceOn', true),   // the coach speaks between rounds and at the end; M mutes
   limits: {},                                       // the current player's limits from the server (therapist panel)
   player: Warp.store.get('zombiewalk.player', 'Player'),
   greeting: null,
@@ -143,6 +143,7 @@ if (params.has('scene')) window.zombiewalk = { perceiver: localPerceiver, tracke
 const scratch = newGame();
 const scratchLayout = floorLayout(FIELD.width, FIELD.height);
 window.addEventListener(SHOES_EVENT, (e) => {
+  if (e.detail.source === 'side') return;   // the side camera sends no shoes, only its picture
   if (cameraWindowAlive()) send('shoes-seen', { boxes: e.detail.boxes });
   if (!camH) return;
   const play = window.zombieGame?.scene.getScene('play');
@@ -171,7 +172,7 @@ window.addEventListener(MARKS_EVENT, (e) => {
 });
 
 // feet.py's camera picture goes on to the camera window, where the shoe calibration is clicked.
-window.addEventListener(FRAME_EVENT, (e) => { if (cameraWindowAlive()) send('frame-seen', { jpeg: e.detail.jpeg }); });
+window.addEventListener(FRAME_EVENT, (e) => { if (e.detail.source !== 'side' && cameraWindowAlive()) send('frame-seen', { jpeg: e.detail.jpeg }); });   // the side camera's pictures go to the dashboard, not here
 
 // Foot events from the camera window on the laptop screen; the game stamps them on arrival like any source.
 // While the camera window runs, this window's own camera (V) would count every step twice: ignore it.
@@ -852,6 +853,7 @@ class Play extends Phaser.Scene {
     this.actIntroUntil = this.g.t + 4.4;
     this.coachLine = shoesLive(this.g) ? a.how : a.hint;   // shoe mode: say what to do with the foot, plainly
     this.nextGardenUpdate = 0;
+    if (this.g.act === 'rest') return;   // the coach speaks here instead (askCoach)
     say(this.g.round > 1 ? ROUND_LINES[this.g.round] || `Round ${this.g.round}!` : a.intro.join(' '));
   }
 
@@ -945,12 +947,14 @@ class Play extends Phaser.Scene {
     let done, within;
     if (g.act === 'walk') { done = 0; within = Math.min(1, g.walkGoodS / g.limits.walkSeconds); }
     else if (g.act === 'garden') { done = 1 + perRound * (g.round - 1); within = Math.min(1, g.actResolved / g.limits.gardenPlants); }
+    else if (g.act === 'rest') { done = 1 + perRound * (g.round - 1); within = 0; }   // between rounds: the next round is about to start
     else if (g.act === 'storm') { done = 2 + perRound * (g.round - 1); within = Math.min(1, g.actResolved / g.limits.stormSeeds); }
     else return 1;
     return (done + within) / total;
   }
 
-  async askCoach() {
+  // The coach's line goes on the floor and the dashboard; it is spoken only between rounds and at the end (speak).
+  async askCoach(speak = false) {
     const g = this.g;
     const sum = summary(g);
     let cue;
@@ -964,7 +968,9 @@ class Play extends Phaser.Scene {
     }
     if (!this.sys.isActive() || this.g !== g || !cue) return;
     this.coachLine = cue;
-    say(cue);
+    this.nextGardenUpdate = 0;
+    logRemote({ what: 'cue', say: cue, act: g.act, round: g.round, t: Math.round(g.t) });
+    if (speak) say(cue);
   }
 
   localCue(sum) {
@@ -1008,6 +1014,7 @@ class Play extends Phaser.Scene {
         touch: th.touchedT === undefined ? null : Math.round((th.touchedT - th.arriveT) * 100) / 100 });
     }
     if (out.actChanged) logRemote({ what: 'act', act: g.act, round: g.round, t: Math.round(g.t) });
+    if (out.actChanged && g.act === 'rest') this.askCoach(true);   // between rounds the coach speaks about the round just played
     if (out.bouquet) {   // four petals banked: both lanes light up gold
       this.showFeedback('BOUQUET!', C.yellow);
       for (const lane of ['L', 'R']) this.laneFlash(lane, C.yellow, 500, L, 0.8);

@@ -31,6 +31,16 @@
     #msg { color: var(--cyan); min-height: 1.4em; }
     .wide { grid-column: 1 / -1; }
     .live-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    /* One dashboard: the walk first (cameras, live numbers, the coach), then the latest walk's review, then the rest. */
+    #live { order: -2; } #latest { order: -1; }
+    .cams { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .cam { background: #000; border-radius: 10px; overflow: hidden; position: relative; aspect-ratio: 4 / 3; }
+    .cam img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .cam small { position: absolute; left: 8px; top: 6px; font-size: 12px; color: var(--dim); background: rgba(0,0,0,.5); padding: 2px 6px; border-radius: 6px; }
+    .cam small.on { color: #000; background: var(--green); }
+    .coach { margin: 10px 0 0; padding: 10px 14px; border-radius: 10px; background: #0b1216; border: 1px solid var(--line); font-size: 18px; } .coach b { color: var(--yellow); }
+    #latest iframe { width: 100%; height: 1150px; border: 0; border-radius: 10px; background: #000; }
+    body.calm .settings { display: none; }
     .stat b { display: block; font-size: 28px; line-height: 1.1; color: var(--green); } .stat small { color: var(--dim); font-size: 12px; }
     .stat.off b { color: var(--dim); }
     .lab-grid { display: flex; flex-wrap: wrap; gap: 24px; }
@@ -92,7 +102,11 @@
     </section>
 
     <section class="wide" id="live">
-      <h2>Live walk</h2>
+      <h2>Live walk <button id="toggle-settings" style="float:right;font-size:13px">Settings</button> <a href="camera.html" target="zombiewalk-camera" style="float:right;margin-right:10px;font-size:13px;color:var(--cyan)">Calibrate shoes</a></h2>
+      <div class="cams">
+        <div class="cam"><img id="cam-top" alt="top camera, the pad"><small id="cam-top-st">top camera · feet.py</small></div>
+        <div class="cam"><img id="cam-side" alt="side camera, the phone"><small id="cam-side-st">side camera · phone</small></div>
+      </div>
       <div class="live-grid">
         <div class="stat off"><b id="lv-state">no game running</b><small id="lv-sub">the game opens a session when the walk starts</small></div>
         <div class="stat"><b id="lv-pace">–</b><small>steps per minute · game</small></div>
@@ -104,6 +118,11 @@
         <div class="stat off"><b id="lv-cam">–</b><small>side camera (the phone)</small></div>
       </div>
       <p class="hint" id="lv-last"></p>
+      <p class="coach"><b>Coach</b> · <span id="lv-cue">waiting for the walk</span></p>
+    </section>
+    <section class="wide" id="latest">
+      <h2>Latest walk</h2>
+      <iframe id="latest-frame" src="/dashboard/" title="the latest walk's review and comparison" loading="lazy"></iframe>
     </section>
     <section class="wide" id="perceptron-lab">
       <h2>Perceptron lab</h2>
@@ -398,6 +417,45 @@
       } catch { $('lv-state').textContent = 'live view: server not reachable'; }
     }
     setInterval(() => live().catch(() => {}), 3000); live().catch(() => {});
+
+    // ---------- the two cameras, straight from the server's event stream (feet.py pictures and the phone's) ----------
+    const camSeen = { top: 0, side: 0 };
+    function camStream() {
+      let ws;
+      try { ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/game`); } catch { return; }
+      ws.onmessage = (m) => {
+        let events; try { events = JSON.parse(m.data); } catch { return; }
+        for (const ev of Array.isArray(events) ? events : [events]) {
+          if (ev.kind !== 'frame') continue;
+          const side = ev.source === 'side';
+          $(side ? 'cam-side' : 'cam-top').src = ev.jpeg;
+          camSeen[side ? 'side' : 'top'] = performance.now();
+        }
+      };
+      ws.onclose = () => setTimeout(camStream, 2000);
+    }
+    camStream();
+    setInterval(() => {
+      for (const [k, id] of [['top', 'cam-top-st'], ['side', 'cam-side-st']]) {
+        const fresh = camSeen[k] > 0 && performance.now() - camSeen[k] < 4000;
+        $(id).classList.toggle('on', fresh);
+        $(id).textContent = `${k === 'top' ? 'top camera · feet.py' : 'side camera · phone'} · ${fresh ? 'live' : camSeen[k] ? 'lost' : 'waiting'}`;
+      }
+    }, 1000);
+    // The coach's latest line comes through the run log (the game posts it there).
+    async function cue() {
+      try {
+        const rows = await api('/api/log?n=60');
+        const last = [...rows].reverse().find((r) => r.what === 'cue');
+        if (last) $('lv-cue').textContent = last.say;
+      } catch { /* server away: keep the last line */ }
+    }
+    setInterval(() => cue().catch(() => {}), 3000); cue().catch(() => {});
+    // The walk first: player, limits and rewards stay behind the Settings button.
+    for (const s of document.querySelectorAll('main > section')) if (!['live', 'latest', 'perceptron-lab'].includes(s.id) && !s.querySelector('#sessions')) s.classList.add('settings');
+    document.body.classList.add('calm');
+    $('toggle-settings').onclick = () => document.body.classList.toggle('calm');
+    setInterval(() => { const f = $('latest-frame'); if (f && !document.hidden) f.src = `/dashboard/?player=${encodeURIComponent($('players').value || 'Player')}&t=${Date.now()}`; }, 60000);
 
     $('load').onclick = () => load($('newname').value.trim() || $('players').value);
     $('players').onchange = () => load($('players').value);
