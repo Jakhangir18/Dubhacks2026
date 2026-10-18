@@ -1,10 +1,10 @@
 // Zombie Walk Home: Phaser scenes, art, HUD and input. Rules live in logic.js.
 // Floor projection: things arrive at the pad's front edge; ghost feet mark the toes below.
-import { ease, plan, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
+import { ease, plan, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS, ROUND_KINDS } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
 import { connectBridge, SHOES_EVENT, FRAME_EVENT, MARKS_EVENT } from './bridge.js';
-import { ACTS, ENDING, ROUND_LINES } from './lore.js';
+import { ACTS, ROUND_ACTS, ROUND_LABELS, endingLine, roundLine } from './lore.js';
 import { GardenSound } from './sound.js';
 import { WalkClip, uploadClip } from './clip.js';
 import { WalkingZone } from './zone.js';
@@ -22,7 +22,7 @@ const SHOW_METERS = false;
 
 const C = { green: 0x7cff4f, yellow: 0xffe44d, magenta: 0xff2d95, cyan: 0x2de2ff, orange: 0xff9a1f,
   white: 0xffffff, red: 0xff4d4d, violet: 0x9b6bff, path: 0x19352f, zone: 0x295d45,
-  lime: 0x9cff5a, amber: 0xffb21e, dodge: 0x2de2c4, pink: 0xff5fa2 };
+  lime: 0x9cff5a, amber: 0xffb21e, dodge: 0x2de2c4, pink: 0xff5fa2, lavender: 0xc9a4ff };   // lavender: Rosa's slippers
 const hex = (c) => `#${c.toString(16).padStart(6, '0')}`;
 const TEXT = { fontFamily: 'Trebuchet MS, system-ui, sans-serif', fontStyle: 'bold', color: '#ffffff',
   stroke: '#19352f', strokeThickness: 8 };
@@ -72,10 +72,19 @@ async function loadPlayer() {
   if (params.get('demo') === '1') Object.assign(settings.limits, DEMO);
   const speed = Warp.store.get('zombiewalk.speedScale', null);   // the operator's [ ] setting wins on this laptop
   if (Number.isFinite(speed)) settings.limits.speedScale = speed;
+  urlRounds(settings.limits);
   settings.greeting = plan.status === 'fulfilled' ? plan.value.say : null;
+}
+// ?rounds=flowers,seedStomp,slippers: the round types in order on this laptop (logic.js plan() reads the list);
+// ?rounds=3: that many rounds of flowers.
+function urlRounds(limits) {
+  const asked = (params.get('rounds') || '').trim();
+  if (/^\d+$/.test(asked)) limits.rounds = Number(asked);
+  else if (asked) limits.roundPlan = asked;
 }
 let playerReady = loadPlayer();
 if (params.get('demo') === '1') Object.assign(settings.limits, DEMO);   // ?demo=1: a short game for judges
+urlRounds(settings.limits);   // also before the player loads: ?scene=play starts without waiting for it
 
 let speechId = 0;
 let currentUtterance = null;   // held so Chrome cannot garbage-collect it before onend fires
@@ -366,6 +375,7 @@ const HD = new Set(['fence', 'flower-bell', 'flower-marigold', 'flower-rose', 'f
 const CONCEPT_ART = { 'gus-idle': 'gus-pvz', 'gus-step': 'gus-pvz', 'gus-celebrate': 'gus-pvz' };
 const SCENERY = ['fence-left', 'fence-right', 'home-view'];
 const PLANT_SCALE = 1.7;   // generated plants are drawn larger than the old SVG box
+const SLIPPER_SCALE = 1.25;   // the drawn slipper (128 x 176, see makeTextures) about as tall as a flower
 const POD_SCALE = 1;
 const FILL = new Set(['fence', 'tile-grass-light', 'tile-grass-dark', 'tile-target']);
 function useHdArt(scene) {
@@ -445,6 +455,27 @@ function makeTextures(scene) {
     ctx.stroke(new Path2D('M29 50 Q7 59 17 84 Q25 101 23 106 Q24 117 41 116 Q60 116 60 102 L67 75 Q73 53 55 48Z'));
     for (const [x, y, rx, ry] of [[21, 33, 11, 14], [43, 24, 10, 13], [62, 31, 8, 11]]) {
       ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+    canvas.refresh();
+  }
+  // Rosa's slippers seen from above, toe up: no art file yet, so they are drawn here. Each group's ellipses go down
+  // grown by 8 px in its outline colour first, then in its fill, so every part gets one thick outline. The left
+  // slipper's toe leans right (the big toe); the right one is its mirror.
+  const SLIPPER = [   // [[x, y, rx, ry], ...], fill, outline on a 128 x 176 canvas
+    [[[66, 60, 44, 50], [60, 118, 40, 50]], '#c9a4ff', '#0b1a14'],                                         // toe and heel
+    [[[60, 124, 27, 38]], '#f6eeff', '#7856b0'],                                                            // the opening
+    [[[30, 88, 12, 12], [45, 82, 12, 12], [60, 80, 12, 12], [75, 82, 12, 12], [90, 88, 12, 12]], '#ffffff', '#0b1a14'],   // fluffy trim
+    [[[66, 38, 19, 19]], '#ffffff', '#0b1a14'],                                                             // pom-pom
+  ];
+  for (const lane of ['l', 'r']) {
+    const key = `slipper-${lane}`;
+    if (scene.textures.exists(key)) continue;
+    const canvas = scene.textures.createCanvas(key, 128, 176);
+    const ctx = canvas.getContext();
+    if (lane === 'r') { ctx.translate(128, 0); ctx.scale(-1, 1); }
+    for (const [parts, fill, outline] of SLIPPER) for (const [color, grow] of [[outline, 8], [fill, 0]]) {
+      ctx.fillStyle = color;
+      for (const [x, y, rx, ry] of parts) { ctx.beginPath(); ctx.ellipse(x, y, rx + grow, ry + grow, 0, 0, Math.PI * 2); ctx.fill(); }
     }
     canvas.refresh();
   }
@@ -689,6 +720,9 @@ class Title extends Phaser.Scene {
   }
 }
 
+// The act's lines: a garden round speaks for its own type (flowers, Pip's seeds, Rosa's slippers).
+const actLore = (g) => (g.act === 'garden' && ROUND_ACTS[g.roundType]) || ACTS[g.act];
+
 // ---------- the walk home ----------
 class Play extends Phaser.Scene {
   constructor() { super('play'); }
@@ -763,7 +797,7 @@ class Play extends Phaser.Scene {
         this.lift[e.foot] = Math.max(this.lift[e.foot], e.liftCm);
         const next = this.g.things.filter(th => th.lane === e.foot && !th.result)
           .sort((a, b) => a.distCm - b.distCm)[0];
-        if (next && this.lift[e.foot] >= needCm(this.g, next.kind, e.foot)) this.meterFlash[e.foot] = 0.2;
+        if (next && this.lift[e.foot] >= needCm(this.g, next, e.foot)) this.meterFlash[e.foot] = 0.2;
         const asked = this.g.act === 'garden' ? 'flower' : this.g.act === 'storm' ? 'seed' : null;   // nothing asked in act 1
         if (asked && !this.highSound[e.foot] && e.liftCm >= needCm(this.g, asked, e.foot)) {
           this.highSound[e.foot] = true;
@@ -845,7 +879,7 @@ class Play extends Phaser.Scene {
   yFor(distCm, L) { return fieldY(distCm, L); }
 
   showAct() {
-    const a = ACTS[this.g.act];
+    const a = actLore(this.g);
     if (!a) return;
     sound.play('act');
     const { rounds, seeds } = plan(this.g);   // the clip records the last act of the last round
@@ -854,7 +888,8 @@ class Play extends Phaser.Scene {
     this.coachLine = shoesLive(this.g) ? a.how : a.hint;   // shoe mode: say what to do with the foot, plainly
     this.nextGardenUpdate = 0;
     if (this.g.act === 'rest') return;   // the coach speaks here instead (askCoach)
-    say(this.g.round > 1 ? ROUND_LINES[this.g.round] || `Round ${this.g.round}!` : a.intro.join(' '));
+    // A later round announces itself and what it brings; the storm act always says its own lines.
+    say(this.g.act === 'garden' && this.g.round > 1 ? roundLine(this.g.round, this.g.roundType) : a.intro.join(' '));
   }
 
   showFeedback(text, color) {
@@ -876,10 +911,12 @@ class Play extends Phaser.Scene {
   }
 
   resolveFx(th, L) {
-    perceiver.checkStep(th);
-    send('resolved', { th: { kind: th.kind, lane: th.lane, result: th.result } });
-    sound.play(th.result !== 'hit' ? 'miss' : th.kind === 'flower' ? 'stomp' : 'dodge');
-    if (th.result === 'hit') reaction(th.kind === 'flower' ? 'stomp' : 'dodge');
+    // Perceptron has a question for a flower (stomp) and a seed to keep clear of (lift) only (server/perceive.py):
+    // a seed to squish would be asked the lift question and a slipper is refused, so those are not sent.
+    if (th.kind === 'flower' || !th.target) perceiver.checkStep(th);
+    send('resolved', { th: { kind: th.kind, target: th.target, lane: th.lane, result: th.result } });   // target: stepped on, not dodged
+    sound.play(th.result !== 'hit' ? 'miss' : th.target ? 'stomp' : 'dodge');
+    if (th.result === 'hit') reaction(th.target ? 'stomp' : 'dodge');
     const x = L.lanes[th.lane];
     const y = this.yFor(th.distCm, L);   // where the thing is now: it resolves a little past the line
     // A hit lights the whole lane white: on a dim projector over a black belt it is the one thing nobody can miss.
@@ -903,6 +940,7 @@ class Play extends Phaser.Scene {
         this.leaveStamp(stamp, y, true);
       }
     }
+    else if (th.target) this.targetFx(th, x, y);   // a seed to squish or a slipper
     else if (th.result === 'hit') {
       this.fx.sparks.explode(40, x, y); this.cameras.main.flash(140, 190, 255, 235);
       this.showFeedback('DODGED!', C.dodge);
@@ -911,15 +949,39 @@ class Play extends Phaser.Scene {
     else {
       this.fx.goo.explode(40, x, y); this.cameras.main.shake(160, 0.006); this.showFeedback('SPLAT', C.pink);
       this.burst(x, y, C.pink, 'SPLAT!');
-      const blot = this.add.graphics({ x, y });
-      blot.fillStyle(C.pink, 0.8); blot.fillEllipse(0, 0, 220, 130);
-      for (let i = 0; i < 7; i++) {
-        const angle = i * Math.PI * 2 / 7;
-        blot.fillEllipse(Math.cos(angle) * 100, Math.sin(angle) * 60, 60, 60);
-      }
-      blot.lineStyle(12, 0xffacd0, 0.8); blot.strokeEllipse(0, 0, 180, 100);
-      this.leaveStamp(blot, y);
+      this.pinkBlot(x, y);
     }
+  }
+
+  // The round types' own targets: Pip's seed squishes pink (gold when golden) and leaves a blot; a slipper says which
+  // foot got it. A miss just goes by, named in the banner.
+  targetFx(th, x, y) {
+    if (th.result !== 'hit') { this.showFeedback(th.kind === 'seed' ? 'ROLLED PAST' : 'MISSED', C.amber); return; }
+    if (th.kind === 'seed') {
+      const color = th.golden ? C.yellow : C.pink;
+      this.fx.goo.explode(40, x, y);
+      this.showFeedback(th.golden ? `GOLDEN! x${RULES.goldenX}` : 'SQUISH!', color);
+      this.burst(x, y, color, th.golden ? `x${RULES.goldenX}!` : 'SQUISH!');
+      this.cameras.main.shake(120, th.golden ? 0.009 : 0.006);
+      this.pinkBlot(x, y);
+      return;
+    }
+    const word = th.lane === 'L' ? 'LEFT!' : 'RIGHT!';
+    this.fx.sparks.explode(30, x, y);
+    this.showFeedback(word, C.lavender);
+    this.burst(x, y, C.lavender, word);
+  }
+
+  // A pink splat stamped on the lane: a seed under a foot, scrolling away under the feet.
+  pinkBlot(x, y) {
+    const blot = this.add.graphics({ x, y });
+    blot.fillStyle(C.pink, 0.8); blot.fillEllipse(0, 0, 220, 130);
+    for (let i = 0; i < 7; i++) {
+      const angle = i * Math.PI * 2 / 7;
+      blot.fillEllipse(Math.cos(angle) * 100, Math.sin(angle) * 60, 60, 60);
+    }
+    blot.lineStyle(12, 0xffacd0, 0.8); blot.strokeEllipse(0, 0, 180, 100);
+    this.leaveStamp(blot, y);
   }
 
   // One big, short burst at the thing: an expanding ring, a spiky flash and the word, all readable from above.
@@ -977,7 +1039,9 @@ class Play extends Phaser.Scene {
     if (sum.cadence < this.g.limits.minCadence) return 'A little faster, keep stepping';
     if (sum.asymmetryPct !== null && sum.asymmetryPct > 20) return 'Even steps, left and right the same';
     const shoes = shoesLive(this.g);   // shoe mode: it is about where the foot lands, not how high it goes
-    if (this.g.act === 'garden' && sum.stompPct !== null && sum.stompPct < 60) return shoes ? 'Step right onto the flower' : 'Knee up high, then stomp the flower';
+    // The garden act: how this round's own things go (flowers, seeds to squish or slippers), named as they are.
+    const target = ROUND_KINDS[this.g.roundType] ?? 'flower', share = sum.roundTypePct ? sum.roundTypePct[this.g.roundType] : sum.stompPct;
+    if (this.g.act === 'garden' && share != null && share < 60) return shoes ? `Step right onto the ${target}` : `Knee up high, then stomp the ${target}`;
     if (this.g.act === 'storm' && sum.dodgePct !== null && sum.dodgePct < 60) return shoes ? 'Keep that foot out of the seed\u2019s lane' : 'Lift the foot higher over the seed';
     return 'Great walking, keep it up';
   }
@@ -994,8 +1058,8 @@ class Play extends Phaser.Scene {
       if (this.g.act === 'home') {
         // The scene is about to close: play the sounds, skip visuals that would be torn down at once.
         for (const th of out.resolved) {
-          sound.play(th.result !== 'hit' ? 'miss' : th.kind === 'flower' ? 'stomp' : 'dodge');
-          if (th.result === 'hit') reaction(th.kind === 'flower' ? 'stomp' : 'dodge');
+          sound.play(th.result !== 'hit' ? 'miss' : th.target ? 'stomp' : 'dodge');
+          if (th.result === 'hit') reaction(th.target ? 'stomp' : 'dodge');
         }
         const timing = { segments: this.segments, pauses: this.pauses, wallSeconds: this.wallS() };
         this.scene.start('home', { summary: { ...summary(this.g), perceptron: perceiver.summary(), ...timing }, sessionId: this.sessionId }); return;
@@ -1009,7 +1073,7 @@ class Play extends Phaser.Scene {
       this.resolveFx(th, L);
       // The log says why: where each shoe stood (lane, toe and heel cm from the line, age of the sighting) and when the
       // thing was last touched relative to its arrival, so a run of misses can be read without a camera.
-      logRemote({ what: th.kind, lane: th.lane, result: th.result, at: Math.round(th.distCm), shoes: shoesLive(g), t: Math.round(g.t),
+      logRemote({ what: th.kind, target: th.target, lane: th.lane, result: th.result, at: Math.round(th.distCm), shoes: shoesLive(g), t: Math.round(g.t),
         feet: g.shoes.map((s) => [s.lane, Math.round(s.nearCm), Math.round(s.farCm), Math.round((g.t - s.t) * 1000)]),
         touch: th.touchedT === undefined ? null : Math.round((th.touchedT - th.arriveT) * 100) / 100 });
     }
@@ -1018,6 +1082,11 @@ class Play extends Phaser.Scene {
     if (out.bouquet) {   // four petals banked: both lanes light up gold
       this.showFeedback('BOUQUET!', C.yellow);
       for (const lane of ['L', 'R']) this.laneFlash(lane, C.yellow, 500, L, 0.8);
+      sound.play('act');
+    }
+    if (out.pair) {      // both slippers of a pair: both lanes light up lavender
+      this.showFeedback('A PAIR FOR ROSA!', C.lavender);
+      for (const lane of ['L', 'R']) this.laneFlash(lane, C.lavender, 500, L, 0.8);
       sound.play('act');
     }
     if (Math.floor(g.t / 5) !== Math.floor((g.t - dt) / 5)) logRemote({ what: 'pace', cadence: out.pace.cadence, steps: g.stats.steps, form: Math.round(out.form * 100), shoes: shoesLive(g), base: g.base, t: Math.round(g.t) });
@@ -1055,15 +1124,20 @@ class Play extends Phaser.Scene {
       let s = this.sprites.get(th.id);
       if (!s) {
         const pad = this.add.ellipse(0, 34, 300, 144).setStrokeStyle(12, C.lime, 0.6).setVisible(false);
-        // Shoe mode: a solid coloured disc under the thing once it is on the belt, for the camera (cyan flower, magenta seed).
-        const mark = this.add.ellipse(0, 20, 200, 120, th.kind === 'flower' ? 0x00e5ff : 0xff00c8, 1).setVisible(false);
+        // Shoe mode: a solid coloured disc under the thing once it is on the belt, for the camera: cyan under what is
+        // stepped on, magenta under what is kept clear of (see markHit in logic.js).
+        const mark = this.add.ellipse(0, 20, 200, 120, th.target ? 0x00e5ff : 0xff00c8, 1).setVisible(false);
         const arc = this.add.graphics({ x: 0, y: 34 }).setScale(1, 0.48);
-        const plant = this.add.image(0, 0, th.kind === 'flower' ? this.flowerKey(th.id) : 'seed')
-          .setScale(th.kind === 'flower' ? PLANT_SCALE : 2.0);
+        const art = th.kind === 'flower' ? this.flowerKey(th.id) : th.kind === 'slipper' ? `slipper-${th.lane.toLowerCase()}` : 'seed';
+        const plant = this.add.image(0, 0, art).setScale(th.kind === 'flower' ? PLANT_SCALE : th.kind === 'slipper' ? SLIPPER_SCALE : 2.0);
         if (th.golden) plant.setTint(0xffe44d);
-        const halo = this.add.ellipse(0, 20, 270, 160).setStrokeStyle(18, C.yellow, 1).setVisible(!!th.golden);   // a golden flower's ring
+        // A pulsing ring says "step on this" beyond plain flowers: gold when golden, pink round a seed to squish,
+        // lavender round a slipper; none round a flower or a seed to keep clear of.
+        const ring = th.golden ? C.yellow : !th.target || th.kind === 'flower' ? null : th.kind === 'seed' ? C.pink : C.lavender;
+        const halo = this.add.ellipse(0, 20, 270, 160).setStrokeStyle(18, ring ?? C.yellow, 1).setVisible(ring !== null);
         // Pads travel with the exact rules position; tile decoration never snaps an obstacle's distance.
         s = this.add.container(L.lanes[th.lane], L.top, [mark, pad, plant, arc, halo]).setDepth(5);
+        s.ringed = ring !== null;
         this.sprites.set(th.id, s);
         if (th.kind === 'seed') {
           sound.play('seed');
@@ -1099,13 +1173,13 @@ class Play extends Phaser.Scene {
       }
       s.windowOpen = windowOpen;
       plant.setVisible(!(th.kind === 'flower' && th.result === 'hit'));
-      if (th.golden) s.list[4].setScale(1 + 0.08 * Math.sin(g.t * Math.PI * 4)).setVisible(!th.result);
+      if (s.ringed) s.list[4].setScale(1 + 0.08 * Math.sin(g.t * Math.PI * 4)).setVisible(!th.result);
       if (th.kind === 'seed' && !th.result) plant.setRotation(plant.rotation + 0.15);
       else plant.setAngle(Math.sin(g.t * 3 + th.id) * 5);
     }
     for (const [id, s] of this.sprites) if (!live.has(id)) { s.destroy(); this.sprites.delete(id); }
-    const storm = g.act === 'storm';
-    for (const lane of ['L', 'R']) this.pods[lane].setVisible(storm);
+    const pip = g.act === 'storm' || (g.act === 'garden' && g.roundType === 'seedStomp');   // Pip spits the seeds
+    for (const lane of ['L', 'R']) this.pods[lane].setVisible(pip);
   }
 
   drawHud(L, out, dt) {
@@ -1149,21 +1223,21 @@ class Play extends Phaser.Scene {
       this.footFlash[lane] = Math.max(0, this.footFlash[lane] - dt * 3);
       this.meterFlash[lane] = Math.max(0, this.meterFlash[lane] - dt);
       const th = next[lane];
-      const need = th ? needCm(g, th.kind, lane) : null;
+      const need = th ? needCm(g, th, lane) : null;
       const urgent = th && 1 - th.distCm / RULES.aheadCm > 0.72;
       const active = Math.floor(beat) % 2 === (lane === 'L' ? 0 : 1);
       this.feet[lane].setTexture(`foot-ghost-${lane.toLowerCase()}${gated && active ? '-amber' : ''}`);
       // Each step lights its footprint briefly, so a working sensor is visible at a glance.
       // Shoe mode: nothing is projected on the feet themselves, so the camera sees socks, not footprints.
       this.feet[lane].setVisible(!shoesLive(g)).setAlpha(Math.max(gated && active ? 0.3 + 0.7 * (1 - beat % 1) : 0.3, this.footFlash[lane]));
-      if (SHOW_METERS && !shoesLive(g)) drawMeter(h, L, lane, this.lift[lane], need, th?.kind === 'flower' ? C.amber : C.pink,
+      if (SHOW_METERS && !shoesLive(g)) drawMeter(h, L, lane, this.lift[lane], need, { flower: C.amber, slipper: C.lavender }[th?.kind] ?? C.pink,
         this.meterFlash[lane], urgent);   // lift meters mean nothing while shoes drive the game
       this.lift[lane] = Math.max(0, this.lift[lane] - dt * 25);
     }
 
     if (g.t >= this.nextGardenUpdate) {
       this.nextGardenUpdate = g.t + .2;
-      const act = ACTS[g.act];
+      const act = actLore(g);
       publishGarden({ cadence: out.pace.cadence, act: g.act, paceOk: !out.pace.gated,
         paused: this.paused, title: `${act?.title || ''}${g.round > 1 && g.act !== 'walk' ? ` · round ${g.round}` : ''}`, score: `${g.score} pts${g.streak >= 5 ? '  x2' : ''}`,
         progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · speed x${speedScale(g).toFixed(1)}${shoesLive(g) ? ' · shoes' : ''} · form ${Math.round(out.form * 100)}%${out.pace.asym !== null ? ` · even L/R ${Math.max(0, Math.round(100 - out.pace.asym * 100))}%` : ''}${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
@@ -1197,11 +1271,16 @@ class Home extends Phaser.Scene {
       wordWrap: { width: W * 0.84 - 32, useAdvancedWrap: true }, align: 'center' });
     const text = (value, size, color) => this.add.text(W / 2, 0, value, style(size, color)).setOrigin(0.5, 0);
     this.heading = text('HOME!', small ? 48 : 64, C.green);
-    this.ending = text(ENDING, bodySize, C.yellow);
+    const ending = endingLine(s);   // counts the slipper pairs Rosa got back, when there were slipper rounds
+    this.ending = text(ending, bodySize, C.yellow);
+    // A walk with more than flowers names each round type's share; a flowers-only walk keeps the plain line.
+    const shares = Object.entries(s.roundTypePct ?? {}).filter(([type, pct]) => pct !== null && ROUND_LABELS[type]);
+    const mixed = shares.some(([type]) => type !== 'flowers');
+    const stomped = mixed ? shares.map(([type, pct]) => `${ROUND_LABELS[type]} ${pct}%`).join('   ·   ') : `Flowers stomped ${s.stompPct ?? 0}%`;
     const lines = [
       `Score ${s.score}   ·   Form ${s.formPct}%`,
       `${s.steps} steps   ·   ${s.cadence} steps/min`,
-      `Flowers stomped ${s.stompPct ?? 0}%${s.dodgePct == null ? '' : `   ·   Seeds dodged ${s.dodgePct}%`}`,
+      `${stomped}${s.dodgePct == null ? '' : `   ·   Seeds dodged ${s.dodgePct}%`}`,
       `Petals ${s.petals ?? 0}   ·   Bouquets ${s.bouquets ?? 0}${s.goldenPct == null ? '' : `   ·   Golden ${s.goldenPct}%`}`,
       s.shoeMode ? `Long steps  left ${s.highLiftAvgCm?.L ?? '-'}   right ${s.highLiftAvgCm?.R ?? '-'}  (swing, camera)`
         : `High steps  left ${s.highLiftAvgCm?.L ?? '-'} cm   right ${s.highLiftAvgCm?.R ?? '-'} cm`,
@@ -1230,7 +1309,7 @@ class Home extends Phaser.Scene {
     }
     if (data.result) this.showResult(data.result);
     if (data.gaitStatus) this.showGait();
-    say(`${ENDING} ${s.stompPct ?? 0} percent of flowers stomped. Great walking.`);
+    say(`${ending} ${(mixed ? s.targetPct : s.stompPct) ?? 0} percent ${mixed ? 'stepped on' : 'of flowers stomped'}. Great walking.`);
     const playAgain = () => {
       // Once per walk, and not under the zone setup. The flag lives on this walk's data, not on the scene: Phaser
       // reuses the scene for every game, and a flag left on it from the last walk ignored every later restart.
