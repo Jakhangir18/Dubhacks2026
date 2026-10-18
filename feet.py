@@ -64,6 +64,42 @@ def filter_feet(dets, frame_area, areas, max_area=0.15, max_boxes=2):
     return kept, rejected
 
 
+class BlobDetector:
+    """Fallback for a dark room: white socks or light shoes on a black belt are the brightest filled blobs.
+    Returns Foot boxes like FeetDetector; used when the model finds nothing (or alone with --blobs-only)."""
+
+    def __init__(self, min_frac=0.0006, max_frac=0.06, fill=0.45, label="blob"):
+        self.min_frac, self.max_frac, self.fill, self.label = min_frac, max_frac, fill, label
+        self.threshold = 0
+        self.zone = None   # polygon of the projected zone, fractions of the frame; outside it nothing counts (console, walls)
+
+    def __call__(self, frame):
+        import numpy as np
+        gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (7, 7), 0)
+        if self.zone is not None:
+            h, w = gray.shape
+            keep = np.zeros_like(gray)
+            cv2.fillPoly(keep, [np.array([[int(x * w), int(y * h)] for x, y in self.zone], dtype="int32")], 255)
+            gray = cv2.bitwise_and(gray, keep)
+        top = float(np.percentile(gray, 99.5))          # the brightest pixels set the bar, so exposure does not matter
+        self.threshold = max(40, int(top * 0.6))
+        mask = (gray >= self.threshold).astype("uint8")
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), "uint8"))
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        area = frame.shape[0] * frame.shape[1]
+        out = []
+        for c in contours:
+            x, y, w, h = cv2.boundingRect(c)
+            if not self.min_frac * area <= w * h <= self.max_frac * area or not 0.3 <= w / max(h, 1) <= 3.3:
+                continue
+            filled = float(mask[y:y + h, x:x + w].mean())   # a projected ring or outline is hollow; a sock is solid
+            if filled < self.fill:
+                continue
+            out.append(Foot(x, y, x + w, y + h, min(0.99, filled), self.label))
+        out.sort(key=lambda f: -f.area)
+        return out[:2]
+
+
 class FeetDetector:
     def __init__(self, classes=("shoe", "foot"), conf=0.15, max_area=0.15, max_boxes=2):
         import torch
@@ -101,6 +137,18 @@ class ShoeSender:
         self.lock = threading.Condition()
         self.listeners = None
         threading.Thread(target=self._run, daemon=True).start()
+
+    def zone(self):
+        """The calibrated zone corners from the server (fractions of the camera picture), or None."""
+        try:
+            cls = http.client.HTTPSConnection if self.https else http.client.HTTPConnection
+            conn = cls(self.host, self.port, timeout=3)
+            conn.request("GET", "/api/shoecal")
+            pts = json.loads(conn.getresponse().read()).get("points") or None
+            conn.close()
+            return pts if pts and len(pts) == 4 else None
+        except Exception:  # noqa: BLE001 - no calibration yet, or offline
+            return None
 
     def send(self, boxes, w, h, frame=None):
         event = {"kind": "shoes", "source": self.source,
@@ -180,7 +228,9 @@ def main():
     p = argparse.ArgumentParser(description="Live feet detection demo (q to quit)")
     p.add_argument("--camera", type=int, help="camera index (overrides --camera-name)")
     p.add_argument("--camera-name", help="substring of camera name, e.g. USB")
-    p.add_argument("--classes", default="shoe,foot")
+    p.add_argument("--classes", default="shoe,foot,sock")
+    p.add_argument("--blobs", action="store_true", help="dark room fallback: bright blobs count as feet when the model sees none")
+    p.add_argument("--blobs-only", action="store_true", help="use only the bright-blob detector (white socks on a black belt)")
     p.add_argument("--conf", type=float, default=0.15)
     p.add_argument("--max-area", type=float, default=0.15, help="reject boxes above this fraction of the frame")
     p.add_argument("--record", action="store_true", help="save preview to clip_<time>.mp4 (saved even on q or Ctrl-C)")
@@ -193,7 +243,8 @@ def main():
     args = p.parse_args()
 
     sender = ShoeSender(args.server) if args.server else None   # a bad URL fails here, before the model and the camera load
-    det = FeetDetector(args.classes.split(","), args.conf, args.max_area)
+    det = FeetDetector(args.classes.split(","), args.conf, args.max_area) if not args.blobs_only else None
+    blobs = BlobDetector() if args.blobs or args.blobs_only else None
     cap = open_camera(args.camera_name, args.camera)
     writer = None
     if args.record:
@@ -213,6 +264,7 @@ def main():
         gamma_table = np.array([min(255, round(255 * (i / 255) ** args.gamma)) for i in range(256)], dtype="uint8")
     times = []
     last_frame_sent = 0.0
+    last_zone_check = 0.0
     while True:
         ok, frame = cap.read()
         if not ok:
@@ -222,7 +274,12 @@ def main():
         if gamma_table is not None:
             frame = cv2.LUT(frame, gamma_table)
         t0 = time.perf_counter()
-        feet = det(frame)
+        if blobs and sender and time.time() - last_zone_check > 5:   # the calibrated zone limits where blobs may be
+            last_zone_check = time.time()
+            blobs.zone = sender.zone()
+        feet = det(frame) if det else []
+        if blobs and not feet:
+            feet = blobs(frame)
         times.append(time.perf_counter() - t0)
         if sender:
             now = time.time()
@@ -230,13 +287,13 @@ def main():
             if with_frame:
                 last_frame_sent = now
             sender.send(feet, frame.shape[1], frame.shape[0], frame if with_frame else None)
-        for f in det.rejected:
+        for f in (det.rejected if det else []):
             cv2.rectangle(frame, (f.x1, f.y1), (f.x2, f.y2), (0, 0, 255), 1)
         for f in feet:
             cv2.rectangle(frame, (f.x1, f.y1), (f.x2, f.y2), (0, 255, 0), 2)
             cv2.putText(frame, f"{f.label} {f.conf:.2f}", (f.x1, max(f.y1 - 6, 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         link = "" if not sender else f" | game windows: {sender.listeners}" if sender.listeners is not None else " | server: no reply"
-        cv2.putText(frame, f"{times[-1] * 1000:.0f} ms | {len(feet)} kept, {len(det.rejected)} rejected{link}", (10, 25),
+        cv2.putText(frame, f"{times[-1] * 1000:.0f} ms | {len(feet)} kept, {len(det.rejected) if det else 0} rejected{link}", (10, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         if writer:
             writer.write(frame)
