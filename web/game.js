@@ -4,7 +4,7 @@ import { ease, plan, endRest, newGame, step, addEvent, addShoes, shoesLive, rese
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
 import { connectBridge, CONTROL_EVENT, SHOES_EVENT, FRAME_EVENT, MARKS_EVENT } from './bridge.js';
-import { ENDING_SECONDS, ENDINGS, HOME_STOMP_THRESHOLD, ROUND_LINES, actStory, endingFor, targetTexture } from './lore.js';
+import { ACTS, ENDING_SECONDS, ENDINGS, HOME_STOMP_THRESHOLD, ROUND_LINES, actStory, endingFor, targetTexture } from './lore.js';
 import { GardenSound } from './sound.js';
 import { WalkClip, uploadClip } from './clip.js';
 import { WalkingZone } from './zone.js';
