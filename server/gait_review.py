@@ -135,6 +135,18 @@ def data_quality(gait: dict[str, Any]) -> tuple[str, list[str], str | None, bool
     return level, issues, near, cadence_ok
 
 
+def perceptron_check(game: dict[str, Any]) -> dict[str, Any] | None:
+    """Perceptron's per-walk agreement with the game's own step judging (web/perceive.js), or None when it did not run."""
+    p = game.get("perceptron")
+    if not isinstance(p, dict) or not isinstance(p.get("checked"), (int, float)) or p["checked"] <= 0:
+        return None
+    checked, agree = int(p["checked"]), int(p.get("agree") or 0)
+    return {"stepsChecked": checked, "agreedWithGame": agree, "agreePct": round(100 * agree / checked),
+            "view": "camera above the belt" if p.get("view") == "overhead" else "leg camera",
+            "meaning": "a second model looked at pictures of the feet around each scored step; disagreement means the "
+                       "game's camera was unsure there, not that the player did it wrong"}
+
+
 def build_view(game: dict[str, Any], gait: dict[str, Any], history: list[dict[str, Any]], player: dict[str, Any]) -> dict[str, Any]:
     """Every number the review may use, each with an id, unit, typical value and trust; plus what was withheld."""
     level, issues, near, cadence_ok = data_quality(gait)
@@ -229,6 +241,7 @@ def build_view(game: dict[str, Any], gait: dict[str, Any], history: list[dict[st
         "nearSide": NAME.get(near or "", "unknown"),
         "shoeMode": bool(game.get("shoeMode")),
         "therapistLimits": {k: limits.get(k) for k in ("minCadence", "liftCm", "liftRange", "spacingCm", "spacingRange")},
+        "perceptronCheck": perceptron_check(game),
     }
     return {"near": near, "dataQuality": {"level": level, "issues": issues}, "metrics": metrics, "withheld": withheld,
             "context": context, "earlierFocus": focus}

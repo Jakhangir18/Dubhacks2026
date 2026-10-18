@@ -158,14 +158,33 @@ async def coach(inp: CoachIn) -> dict[str, Any]:
     player = await run_in_threadpool(store.player, inp.player)
     gait = player.get("gait") or {}
     live = gait_review.live_view(gait.get("summary")) if time.time() - float(gait.get("ts") or 0) < LIVE_GAIT_S else None
-    return await therapist.coach(inp.summary, player["limits"], live, share_side=player.get("aiReviewConsent", False))
+    return await therapist.coach(inp.summary, player["limits"], live, share_side=player.get("aiReviewConsent", False),
+                                 memory=player.get("memoryNote"))
 
 
 @router.get("/plan/{name}")
 async def plan(name: str) -> dict[str, Any]:
     player = await run_in_threadpool(store.player, name)
     recent = await run_in_threadpool(store.sessions, name, 5)
-    return await therapist.plan(player, recent)
+    out = await therapist.plan(player, recent)
+    if out.get("memory"):   # what Backboard said at the start of the walk: the coach's cues and the dashboard read it
+        await run_in_threadpool(store.update_player, name, memoryNote=out["memory"][:600], memoryTs=time.time())
+    return out
+
+
+@router.get("/memory/{name}")
+async def memory(name: str, refresh: bool = False) -> dict[str, Any]:
+    """What Maya remembers about the player (Backboard): the note saved at the last walk's start, or a fresh recall."""
+    player = await run_in_threadpool(store.player, name)
+    if refresh or not player.get("memoryNote"):
+        text = await therapist.recall(player)
+        if text:
+            await run_in_threadpool(store.update_player, name, memoryNote=text[:600], memoryTs=time.time())
+            return {"text": text[:600], "source": "backboard", "ts": time.time(), "fresh": True}
+    if player.get("memoryNote"):
+        return {"text": player["memoryNote"], "source": "backboard", "ts": player.get("memoryTs"), "fresh": False}
+    reason = "no BACKBOARD_API_KEY" if not os.environ.get("BACKBOARD_API_KEY") else "no memory yet: Maya remembers after the first walk"
+    return {"text": None, "source": "none", "reason": reason}
 
 
 # ---------------------------------------------------------------- session end: save, remember, report, reward
@@ -228,7 +247,7 @@ async def session(inp: SessionIn, background: BackgroundTasks) -> dict[str, Any]
     sid = inp.id if inp.id and SESSION_ID.fullmatch(inp.id) and not await run_in_threadpool(store.session, inp.id) else None
     extra = {"gaitReview": {"status": "waiting", "ts": time.time()}} if sid and side_camera_on(sid) else {}
     doc = await run_in_threadpool(store.add_session, name, inp.summary, inp.verified, note["note"], out["reward"] is not None,
-                                  sid, **extra)
+                                  sid, noteSource=note["source"], **extra)
     out["id"] = doc["id"]
     out["gaitReview"] = extra.get("gaitReview")
     if sid and (active_session() or {}).get("id") == sid:

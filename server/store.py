@@ -157,7 +157,8 @@ class Store:
                 "assistantId": doc.get("assistantId"), "notes": doc.get("notes", ""),
                 "perceptronConsent": bool(doc.get("perceptronConsent", False)),
                 "aiReviewConsent": bool(doc.get("aiReviewConsent", False)),
-                "perceptronReports": doc.get("perceptronReports", []), "gait": doc.get("gait")}
+                "perceptronReports": doc.get("perceptronReports", []), "gait": doc.get("gait"),
+                "memoryNote": doc.get("memoryNote"), "memoryTs": doc.get("memoryTs")}
 
     def update_player(self, name: str, **fields: Any) -> dict[str, Any]:
         """Set only the given fields, so two writers (the panel and the memory task) never overwrite each other."""

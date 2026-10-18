@@ -36,6 +36,9 @@ def facts(session: dict[str, Any] | None) -> str:
              f"left-right evenness %: {None if s.get('asymmetryPct') is None else max(0, 100 - s['asymmetryPct'])}",
              f"knee bend in swing, degrees, left/right: {bend['L']}/{bend['R']}",
              f"toe lift cm left/right: {gait.get('toe_lift_cm')}", f"reached home: {s.get('act') == 'home'}"]
+    p = s.get("perceptron") or {}
+    if isinstance(p, dict) and isinstance(p.get("checked"), (int, float)) and p["checked"] > 0:
+        lines.append(f"Perceptron second look agreed with the game on {p.get('agree', 0)} of {int(p['checked'])} scored steps")
     review = ((session.get("gaitReview") or {}).get("review")) or {}
     for key in ("overview", "playerFeedback"):
         if review.get(key):
@@ -75,6 +78,9 @@ def rules_reply(message: str, session: dict[str, Any] | None, shots: list[tuple[
     if not session:
         return "Finish a walk on the pad and I will have something specific to say. Until then: steady pace, even steps."
     s = session.get("summary") or {}
+    p = s.get("perceptron") or {}
+    if isinstance(p, dict) and isinstance(p.get("checked"), (int, float)) and p["checked"] > 0:
+        lines.append(f"Perceptron second look agreed with the game on {p.get('agree', 0)} of {int(p['checked'])} scored steps")
     review = ((session.get("gaitReview") or {}).get("review")) or {}
     if shots:
         row = next((r for r, _ in shots if r.get("momentKind") != "good"), shots[0][0])
