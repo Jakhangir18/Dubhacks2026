@@ -18,7 +18,7 @@ def summary(**over):
 
 
 def test_status_reports_fallbacks():
-    assert client.get("/api/status").json() == {"gemini": False, "backboard": False, "storage": "file", "visa": "mock", "perceptron": False}
+    assert client.get("/api/status").json() == {"gemini": False, "backboard": False, "storage": "file", "visa": "mock", "perceptron": False, "voice": False}
 
 
 def test_limits_are_cleaned_and_kept_inside_their_ranges():
@@ -53,6 +53,14 @@ def test_coach_model_output_is_clamped(monkeypatch):
     assert out["source"] == "gemini"
     assert out["params"] == {"liftCm": 18.0, "spacingCm": 90.0}
     assert len(out["say"].split()) <= 14
+
+
+def test_the_rest_line_is_not_cut_off():
+    rest = {"act": "rest", "cadence": 100, "asymmetryPct": 5, "thisRound": {"round": 2, "hit": 3, "n": 6}}
+    out = client.post("/api/coach", json={"player": "Mia", "summary": rest}).json()
+    assert out["say"].endswith("Walk when you are ready.")              # all of it, not the first 14 words
+    walking = client.post("/api/coach", json={"player": "Mia", "summary": summary(act="garden", stompPct=40)}).json()
+    assert len(walking["say"].split()) <= 14
 
 
 def test_plan_uses_history():

@@ -9,11 +9,11 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
-from server import gait_review, gemini, perceive, therapist
+from server import gait_review, gemini, perceive, therapist, tts
 from server.store import Store
 
 router = APIRouter(prefix="/api")
@@ -29,7 +29,32 @@ def status() -> dict[str, Any]:
         "storage": store.backend,
         "visa": os.environ.get("VISA_MODE", "mock"),
         "perceptron": bool(os.environ.get("PERCEPTRON_API_KEY")),
+        "voice": tts.available(),   # the coach speaks with Gemini's voice; the browser's own voice otherwise
     }
+
+
+# ---------------------------------------------------------------- the coach's voice (server/tts.py)
+class TtsIn(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
+    player: str | None = None   # set when the line is about this player's walk: then it needs their AI consent
+
+
+@router.post("/tts")
+async def speak(inp: TtsIn) -> Response:
+    """One coach line as WAV. Story lines carry nothing personal; a line about a player's walk goes to Gemini only with
+    that player's AI consent, and never with their name in it."""
+    text = " ".join(inp.text.split())[: tts.MAX_CHARS]
+    if inp.player is not None:
+        player = await run_in_threadpool(store.player, inp.player)
+        if not player.get("aiReviewConsent"):
+            raise HTTPException(403, "no AI consent for this player: the browser voice speaks this line")
+        text = tts.strip_name(text, player["name"])
+    if not text:
+        raise HTTPException(422, "nothing to say")
+    audio, reason = await tts.synthesize(text)
+    if audio is None:
+        raise HTTPException(503, reason or "no audio")
+    return Response(audio, media_type="audio/wav", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.get("/health")
