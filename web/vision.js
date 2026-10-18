@@ -14,6 +14,7 @@ export const TUNING = {
   landCm: 1.5,           // and as landed below this
   peakDropCm: 2,         // the swing peak is reported once the foot has come down this far from it
   groundWindowS: 3,      // each foot's ground level is its lowest position over this window
+  lostAfterS: 0.5,       // a lifted foot unseen this long is a lost step
 };
 
 export class FootTracker {
@@ -71,7 +72,10 @@ export class FootTracker {
   loop() {
     if (!this.running) return;
     const now = performance.now();
-    if (this.video.readyState >= 2 && now > this.lastTs) {
+    // Run the model once per new camera frame, not once per display refresh.
+    const frameTime = this.video.currentTime;
+    if (this.video.readyState >= 2 && frameTime !== this.lastFrameTime && now > this.lastTs) {
+      this.lastFrameTime = frameTime;
       this.lastTs = now;
       const res = this.landmarker.detectForVideo(this.video, now);
       const lm = res.landmarks && res.landmarks[0];
@@ -96,7 +100,13 @@ export class FootTracker {
     if (!this.cmPerPx) return;
 
     for (const f of ['L', 'R']) {
-      if (!ok(IDX[f].heel) || !ok(IDX[f].toe)) continue;
+      const st = this.state[f];
+      if (!ok(IDX[f].heel) || !ok(IDX[f].toe)) {
+        // Foot out of view while lifted: drop the step rather than land it late.
+        if (st.lifted && t - (st.lastSeen ?? t) > TUNING.lostAfterS) st.lifted = false;
+        continue;
+      }
+      st.lastSeen = t;
       // Clearance is the lowest point of the foot (largest image y); the heel alone rises a lot in a normal step.
       const y = Math.max(lm[IDX[f].heel].y, lm[IDX[f].toe].y) * h;
       const hist = this.hist[f];
@@ -106,7 +116,6 @@ export class FootTracker {
       const ys = hist.map((p) => p.y).sort((a, b) => a - b);
       const ground = ys[Math.floor(ys.length * 0.9)];          // this foot's own ground level
       const liftCm = Math.max(0, (ground - y) * this.cmPerPx);
-      const st = this.state[f];
       st.liftCm = liftCm;
       if (!st.lifted && liftCm > TUNING.liftStartCm) { st.lifted = true; st.peak = liftCm; st.peakSent = false; }
       if (!st.lifted) continue;

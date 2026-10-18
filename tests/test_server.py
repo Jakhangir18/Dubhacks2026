@@ -38,3 +38,16 @@ def test_game_page_is_served():
     r = client.get("/")
     assert r.status_code == 200
     assert "Zombie Walk Home" in r.text
+
+
+def test_non_finite_and_boolean_lifts_are_rejected():
+    assert clean_event({"foot": "L", "kind": "lift", "liftCm": float("nan")}) is None
+    assert clean_event({"foot": "L", "kind": "lift", "liftCm": float("inf")}) is None
+    assert clean_event({"foot": "L", "kind": "lift", "liftCm": True}) is None
+
+
+def test_garbled_websocket_frame_does_not_close_the_sender():
+    with client.websocket_connect("/ws/game") as game, client.websocket_connect("/ws/events") as pi:
+        pi.send_text("{not json")
+        pi.send_json({"foot": "L", "kind": "strike"})
+        assert game.receive_json() == [{"foot": "L", "kind": "strike", "source": "pi"}]

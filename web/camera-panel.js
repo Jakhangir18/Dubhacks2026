@@ -46,8 +46,8 @@ export function mountCameraPanel() {
       frames++;
       const now = performance.now();
       if (now - fpsT > 1000) { fps = Math.round((frames * 1000) / (now - fpsT)); frames = 0; fpsT = now; }
-      canvas.width = video.videoWidth || 640;
-      canvas.height = video.videoHeight || 360;
+      const vw = video.videoWidth || 640, vh = video.videoHeight || 360;
+      if (canvas.width !== vw || canvas.height !== vh) { canvas.width = vw; canvas.height = vh; }
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (lm) {
         for (const [i, c] of [[29, '#ffe44d'], [31, '#ffe44d'], [30, '#2de2ff'], [32, '#2de2ff'], [27, '#fff'], [28, '#fff']]) {
@@ -62,8 +62,9 @@ export function mountCameraPanel() {
   });
 
   let busy = false;
+  let pending = false;            // a camera switch asked for while the model was still loading
   async function start() {
-    if (busy) return;
+    if (busy) { pending = true; return; }
     busy = true;
     try {
       const id = $('cp-dev').value || store.get('zombiewalk.camera', null);
@@ -71,14 +72,16 @@ export function mountCameraPanel() {
       await tracker.start(id);
       const cams = await FootTracker.cameras();
       const current = video.srcObject.getVideoTracks()[0].getSettings().deviceId;
-      $('cp-dev').innerHTML = cams.map((c, i) => `<option value="${c.deviceId}">${c.label || `camera ${i + 1}`}</option>`).join('');
-      $('cp-dev').value = current;
+      const select = $('cp-dev');
+      select.replaceChildren(...cams.map((c, i) => new Option(c.label || `camera ${i + 1}`, c.deviceId)));   // labels as text, not HTML
+      select.value = current;
       store.set('zombiewalk.camera', current);
     } catch (e) {
       status.textContent = `camera error: ${e && (e.message || e.name) ? `${e.name || ''} ${e.message || ''}` : String(e)}`;
       console.error('camera start failed', e);
     } finally {
       busy = false;
+      if (pending) { pending = false; start(); }
     }
   }
 

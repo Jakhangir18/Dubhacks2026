@@ -13,27 +13,47 @@ Or run a demo walk to test the link:
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import time
-import urllib.request
+from urllib.parse import urlparse
 
 
 class Sender:
+    """Keeps one HTTP connection open (no handshake per step) and never raises into the caller's pose loop."""
+
     def __init__(self, server: str, source: str = "pi", timeout: float = 0.5) -> None:
-        self.url = server.rstrip("/") + "/api/events"
+        u = urlparse(server)
+        self.host, self.port = u.hostname or "localhost", u.port or (443 if u.scheme == "https" else 80)
+        self.https = u.scheme == "https"
         self.source = source
         self.timeout = timeout
+        self.conn: http.client.HTTPConnection | None = None
+        self.errors = 0
 
-    def send(self, events: list[dict]) -> dict:
-        body = json.dumps({"events": events}).encode()
-        req = urllib.request.Request(self.url, data=body, headers={"content-type": "application/json"})
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            return json.loads(resp.read())
+    def _connect(self) -> http.client.HTTPConnection:
+        cls = http.client.HTTPSConnection if self.https else http.client.HTTPConnection
+        return cls(self.host, self.port, timeout=self.timeout)
 
-    def lift(self, foot: str, lift_cm: float) -> dict:
+    def send(self, events: list[dict]) -> dict | None:
+        body = json.dumps({"events": events})
+        for _attempt in range(2):  # one reconnect if the kept-alive connection went stale
+            try:
+                if self.conn is None:
+                    self.conn = self._connect()
+                self.conn.request("POST", "/api/events", body=body, headers={"content-type": "application/json"})
+                return json.loads(self.conn.getresponse().read())
+            except (OSError, http.client.HTTPException, ValueError):
+                if self.conn is not None:
+                    self.conn.close()
+                self.conn = None
+        self.errors += 1
+        return None
+
+    def lift(self, foot: str, lift_cm: float) -> dict | None:
         return self.send([{"foot": foot, "kind": "lift", "liftCm": round(lift_cm, 1), "source": self.source}])
 
-    def strike(self, foot: str) -> dict:
+    def strike(self, foot: str) -> dict | None:
         return self.send([{"foot": foot, "kind": "strike", "source": self.source}])
 
 

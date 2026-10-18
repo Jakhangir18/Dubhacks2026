@@ -15,6 +15,7 @@ Environment (.env next to this repo root, never committed):
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -53,10 +54,16 @@ def clean_event(ev: Any) -> dict[str, Any] | None:
         return None
     out: dict[str, Any] = {"foot": ev["foot"], "kind": ev["kind"], "source": str(ev.get("source", "pi"))[:20]}
     if ev["kind"] == "lift":
+        raw = ev.get("liftCm", 0)
+        if isinstance(raw, bool):
+            return None
         try:
-            out["liftCm"] = max(0.0, min(80.0, float(ev.get("liftCm", 0))))
+            value = float(raw)
         except (TypeError, ValueError):
             return None
+        if not math.isfinite(value):  # NaN or Infinity would become a perfect 80 cm step
+            return None
+        out["liftCm"] = max(0.0, min(80.0, value))
     return out
 
 
@@ -64,7 +71,7 @@ async def broadcast(events: list[dict[str, Any]]) -> int:
     if not events:
         return 0
     dead = []
-    for ws in game_clients:
+    for ws in list(game_clients):  # copy: clients may join or leave while we await a send
         try:
             await ws.send_json(events)
         except Exception:  # noqa: BLE001 - a closed socket raises several types
@@ -80,8 +87,10 @@ async def ws_game(ws: WebSocket) -> None:
     game_clients.add(ws)
     try:
         while True:
-            await ws.receive_text()  # the game only listens; keep the socket open
-    except WebSocketDisconnect:
+            await ws.receive()  # the game only listens; keep the socket open
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
         game_clients.discard(ws)
 
 
@@ -90,10 +99,14 @@ async def ws_events(ws: WebSocket) -> None:
     await ws.accept()
     try:
         while True:
-            msg = await ws.receive_json()
+            raw = await ws.receive_text()
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                continue  # one garbled frame must not cut the Pi off
             batch = msg if isinstance(msg, list) else [msg]
             await broadcast([e for e in (clean_event(x) for x in batch) if e])
-    except (WebSocketDisconnect, json.JSONDecodeError, ValueError):
+    except (WebSocketDisconnect, RuntimeError, KeyError):
         return
 
 
