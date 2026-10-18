@@ -106,15 +106,19 @@ def rule_cue(summary: dict[str, Any], limits: dict[str, Any]) -> dict[str, Any]:
         return {"say": "Keep stepping, a little faster, nice and steady", "params": {}}
     if asym is not None and asym > 20:
         return {"say": "Make left and right steps the same", "params": {}}
+    shoes = bool(summary.get("shoeMode"))   # shoe mode: it is where the foot lands, not how high it goes
     if act == "garden":
         pct = summary.get("stompPct")
         if pct is not None and pct < 60:
-            return {"say": "Knee up high, then stomp the glowing flower", "params": {"spacingCm": spacing + 30}}
+            say = "Step right onto the glowing flower" if shoes else "Knee up high, then stomp the glowing flower"
+            return {"say": say, "params": {"spacingCm": spacing + 30}}
         if pct is not None and pct > 85:
             return {"say": "Great stomping! Flowers are coming faster", "params": {"spacingCm": spacing - 20}}
     if act == "storm":
         pct = summary.get("dodgePct")
         if pct is not None and pct < 60:
+            if shoes:
+                return {"say": "Keep that foot out of the seed's lane", "params": {}}
             return {"say": "Lift the foot higher over the seed", "params": {"liftCm": lift - 1}}
         if pct is not None and pct > 85:
             return {"say": "Super lifts! Let us go a bit higher", "params": {"liftCm": lift + 1}}

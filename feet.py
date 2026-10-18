@@ -190,9 +190,9 @@ def main():
                    help="rotate the camera picture clockwise before detection (a camera mounted on its side)")
     args = p.parse_args()
 
+    sender = ShoeSender(args.server) if args.server else None   # a bad URL fails here, before the model and the camera load
     det = FeetDetector(args.classes.split(","), args.conf, args.max_area)
     cap = open_camera(args.camera_name, args.camera)
-    sender = ShoeSender(args.server) if args.server else None
     writer = None
     if args.record:
         path = time.strftime("clip_%Y%m%d_%H%M%S.mp4")

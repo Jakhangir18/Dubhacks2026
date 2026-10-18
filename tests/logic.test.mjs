@@ -227,9 +227,9 @@ test('a shoe on a flower smashes it at once; a flower that passes the toes is mi
   const g = toGarden();
   walkUntil(g, () => g.things.length > 0);
   const th = g.things[0];
-  // keep walking (keyboard steps) until the flower is on the belt; a shoe far up the other lane keeps shoe mode live
-  walkUntil(g, () => th.distCm < -20);
-  addShoes(g, [{ xFrac: th.lane === 'L' ? 0.7 : 0.3, nearCm: 300, farCm: 280 }]);
+  // keep walking (keyboard steps) until the flower is on the belt, with a shoe far up the other lane keeping shoe mode live
+  const other = () => addShoes(g, [{ xFrac: th.lane === 'L' ? 0.7 : 0.3, nearCm: 600, farCm: 580 }]);   // beyond the field: keeps shoe mode live, touches nothing
+  walkUntil(g, () => { other(); return th.distCm < -20; });
   assert.equal(th.result, null);
   addShoes(g, [{ xFrac: th.lane === 'L' ? 0.3 : 0.7, nearCm: th.distCm + 10, farCm: th.distCm - 10 }]);
   const out = step(g, DT);
@@ -293,4 +293,18 @@ test('one shoe takes its lane from the last two-shoe midpoint', () => {
   assert.equal(g.shoes[0].lane, 'R');       // right of the midpoint 0.3, although left of the field centre
   resetShoes(g);
   assert.deepEqual(g.shoes, []);
+});
+
+test('when the shoes drop out mid-act, things past the line still wait for the toes', () => {
+  const g = toGarden();
+  walkUntil(g, () => g.things.length > 0);
+  const th = g.things[0];
+  const other = () => addShoes(g, [{ xFrac: th.lane === 'L' ? 0.7 : 0.3, nearCm: 600, farCm: 580 }]);   // beyond the field: keeps shoe mode live, touches nothing
+  walkUntil(g, () => { other(); return th.distCm < -20; });
+  walk(g, 4);                                   // no sightings: shoe mode lapses, but no lift was ever asked for
+  assert.equal(shoesLive(g), false);
+  assert.equal(th.result, null);                // not a miss yet
+  walkUntil(g, () => th.result !== null, 90);
+  assert.equal(th.result, 'miss');
+  assert.ok(th.distCm < -g.toeCm);              // missed at the toes, as under the shoe rules
 });
