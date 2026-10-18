@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newGame, step, addEvent, pace, form, applyParams, summary, needCm, startAt } from '../web/logic.js';
+import { newGame, step, addEvent, pace, form, applyParams, summary, needCm, startAt, speedScale } from '../web/logic.js';
 
 const DT = 0.05;
 
@@ -172,4 +172,26 @@ test('equal step times on one foot still give an asymmetry value', () => {
   for (const [t, f] of [[0, 'L'], [0.6, 'R'], [0.6, 'L'], [1.2, 'R'], [1.2, 'L']]) addEvent(g, { foot: f, kind: 'strike', t });
   g.t = 1.3;
   assert.notEqual(pace(g).asym, null);
+});
+
+test('plant speed scales the world speed inside its limits', () => {
+  const at = (speedScale) => {
+    const g = newGame({ speedScale }, 1);
+    let out;
+    for (let i = 0; i < 40; i++) {           // a steady 100 steps per minute, both feet
+      addEvent(g, { foot: i % 2 ? 'R' : 'L', kind: 'strike', t: g.t });
+      out = step(g, 0.3);
+    }
+    return out.speed;
+  };
+  const normal = at(1);
+  assert.ok(normal > 0);
+  assert.ok(Math.abs(at(0.5) - normal / 2) < 1e-9);
+  assert.ok(Math.abs(at(5) - normal * 2) < 1e-9);      // capped at 2
+  assert.ok(Math.abs(at(0.1) - normal * 0.3) < 1e-9);  // floor at 0.3
+});
+
+test('a zero or missing plant speed never stops the world', () => {
+  assert.equal(speedScale(newGame({ speedScale: 0 }, 1)), 0.3);
+  assert.equal(speedScale(newGame({ speedScale: 'x' }, 1)), 1);
 });

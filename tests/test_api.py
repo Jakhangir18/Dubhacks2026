@@ -148,3 +148,9 @@ def test_gait_rules():
     client.put("/api/player/Mia", json={"notes": ""})
     assert client.post("/api/gait", json={"player": "Mia", "summary": None}).json()["ok"] is False
     assert api.clean_gait({"big": 10**400, "nan": float("nan")}) == {"big": None, "nan": None}
+
+
+def test_plant_speed_is_kept_between_its_bounds():
+    assert clean_limits({"speedScale": 7})["speedScale"] == 2.0
+    assert clean_limits({"speedScale": 0})["speedScale"] == 0.3
+    assert clean_limits({})["speedScale"] == 1.0

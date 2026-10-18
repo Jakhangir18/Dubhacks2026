@@ -1,6 +1,6 @@
 // Zombie Walk Home: Phaser scenes, art, HUD and input. Rules live in logic.js.
 // Floor projection: things arrive at the pad's front edge; ghost feet mark the toes below.
-import { newGame, step, addEvent, summary, needCm, startAt, applyParams, RULES } from './logic.js';
+import { newGame, step, addEvent, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
 import { connectBridge } from './bridge.js';
@@ -28,7 +28,7 @@ const txt = (size, color = C.white) => ({ ...TEXT, fontSize: `${Math.max(24, siz
 // URL options for development and screenshots: ?scene=play&act=garden&auto=1
 const params = new URLSearchParams(location.search);
 const settings = {
-  voice: Warp.store.get('zombiewalk.voice', true),
+  voice: Warp.store.get('zombiewalk.voiceOn', false),   // spoken lines are off until the team picks a voice (M)
   limits: {},                                       // the current player's limits from the server (therapist panel)
   player: Warp.store.get('zombiewalk.player', 'Player'),
   greeting: null,
@@ -56,6 +56,8 @@ async function loadPlayer() {
   settings.perceptron = player.status === 'fulfilled' && player.value.perceptronConsent === true &&
     status.status === 'fulfilled' && status.value.perceptron === true;
   if (params.get('demo') === '1') Object.assign(settings.limits, DEMO);
+  const speed = Warp.store.get('zombiewalk.speedScale', null);   // the operator's [ ] setting wins on this laptop
+  if (Number.isFinite(speed)) settings.limits.speedScale = speed;
   settings.greeting = plan.status === 'fulfilled' ? plan.value.say : null;
 }
 let playerReady = loadPlayer();
@@ -97,6 +99,17 @@ function keyStep(foot, liftCm) {
 }
 let autoWalk = null;
 let autoFoot = 'L';
+// [ and ]: plants slower or faster, live, remembered on this laptop.
+function nudgeSpeed(delta) {
+  const play = window.zombieGame?.scene.getScene('play');
+  const now = Number(play?.g?.limits.speedScale ?? settings.limits.speedScale ?? 1);
+  const next = Math.round(Math.min(SPEED_RANGE[1], Math.max(SPEED_RANGE[0], now + delta)) * 10) / 10;
+  settings.limits.speedScale = next;
+  if (play?.g) play.g.limits.speedScale = next;
+  Warp.store.set('zombiewalk.speedScale', next);
+  if (play?.sys.isActive()) play.showFeedback(`PLANT SPEED x${next.toFixed(1)}`, C.cyan);
+}
+
 function toggleAutoWalk() {
   if (autoWalk) { clearInterval(autoWalk); autoWalk = null; return; }
   autoWalk = setInterval(() => { keyStep(autoFoot, 4); autoFoot = autoFoot === 'L' ? 'R' : 'L'; }, 600);
@@ -166,12 +179,13 @@ window.addEventListener('keydown', (e) => {
     w: toggleAutoWalk, c: openZone, z: openZone,
     f: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()),
     m: () => {
-      settings.voice = !settings.voice; Warp.store.set('zombiewalk.voice', settings.voice);
+      settings.voice = !settings.voice; Warp.store.set('zombiewalk.voiceOn', settings.voice);
       if (!settings.voice) { ++speechId; window.speechSynthesis?.cancel(); sound.duck(false); }
     },
     n: () => sound.toggle(),
     k: () => { const el = document.getElementById('keys'); el.hidden = !el.hidden; },
     v: () => cameraPanel.toggle(),
+    '[': () => nudgeSpeed(-0.1), ']': () => nudgeSpeed(0.1),
   };
   if (zone.active && ['a', 'd', 'q', 'e', 'w', 'c', 'z'].includes(k)) return;
   if (map[k]) { map[k](); e.preventDefault(); }
@@ -207,6 +221,10 @@ function useHdArt(scene) {
     else {
       const s = Math.min(w / img.width, h / img.height);   // contain: the art keeps its proportions inside the old box
       ctx.drawImage(img, (w - img.width * s) / 2, (h - img.height * s) / 2, img.width * s, img.height * s);
+    }
+    if (key === 'tile-grass-dark') {   // lift the dark checker: on a 150-lumen projector it read as almost black
+      ctx.globalCompositeOperation = 'screen'; ctx.fillStyle = '#3c6a2c'; ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'source-over';
     }
     canvas.refresh();
     scene.textures.remove(hd);   // the full-size source is not needed again
@@ -268,11 +286,15 @@ function makeTextures(scene) {
   }
 }
 
+// ?floor=1: the whole field lies on a white board in front of the pad (black belt, lit venue), so the hit line
+// sits near the board's rear edge by the pad and nothing is dimmed as "belt".
+const BOARD = params.get('floor') === '1';
 function floorLayout(W, H) {
-  const zoneY = H * 0.54, top = H * 0.085;
+  const zoneY = H * (BOARD ? 0.86 : 0.54), top = H * 0.085;
   return { W, H, zoneY, top, rowH: (zoneY - top) / 6,
     lanes: { L: W * 0.318, R: W * 0.682 }, laneW: W * 0.364, gap: 20,
-    toeY: H - 120, meterBottom: H - 30, meterTop: zoneY + 10 };
+    // On the board the meters stand beside the lanes, ending at the hit line; on the pad they run up the rails.
+    toeY: BOARD ? H - 75 : H - 120, meterBottom: BOARD ? zoneY - 20 : H - 30, meterTop: BOARD ? H * 0.42 : zoneY + 10 };
 }
 
 function makeFloor(scene, L) {
@@ -282,7 +304,8 @@ function makeFloor(scene, L) {
   scene.board = Array.from({ length: rows * 2 }, () => scene.add.image(0, 0, 'tile-grass-light').setDepth(-18));
   scene.hitLine = scene.add.graphics().setDepth(2);
   scene.feet = Object.fromEntries(['L', 'R'].map(lane => [lane,
-    scene.add.image(L.lanes[lane], L.toeY, `foot-ghost-${lane.toLowerCase()}`).setAlpha(0.3).setDepth(12)]));
+    scene.add.image(L.lanes[lane], L.toeY, `foot-ghost-${lane.toLowerCase()}`).setAlpha(0.3).setDepth(12)
+      .setScale(BOARD ? 0.5 : 1)]));   // on the board the feet are a small metronome under the hit line
   scene.hud = scene.add.graphics().setDepth(30);
 }
 
@@ -298,7 +321,7 @@ function drawFloor(scene, L, travelledCm, t, gated = false) {
         .setDisplaySize(L.laneW - L.gap / 2, L.rowH + 1);
     }
     const y = L.top + (row - 1) * L.rowH + offset;
-    tile.setPosition(L.lanes[col ? 'R' : 'L'], y).setAlpha((y > L.zoneY ? 0.4 : 1) * (gated ? 0.4 : 1));
+    tile.setPosition(L.lanes[col ? 'R' : 'L'], y).setAlpha((y > L.zoneY && !BOARD ? 0.4 : 1) * (gated ? 0.4 : 1));
   }
   scene.rowIndex = rowIndex;
   const h = scene.hitLine;
@@ -410,7 +433,7 @@ class ZonePreview extends Phaser.Scene {
     this.flowers.forEach((flower, i) => {
       const phase = (t / 6 + i / 3) % 1;
       const y = L.top + phase * (L.H - L.top + 150);
-      flower.setPosition(L.lanes[i % 2 ? 'R' : 'L'], y).setAlpha(y > L.zoneY ? 0.4 : 1);
+      flower.setPosition(L.lanes[i % 2 ? 'R' : 'L'], y).setAlpha(y > L.zoneY && !BOARD ? 0.4 : 1);
     });
   }
 
@@ -783,7 +806,7 @@ class Play extends Phaser.Scene {
       const act = ACTS[g.act];
       publishGarden({ cadence: out.pace.cadence, act: g.act, paceOk: out.pace.ok || g.t <= 3,
         paused: this.paused, title: act?.title || '', score: `${g.score} pts${g.streak >= 5 ? '  x2' : ''}`,
-        progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · form ${Math.round(out.form * 100)}%${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
+        progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · speed x${speedScale(g).toFixed(1)} · form ${Math.round(out.form * 100)}%${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
         coachColor: g.t < this.feedbackUntil ? this.feedbackColor : '',
         coach: g.t < this.feedbackUntil ? this.feedback : g.t < this.actIntroUntil ? act.intro.join(' ') : this.coachLine });
     }
