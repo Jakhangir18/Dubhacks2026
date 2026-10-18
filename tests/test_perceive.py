@@ -137,3 +137,6 @@ async def test_spent_budget_stops_the_paid_call(monkeypatch):
 
 def test_huge_or_unsized_body_is_refused():
     assert client.post("/api/perceive", content=b"{}", headers={"content-length": "999999999"}).status_code == 413
+    chunked = client.post("/api/perceive", content=iter([b"{}"]), headers={"content-type": "application/json"})
+    assert chunked.status_code == 413   # no length: refused, never streamed in
+    assert client.get("/api/perceive").status_code != 413   # only POST bodies are capped

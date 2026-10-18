@@ -168,7 +168,7 @@ class PerceiveIn(BaseModel):
     kind: str                 # "step" or "form"
     foot: str | None = None   # for step: "L" or "R"
     thing: str | None = None  # for step: "flower" or "seed"
-    frames: list[dict[str, Any]] = Field(max_length=perceive.MAX_FRAMES * 4)   # bad frames are skipped one by one
+    frames: list[Any] = Field(max_length=perceive.MAX_FRAMES * 4)   # bad frames are skipped one by one
 
 
 @router.post("/perceive")

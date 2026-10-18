@@ -50,7 +50,8 @@ export class Perceiver {
   capture() {
     const v = this.tracker.video;
     const lm = this.tracker.lastLm;
-    if (!this.enabled || this.isPaused() || !this.tracker.running || !lm || v.readyState < 2 || !v.videoWidth) return;
+    if (this.isPaused()) { this.frames = []; this.lastForm = performance.now(); return; }   // no clip spans a pause
+    if (!this.enabled || !this.tracker.running || !lm || v.readyState < 2 || !v.videoWidth) return;
     const seen = (i) => lm[i] && (lm[i].visibility ?? 1) > 0.5;
     const pts = LEG.filter(seen).map((i) => lm[i]);
     if (pts.length < 4 || !KNEES.some(seen)) return;
