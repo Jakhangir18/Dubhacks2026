@@ -230,65 +230,53 @@ test('shoe swings on the belt count as steps and keep the pace gate open', () =>
   assert.equal(g.act, 'garden');          // act 1 filled with no lift events at all
 });
 
-test('a shoe on a flower smashes it at once; a flower that passes the toes is missed', () => {
+test('at the line: a shoe on the flower smashes it, no shoe means it got away', () => {
   const g = toGarden();
   walkUntil(g, () => g.things.length > 0);
   const th = g.things[0];
-  // keep walking (keyboard steps) until the flower is on the belt, with a shoe far up the other lane keeping shoe mode live
-  const other = () => addShoes(g, [{ xFrac: th.lane === 'L' ? 0.7 : 0.3, nearCm: 600, farCm: 580 }]);   // beyond the field: keeps shoe mode live, touches nothing
-  walkUntil(g, () => { other(); return th.distCm < -20; });
-  assert.equal(th.result, null);
-  addShoes(g, [{ xFrac: th.lane === 'L' ? 0.3 : 0.7, nearCm: th.distCm + 10, farCm: th.distCm - 10 }]);
-  const out = step(g, DT);
+  const x = th.lane === 'L' ? 0.3 : 0.7;
+  const keep = () => addShoes(g, [{ xFrac: th.lane === 'L' ? 0.7 : 0.3, nearCm: 600, farCm: 580 }]);   // shoe mode live, touching nothing
+  walkUntil(g, () => { keep(); return th.distCm < 30; });
+  // the shoe is on the flower as it crosses the line
+  walkUntil(g, () => { addShoes(g, [{ xFrac: x, nearCm: th.distCm + 15, farCm: th.distCm - 15 }]); return th.result !== null; }, 10);
   assert.equal(th.result, 'hit');
-  assert.equal(out.resolved[0], th);
-  assert.equal(g.stats.stomp[0], 1);
-  // the next flower gets no shoe at all and walks past the toes
-  walkUntil(g, () => g.things.some((x) => x !== th && !x.result));
-  const next = g.things.find((x) => x !== th && !x.result);
-  // a shoe keeps showing up in the other lane, never on this flower
-  walkUntil(g, () => { addShoes(g, [{ xFrac: next.lane === 'L' ? 0.7 : 0.3, nearCm: -40, farCm: -70 }]); return next.result !== null; }, 90);
+  assert.ok(th.distCm > -80, `judged near the line, at ${Math.round(th.distCm)}`);
+  // the next flower crosses with the shoe elsewhere
+  walkUntil(g, () => { keep(); return g.things.some((t) => t !== th && !t.result); });
+  const next = g.things.find((t) => t !== th && !t.result);
+  walkUntil(g, () => { keep(); return next.result !== null; }, 60);
   assert.equal(next.result, 'miss');
-  assert.ok(next.distCm < -g.toeCm);
+  assert.ok(next.distCm > -80);
 });
 
-test('a seed under a shoe splats, unless a big step came just before; a clear lane dodges at the toes', () => {
+test('at the line: a shoe on the seed splats, a clear lane is a dodge', () => {
   const g = toGarden();
   startAt(g, 'storm');
-  g.base = { L: 16, R: 16 };   // act 1 would have learned the normal swing (120 world cm = 16)
   walkUntil(g, () => g.things.length > 0);
   const seed = g.things[0];
-  walkUntil(g, () => seed.distCm < -20);
   const x = seed.lane === 'L' ? 0.3 : 0.7;
-  // a normal step first (swing 120 world cm = 16 'cm'), then the foot lands on the seed: splat
-  for (const d of [-500, -440, -380, -500, -500]) { addShoes(g, [{ xFrac: x, nearCm: d + 30, farCm: d }]); step(g, DT); }
-  addShoes(g, [{ xFrac: x, nearCm: seed.distCm + 10, farCm: seed.distCm - 10 }]);
-  step(g, DT);
+  const keep = () => addShoes(g, [{ xFrac: seed.lane === 'L' ? 0.7 : 0.3, nearCm: 600, farCm: 580 }]);
+  walkUntil(g, () => { keep(); return seed.distCm < 30; });
+  walkUntil(g, () => { addShoes(g, [{ xFrac: x, nearCm: seed.distCm + 15, farCm: seed.distCm - 15 }]); return seed.result !== null; }, 10);
   assert.equal(seed.result, 'miss');
-  // the next seed in the same lane: a big step (swing 240 world cm = 32, 2x the normal 16) right before the foot reaches it: dodged
-  walkUntil(g, () => g.things.some((t) => t !== seed && !t.result && t.lane === seed.lane && t.distCm < -20), 120);
-  const next = g.things.find((t) => t !== seed && !t.result && t.lane === seed.lane);
-  resetShoes(g);
-  for (const d of [-500, -380, -260, -500, -500]) { addShoes(g, [{ xFrac: x, nearCm: d + 30, farCm: d }]); step(g, DT); }
-  addShoes(g, [{ xFrac: x, nearCm: next.distCm + 10, farCm: next.distCm - 10 }]);
-  step(g, DT);
-  assert.equal(next.result, 'hit');
-  walkUntil(g, () => g.things.some((t) => !t.result && t !== seed && t !== next), 120);
-  const clear = g.things.find((t) => !t.result && t !== seed && t !== next);
-  // a shoe keeps showing in the other lane and never touches it
-  walkUntil(g, () => { addShoes(g, [{ xFrac: clear.lane === 'L' ? 0.7 : 0.3, nearCm: -40, farCm: -70 }]); return clear.result !== null; }, 120);
+  walkUntil(g, () => { keep(); return g.things.some((t) => t !== seed && !t.result); });
+  const clear = g.things.find((t) => t !== seed && !t.result);
+  walkUntil(g, () => { keep(); return clear.result !== null; }, 60);
   assert.equal(clear.result, 'hit');
-  assert.ok(g.stats.dodge[0] >= 2, `dodges ${g.stats.dodge[0]}`);   // plus any seed that passed the toes in the other lane
+  assert.ok(g.stats.dodge[0] >= 1);
 });
 
-test('a stale shoe sighting no longer smashes anything', () => {
+test('a camera mark touches the thing; the line still decides', () => {
   const g = toGarden();
   walkUntil(g, () => g.things.length > 0);
   const th = g.things[0];
-  walkUntil(g, () => th.distCm < -20);
-  addShoes(g, [{ xFrac: th.lane === 'L' ? 0.3 : 0.7, nearCm: th.distCm + 10, farCm: th.distCm - 10 }], g.t - 1);
-  step(g, DT);
-  assert.equal(th.result, null);
+  const keep = () => addShoes(g, [{ xFrac: th.lane === 'L' ? 0.7 : 0.3, nearCm: 600, farCm: 580 }]);
+  walkUntil(g, () => { keep(); return th.distCm < 20; });
+  assert.equal(markHit(g, th.lane === 'L' ? 'R' : 'L', 'flower', th.distCm), null);   // other lane: nothing
+  assert.equal(markHit(g, th.lane, 'flower', th.distCm), th);
+  assert.equal(th.result, null);                                                      // not yet: the line decides
+  walkUntil(g, () => { keep(); return th.result !== null; }, 10);
+  assert.equal(th.result, 'hit');
 });
 
 test('shoe mode needs a real sighting, lapses when the shoes stop coming, and reports itself', () => {
@@ -314,34 +302,6 @@ test('one shoe takes its lane from the last two-shoe midpoint', () => {
   assert.deepEqual(g.shoes, []);
 });
 
-test('when the shoes drop out mid-act, things past the line still wait for the toes', () => {
-  const g = toGarden();
-  walkUntil(g, () => g.things.length > 0);
-  const th = g.things[0];
-  const other = () => addShoes(g, [{ xFrac: th.lane === 'L' ? 0.7 : 0.3, nearCm: 600, farCm: 580 }]);   // beyond the field: keeps shoe mode live, touches nothing
-  walkUntil(g, () => { other(); return th.distCm < -20; });
-  walk(g, 4);                                   // no sightings: shoe mode lapses, but no lift was ever asked for
-  assert.equal(shoesLive(g), false);
-  assert.equal(th.result, null);                // not a miss yet
-  walkUntil(g, () => th.result !== null, 90);
-  assert.equal(th.result, 'miss');
-  assert.ok(th.distCm < -g.toeCm);              // missed at the toes, as under the shoe rules
-});
-
-test('the toe line follows where the shoes stand, so a flower reaches feet that map past the field', () => {
-  const g = toGarden();
-  const standing = () => addShoes(g, [{ xFrac: 0.3, nearCm: -500, farCm: -530 }, { xFrac: 0.7, nearCm: -500, farCm: -530 }]);
-  for (let i = 0; i < 12; i++) { standing(); step(g, DT); }
-  assert.ok(g.toeCm >= 530, `toeCm ${g.toeCm}`);        // the feet stand 500 cm past the line, 30 cm margin
-  walkUntil(g, () => { standing(); return g.things.length > 0; });
-  const th = g.things[0];
-  walkUntil(g, () => { standing(); return th.distCm < -400; }, 90);
-  assert.equal(th.result, null);                         // not missed at the old toe line (300 cm)
-  addShoes(g, [{ xFrac: th.lane === 'L' ? 0.3 : 0.7, nearCm: th.distCm + 10, farCm: th.distCm - 10 }]);
-  step(g, DT);
-  assert.equal(th.result, 'hit');
-});
-
 test('rounds: flowers and seeds repeat before home, and the summary counts them', () => {
   const g = newGame({ walkSeconds: 2, gardenPlants: 2, stormSeeds: 2, rounds: 2 }, 5);
   const acts = [];
@@ -350,15 +310,3 @@ test('rounds: flowers and seeds repeat before home, and the summary counts them'
   assert.equal(summary(g).rounds, 2);
 });
 
-test('a camera-seen foot on a mark resolves the nearest thing of that kind in the lane', () => {
-  const g = toGarden();
-  walkUntil(g, () => g.things.length > 0);
-  const th = g.things[0];
-  walkUntil(g, () => th.distCm < -20);
-  assert.equal(markHit(g, th.lane === 'L' ? 'R' : 'L', 'flower', th.distCm), null);   // other lane: nothing
-  assert.equal(markHit(g, th.lane, 'seed', th.distCm), null);                       // other kind: nothing
-  assert.equal(markHit(g, th.lane, 'flower', th.distCm - 400), null);                // too far: nothing
-  assert.equal(markHit(g, th.lane, 'flower', th.distCm + 50), th);
-  assert.equal(th.result, 'hit');
-  assert.equal(g.stats.stomp[0], 1);
-});

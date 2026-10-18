@@ -43,14 +43,13 @@ export const RULES = {
   shoeSwingCm: 40,               // a shoe must travel this far forward, then back, to count as one step (box jitter is under 20)
   shoeStepMinS: 0.3,             // one landing per foot at most this often
   swingCmPerLiftCm: 7.5,         // world cm of forward swing on the belt per cm of 'lift': a long or high step swings far
-  shoeDodgeS: 1.0,               // a big swing this recently, as the seed reaches the foot, is the dodge
-  dodgeSwingFactor: 1.4,         // the dodge swing must be this much longer than the foot's normal one (camera units are not cm)
   toeCm: 300,                    // how far past the hit line the toes are; the game sets it from its layout
   shoeHoldS: 3,                  // shoes drive the game this long after the last sighting, then the lift rules return
   shoeGapS: 1,                   // a lane unseen this long starts its swing tracking afresh
   stanceS: 6,                    // the toe line follows where the shoes have stood over this window
   stanceMarginCm: 30,            // a thing is gone only this far behind the standing feet
-  markReachCm: 90,               // a camera-seen foot-on-mark resolves the nearest thing of that kind within this (the sock's centre is not the flower's)
+  markReachCm: 90,               // a camera-seen foot-on-mark touches the nearest thing of that kind within this (the sock's centre is not the flower's)
+  markShowCm: 90,                // the coloured mark shows under a thing from this far before the hit line
 };
 
 export function rng(seed = 1) {
@@ -177,24 +176,14 @@ export function resetShoes(g) {
   for (const lane of ['L', 'R']) g.shoeTrack[lane] = { phase: 'back', max: -Infinity, min: Infinity, lastStrikeT: -Infinity };
 }
 
-// The camera saw a foot on a coloured mark the game draws under a thing on the belt: cyan under flowers, magenta under
-// seeds. The nearest unresolved thing of that kind in the lane, on the belt or within reach, resolves at once.
-export function markHit(g, lane, kind, distCm, f = 1) {
-  // Only things whose mark is on the belt (the game shows it from distCm 20 down) can be stood on.
-  const near = g.things.filter((th) => !th.result && th.kind === kind && th.lane === lane && th.distCm < 20 &&
+// The camera saw a foot on a coloured mark the game draws under a thing near the hit line: cyan under flowers, magenta
+// under seeds. The nearest unresolved thing of that kind in the lane is marked as touched; the line decides the result.
+export function markHit(g, lane, kind, distCm) {
+  const near = g.things.filter((th) => !th.result && th.kind === kind && th.lane === lane && th.distCm < RULES.markShowCm &&
     Math.abs(th.distCm - distCm) <= RULES.markReachCm).sort((a, b) => Math.abs(a.distCm - distCm) - Math.abs(b.distCm - distCm))[0];
   if (!near) return null;
-  const out = { resolved: [] };
-  resolve(g, near, kind === 'flower' || bigSwing(g, lane) ? 'hit' : 'miss', f, out);
+  near.touchedT = g.t;
   return near;
-}
-
-// A seed reaching the foot is dodged only by a big step just before: a swing above the seed's lift target.
-function bigSwing(g, lane) {
-  // Relative to this foot's own normal swing: the camera's units depend on the calibration and the lane, not on cm.
-  const base = g.base ? g.base[lane] : RULES.defaultBaseCm;
-  const need = Math.max(base * RULES.dodgeSwingFactor, base + 3);
-  return !!takeEvent(g, (e) => e.kind === 'lift' && e.foot === lane && e.liftCm >= need && g.t - e.t <= RULES.shoeDodgeS);
 }
 
 function shoeOn(g, th) {
@@ -309,15 +298,15 @@ export function step(g, dt) {
     th.distCm -= moved;
     if (th.arriveT === null && th.distCm <= 0) th.arriveT = g.t;
     if (shoesLive(g)) {
-      // A shoe on a flower smashes it; a shoe on a seed is a splat. Past the toes: the flower got away, the seed was dodged.
-      if (shoeOn(g, th)) resolve(g, th, th.kind === 'flower' || bigSwing(g, th.lane) ? 'hit' : 'miss', f, out);
-      else if (th.distCm < -g.toeCm) resolve(g, th, th.kind === 'flower' ? 'miss' : 'hit', f, out);
+      // Everything is decided at the hit line: a shoe on the thing while it crosses (the timing window around arrival)
+      // smashes a flower and splats on a seed; nothing on it means the flower got away and the seed was dodged.
+      if (shoeOn(g, th)) th.touchedT = g.t;
+      if (th.arriveT !== null && g.t - th.arriveT > RULES.afterS) {
+        const touched = th.touchedT !== undefined && th.touchedT >= th.arriveT - RULES.beforeS;
+        resolve(g, th, (th.kind === 'flower') === touched ? 'hit' : 'miss', f, out);
+      }
     } else if (th.arriveT !== null && g.t - th.arriveT > RULES.afterS) {
-      if (judge(g, th)) resolve(g, th, 'hit', f, out);
-      // A game the shoes have driven keeps the toe rule when they drop out: no lift was ever asked for, so a thing
-      // past the line is not a miss until it passes the toes (a seed in a clear lane is still a dodge).
-      else if (!g.shoeMode) resolve(g, th, 'miss', f, out);
-      else if (th.distCm < -g.toeCm) resolve(g, th, th.kind === 'flower' ? 'miss' : 'hit', f, out);
+      resolve(g, th, judge(g, th) ? 'hit' : 'miss', f, out);
     }
   }
   g.things = g.things.filter((th) => !th.result || g.t - th.resolvedT < 1.5);

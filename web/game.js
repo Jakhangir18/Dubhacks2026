@@ -158,8 +158,7 @@ window.addEventListener(MARKS_EVENT, (e) => {
     const [fx, fy] = Warp.mapPoint(camH, cx, cy);
     if (!Number.isFinite(fx) || !Number.isFinite(fy)) continue;
     const lane = fx < L.W / 2 ? 'L' : 'R';
-    const th = markHit(play.g, lane, kind, fieldDist(fy, L), play.lastForm ?? 1);
-    if (th) { play.resolveFx(th, L); logRemote({ what: th.kind, lane: th.lane, result: th.result, at: Math.round(th.distCm), by: 'mark', t: Math.round(play.g.t) }); }
+    markHit(play.g, lane, kind, fieldDist(fy, L));   // touched; the line decides, and the game logs the result then
   }
 });
 
@@ -761,9 +760,11 @@ class Play extends Phaser.Scene {
         onComplete: () => this.tweens.add({ targets: stamp, scaleX: size * 1.25, scaleY: size * 0.38, alpha: 0.75, duration: 160, ease: 'Back.out' }) });
     }
     else if (th.kind === 'flower') {
-      this.showFeedback('HIGHER STEP', C.amber);
-      const stamp = this.add.image(x, y, this.flowerKey(th.id)).setScale(PLANT_SCALE, PLANT_SCALE * 1.25).setAlpha(0.5);
-      this.leaveStamp(stamp, y, true);
+      this.showFeedback(shoesLive(this.g) ? 'MISSED' : 'HIGHER STEP', C.amber);
+      if (!shoesLive(this.g)) {   // in shoe mode a missed flower just goes: nothing lands on the feet
+        const stamp = this.add.image(x, y, this.flowerKey(th.id)).setScale(PLANT_SCALE, PLANT_SCALE * 1.25).setAlpha(0.5);
+        this.leaveStamp(stamp, y, true);
+      }
     }
     else if (th.result === 'hit') {
       this.fx.sparks.explode(40, x, y); this.cameras.main.flash(140, 190, 255, 235);
@@ -923,7 +924,7 @@ class Play extends Phaser.Scene {
       // Once open, the window stays open: a pace dip must not flip the cue back or flash the lane again.
       const windowOpen = s.windowOpen || th.arriveT !== null || th.distCm <= out.speed * RULES.beforeS;
       pad.setVisible(near > 0.72 && !th.result);
-      s.list[0].setVisible(!!camH && !th.result && th.distCm < 20);   // the camera mark, on the belt only
+      s.list[0].setVisible(!!camH && !th.result && th.distCm < RULES.markShowCm);   // the camera mark, from just before the line
       pad.setStrokeStyle(12, windowOpen ? C.white : C.lime, windowOpen ? 1 : 0.6);
       pad.setScale(windowOpen ? 1 : 1 + 0.06 * Math.sin(g.t * Math.PI * 6));
       const arc = s.list[3];
@@ -972,7 +973,8 @@ class Play extends Phaser.Scene {
       const active = Math.floor(beat) % 2 === (lane === 'L' ? 0 : 1);
       this.feet[lane].setTexture(`foot-ghost-${lane.toLowerCase()}${gated && active ? '-amber' : ''}`);
       // Each step lights its footprint briefly, so a working sensor is visible at a glance.
-      this.feet[lane].setAlpha(Math.max(gated && active ? 0.3 + 0.7 * (1 - beat % 1) : 0.3, this.footFlash[lane]));
+      // Shoe mode: nothing is projected on the feet themselves, so the camera sees socks, not footprints.
+      this.feet[lane].setVisible(!shoesLive(g)).setAlpha(Math.max(gated && active ? 0.3 + 0.7 * (1 - beat % 1) : 0.3, this.footFlash[lane]));
       if (!shoesLive(g)) drawMeter(h, L, lane, this.lift[lane], need, th?.kind === 'flower' ? C.amber : C.pink,
         this.meterFlash[lane], urgent);   // lift meters mean nothing while shoes drive the game
       this.lift[lane] = Math.max(0, this.lift[lane] - dt * 25);
