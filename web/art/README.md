@@ -38,3 +38,7 @@ The seven tile designs are decorative: only the highlighted target row indicates
 Art is loaded locally by the Preload scene using `this.load.svg`. If an individual SVG fails, `makeTextures()` supplies its procedural fallback. Textures are rasterized once at load time. Play uses 20 recycled board tiles, two target tiles, and at most 80 live particles across three capped emitters. Home caps particles at 36.
 
 The game uses Phaser’s Canvas renderer: the sprite set needs no WebGL effects, leaving GPU resources available for pose estimation. Foot urgency is drawn as a colored rim so it also works in Canvas.
+
+## Generated art (concept E, 2026-10-18)
+
+`hd/*.png` are generated with Higgsfield (style sheet on `nano_banana_pro`, sprites on `gpt_image_2_5` with transparent backgrounds) from the style reference in `docs/ART_DIRECTION.md`, then scaled to twice their game size. The game draws each one into the box of the SVG with the same name and keeps the SVG as the fallback.

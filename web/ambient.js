@@ -11,7 +11,13 @@ export class AmbientGarden {
     this.hud = $('garden-hud');
     this.title = $('act-title'); this.score = $('score'); this.coach = $('coach');
     this.progress = $('home-progress'); this.pace = $('pace'); this.prompt = $('walk-prompt');
-    this.images = ART.map(name => { const img = new Image(); img.src = `art/${name}.svg`; return img; });
+    // Generated art first (web/art/hd), the SVG if it is missing.
+    this.images = ART.map(name => {
+      const img = new Image();
+      img.onerror = () => { img.onerror = null; img.src = `art/${name}.svg`; };
+      img.src = `art/hd/${name}.png`;
+      return img;
+    });
     // x, y, size, phase, art index: allocated only once, recycled in place.
     this.decor = new Float32Array(72 * 5);
     for (let i = 0; i < 72; i++) {
@@ -107,7 +113,12 @@ export class AmbientGarden {
 
   drawImage(index, x, y, w, h = w) {
     const img = this.images[index];
-    if (img.complete && img.naturalWidth) this.ctx.drawImage(img, x - w / 2, y - h / 2, w, h);
+    if (!img.complete || !img.naturalWidth) return;
+    if (index > 1 && index !== 7) {   // contain-fit everything but tiles and the fence, which join edge to edge
+      const s = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+      w = img.naturalWidth * s; h = img.naturalHeight * s;
+    }
+    this.ctx.drawImage(img, x - w / 2, y - h / 2, w, h);
   }
 
   frame(now) {

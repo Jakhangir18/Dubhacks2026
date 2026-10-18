@@ -188,6 +188,29 @@ const ART = {
   moon: [128, 128], 'cloud-puff': [164, 80], 'cloud-long': [164, 80],
   petal: [24, 20], spark: [24, 24], goo: [24, 24],
 };
+// Generated art (Higgsfield, docs/ART_DIRECTION.md) replaces the SVG of the same name; the SVG stays as the fallback.
+const HD = new Set(['fence', 'flower-bell', 'flower-marigold', 'flower-rose', 'foot-l', 'foot-r', 'gus-celebrate', 'gus-idle', 'gus-portrait', 'gus-step', 'house', 'moon', 'pod', 'seed', 'tile-grass-dark', 'tile-grass-light', 'tile-target', 'tree-lime', 'tree-teal']);
+const PLANT_SCALE = 1.55;   // generated plants are drawn larger than the old SVG box
+const POD_SCALE = 1;
+const FILL = new Set(['fence', 'tile-grass-light', 'tile-grass-dark', 'tile-target']);
+function useHdArt(scene) {
+  for (const [key, [w, h]] of Object.entries(ART)) {
+    const hd = `${key}@hd`;
+    if (!scene.textures.exists(hd)) continue;
+    const img = scene.textures.get(hd).getSourceImage();
+    if (scene.textures.exists(key)) scene.textures.remove(key);
+    const canvas = scene.textures.createCanvas(key, w, h);
+    const ctx = canvas.getContext();
+    ctx.imageSmoothingQuality = 'high';
+    if (FILL.has(key)) ctx.drawImage(img, 0, 0, w, h);   // tiles and fence segments must join edge to edge
+    else {
+      const s = Math.min(w / img.width, h / img.height);   // contain: the art keeps its proportions inside the old box
+      ctx.drawImage(img, (w - img.width * s) / 2, (h - img.height * s) / 2, img.width * s, img.height * s);
+    }
+    canvas.refresh();
+    scene.textures.remove(hd);   // the full-size source is not needed again
+  }
+}
 function makeTextures(scene) {
   const g = scene.make.graphics({ x: 0, y: 0, add: false });
   const done = (key, w, h) => { if (!scene.textures.exists(key)) g.generateTexture(key, w, h); g.clear(); };
@@ -236,9 +259,10 @@ class Preload extends Phaser.Scene {
     this.add.text(W / 2, H / 2, 'Waking up Gus…', txt(40, C.yellow)).setOrigin(0.5);
     for (const [key, [width, height, file = key]] of Object.entries(ART)) {
       this.load.svg(key, `art/${file}.svg`, { width, height });
+      if (HD.has(file)) this.load.image(`${key}@hd`, `art/hd/${file}.png`);
     }
   }
-  create() { makeTextures(this); this.scene.start('boot'); }
+  create() { useHdArt(this); makeTextures(this); this.scene.start('boot'); }
 }
 
 // Shared storybook scenery: no external fonts, filters, shaders, or per-frame allocations.
@@ -385,8 +409,8 @@ class Play extends Phaser.Scene {
     this.board = Array.from({ length: 20 }, () => this.add.image(0, 0, 'tile-grass-light').setDepth(-18));
     this.walkingZone = this.add.graphics().setDepth(-10);
     this.targetTiles = ['L', 'R'].map(() => this.add.image(0, 0, 'tile-target').setDepth(-15));
-    this.pods = { L: this.add.image(0, 0, 'pod').setVisible(false).setScale(0.8).setDepth(3),
-      R: this.add.image(0, 0, 'pod').setVisible(false).setScale(0.8).setDepth(3) };
+    this.pods = { L: this.add.image(0, 0, 'pod').setVisible(false).setScale(POD_SCALE).setDepth(3),
+      R: this.add.image(0, 0, 'pod').setVisible(false).setScale(POD_SCALE).setDepth(3) };
     this.feet = { L: this.add.image(0, 0, 'foot-l').setDepth(12), R: this.add.image(0, 0, 'foot-r').setDepth(12) };
     this.hud = this.add.graphics().setDepth(30);
 
@@ -479,8 +503,9 @@ class Play extends Phaser.Scene {
       this.fx.petals.explode(26, x, y);
       this.showFeedback('SMASH!');
       // A separate short-lived stamp also works for the last plant of an act.
-      const stamp = this.add.image(x, y, this.flowerKey(th.id)).setDepth(19);
-      this.tweens.add({ targets: stamp, scaleX: 1.5, scaleY: 0.35, duration: 110, yoyo: true,
+      const size = PLANT_SCALE * Math.min(1.15, L.W / 850);   // the same size the flower had in its lane
+      const stamp = this.add.image(x, y, this.flowerKey(th.id)).setDepth(19).setScale(size);
+      this.tweens.add({ targets: stamp, scaleX: size * 1.5, scaleY: size * 0.35, duration: 110, yoyo: true,
         onComplete: () => { this.tweens.add({ targets: stamp, scale: 0.3, alpha: 0, duration: 160, onComplete: () => stamp.destroy() }); } });
     }
     else if (th.kind === 'flower') this.showFeedback('Higher step!');
@@ -567,12 +592,12 @@ class Play extends Phaser.Scene {
       this.worldLayout = L;
       const b = this.bg;
       b.clear();
-      b.fillStyle(0x43864b); b.fillRect(0, 0, W, H);
+      b.fillStyle(0x10241c); b.fillRect(0, 0, W, H);   // dark around the lawn: the projector spends its light on the lanes
       b.fillStyle(C.path); b.fillRoundedRect(W * 0.155, L.top - 10, W * 0.69, H, 18);
       this.targetTiles.forEach((tile, i) => tile.setPosition(L.lanes[i ? 'R' : 'L'], L.zoneY)
         .setDisplaySize(W * 0.34, rowH));
       for (const lane of ['L', 'R']) {
-        this.pods[lane].setPosition(W * (lane === 'L' ? 0.08 : 0.92), L.top + 48);
+        this.pods[lane].setPosition(L.lanes[lane], Math.max(66, L.top - 20));   // Pip sits at the far end of its lane, never off the top
         const pad = L.pad(lane);
         this.feet[lane].setPosition(L.lanes[lane], pad.y + pad.h / 2)
           .setScale(Math.min(1.4, (pad.h - 16) / 124, (pad.w - 16) / 80));
@@ -610,15 +635,19 @@ class Play extends Phaser.Scene {
       live.add(th.id);
       let s = this.sprites.get(th.id);
       if (!s) {
-        const pad = this.add.image(0, 8, 'tile-dirt').setDisplaySize(142, 90);
-        const plant = this.add.image(0, 0, th.kind === 'flower' ? this.flowerKey(th.id) : 'seed');
+        // The glow ring shows only as the thing reaches the feet; the plant stands on the lawn itself.
+        const pad = this.add.ellipse(0, 34, 170, 64, C.yellow, 0.28).setStrokeStyle(8, C.yellow).setVisible(false);
+        const plant = this.add.image(0, 0, th.kind === 'flower' ? this.flowerKey(th.id) : 'seed')
+          .setScale(th.kind === 'flower' ? PLANT_SCALE : 1.3);
         // Pads travel with the exact rules position; tile decoration never snaps an obstacle's distance.
         s = this.add.container(L.lanes[th.lane], L.top, [pad, plant]).setDepth(5);
         this.sprites.set(th.id, s);
         if (th.kind === 'seed') {
           sound.play('seed');
           const pod = this.pods[th.lane];
-          this.tweens.add({ targets: pod, scaleX: 1, scaleY: 0.65, duration: 120, yoyo: true });
+          this.tweens.killTweensOf(pod);
+          pod.setScale(POD_SCALE);   // a second seed mid-hiccup restarts from rest, never from a squashed pod
+          this.tweens.add({ targets: pod, scaleX: POD_SCALE * 1.2, scaleY: POD_SCALE * 0.8, duration: 120, yoyo: true });
         }
       }
       const y = this.yFor(Math.max(th.distCm, -40), L);
@@ -627,8 +656,7 @@ class Play extends Phaser.Scene {
       s.setPosition(L.lanes[th.lane], y).setScale(Math.min(1.15, L.W / 850));
       s.setAlpha(th.result ? 0.25 : 1);
       const pad = s.list[0];
-      const padKey = near > 0.72 && !th.result ? 'tile-target' : 'tile-dirt';
-      if (pad.texture.key !== padKey) pad.setTexture(padKey).setDisplaySize(142, 90);
+      pad.setVisible(near > 0.72 && !th.result);
       plant.setVisible(!(th.kind === 'flower' && th.result === 'hit'));
       if (th.kind === 'seed' && !th.result) plant.setRotation(plant.rotation + 0.15);
       else plant.setAngle(Math.sin(g.t * 3 + th.id) * 5);
