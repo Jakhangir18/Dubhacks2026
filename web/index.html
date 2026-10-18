@@ -15,7 +15,9 @@
       background: rgba(0,0,0,.6); padding: 6px 10px; border-radius: 8px; }
     #keys b { color: #7CFF4F; }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <!-- Phaser 3.80.1 (MIT) is vendored so the game runs with no Wi-Fi; the CDN is only a fallback -->
+  <script src="vendor/phaser.min.js"></script>
+  <script>window.Phaser || document.write('<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"><\/script>')</script>
   <script src="warp.js"></script>
 </head>
 <body>

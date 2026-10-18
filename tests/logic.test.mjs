@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newGame, step, addEvent, pace, form, applyParams, summary, needCm } from '../web/logic.js';
+import { newGame, step, addEvent, pace, form, applyParams, summary, needCm, startAt } from '../web/logic.js';
 
 const DT = 0.05;
 
@@ -149,4 +149,27 @@ test('events from an unknown foot are ignored', () => {
   const g = newGame({}, 1);
   assert.equal(addEvent(g, { foot: 'X', kind: 'strike' }), null);
   assert.equal(g.stats.steps, 0);
+});
+
+test('lift targets never exceed the therapist maximum', () => {
+  const g = newGame({ walkSeconds: 1, liftRange: [6, 18] }, 4);
+  walk(g, 3, 0.6, 12);                 // high marching in act 1: normal step 12 cm
+  assert.equal(g.act, 'garden');
+  assert.equal(needCm(g, 'seed', 'L'), 18);
+  assert.equal(needCm(g, 'flower', 'L'), 16);
+});
+
+test('startAt jumps to an act through the normal transition', () => {
+  const g = newGame({}, 1);
+  startAt(g, 'storm');
+  assert.equal(g.act, 'storm');
+  assert.equal(g.actResolved, 0);
+  assert.ok(g.base);
+});
+
+test('equal step times on one foot still give an asymmetry value', () => {
+  const g = newGame({}, 1);
+  for (const [t, f] of [[0, 'L'], [0.6, 'R'], [0.6, 'L'], [1.2, 'R'], [1.2, 'L']]) addEvent(g, { foot: f, kind: 'strike', t });
+  g.t = 1.3;
+  assert.notEqual(pace(g).asym, null);
 });

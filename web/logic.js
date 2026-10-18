@@ -59,6 +59,7 @@ export function newGame(limits = {}, seed = 1) {
     walkLifts: { L: [], R: [] },   // act 1 lifts: the player's normal step height
     base: null,                    // {L, R} normal step height, set when act 1 ends
     log: [],                     // resolved things for the report and the UI
+    actResolved: 0,              // things resolved in the current act (progress bar)
   };
 }
 
@@ -97,7 +98,7 @@ export function pace(g, now = g.t) {
   for (let i = 1; i < recent.length; i++) gaps[recent[i].foot].push(recent[i].t - recent[i - 1].t);
   const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
   const mL = mean(gaps.L), mR = mean(gaps.R);
-  const asym = mL && mR ? Math.abs(mL - mR) / ((mL + mR) / 2) : null;
+  const asym = mL !== null && mR !== null && mL + mR > 0 ? Math.abs(mL - mR) / ((mL + mR) / 2) : null;
   const ok = cadence >= g.limits.minCadence && feet.size === 2;
   return { cadence: Math.round(cadence), ok, bothFeet: feet.size === 2, asym };
 }
@@ -140,7 +141,8 @@ function median(a) {
 // Height a lift must reach on this foot for this kind of thing.
 export function needCm(g, kind, foot) {
   const base = g.base ? g.base[foot] : RULES.defaultBaseCm;
-  return kind === 'flower' ? base + RULES.stompExtraCm : Math.max(g.limits.liftCm, base + RULES.dodgeExtraCm);
+  const max = g.limits.liftRange[1];     // never ask for more than the therapist allows
+  return kind === 'flower' ? Math.min(max, base + RULES.stompExtraCm) : Math.min(max, Math.max(g.limits.liftCm, base + RULES.dodgeExtraCm));
 }
 
 function judge(g, th) {
@@ -156,7 +158,7 @@ export function step(g, dt) {
   g.actT += dt;
   const p = pace(g);
   const f = form(p);
-  if (g.act !== 'home') { g.formSum += f; g.formN += 1; }
+  if (g.act !== 'home') { g.formSum += f * dt; g.formN += dt; }   // time-weighted, independent of frame rate
   const speed = p.ok ? (p.cadence / 60) * RULES.strideCm : 0;   // the world waits when the pace drops
   const moved = speed * dt;
   g.travelledCm += moved;
@@ -190,6 +192,7 @@ export function step(g, dt) {
         g.streak = 0;
       }
       g.log.push({ id: th.id, kind: th.kind, lane: th.lane, result: th.result, t: g.t });
+      g.actResolved += 1;
       out.resolved.push(th);
     }
   }
@@ -208,10 +211,20 @@ function nextAct(g, out) {
   }
   g.act = { walk: 'garden', garden: 'storm', storm: 'home' }[g.act];
   g.actT = 0;
+  g.actResolved = 0;
   g.spawned = 0;
   g.nextSpawnCm = g.travelledCm + 60;
   g.things = [];
   out.actChanged = true;
+}
+
+// Development and demo shortcut: start at an act as if the earlier acts were done with normal steps.
+export function startAt(g, act) {
+  if (act !== 'garden' && act !== 'storm') return;
+  g.base = { L: RULES.defaultBaseCm, R: RULES.defaultBaseCm };
+  g.act = 'walk';
+  if (act === 'storm') g.act = 'garden';
+  nextAct(g, { actChanged: false });
 }
 
 // Coach adjustments are clamped to the therapist's ranges.
@@ -234,6 +247,11 @@ export function summary(g) {
     stompPct: pct(g.stats.stomp),
     dodgePct: pct(g.stats.dodge),
     liftAvgCm: { L: avg(g.stats.lifts.L), R: avg(g.stats.lifts.R) },
+    liftMaxCm: { L: g.stats.lifts.L.length ? Math.max(...g.stats.lifts.L) : null, R: g.stats.lifts.R.length ? Math.max(...g.stats.lifts.R) : null },
+    highLiftAvgCm: {   // only deliberate high steps (stomps and dodges), the number a therapist cares about
+      L: avg(g.stats.lifts.L.filter((x) => x >= (g.base ? g.base.L : RULES.defaultBaseCm) + RULES.stompExtraCm)),
+      R: avg(g.stats.lifts.R.filter((x) => x >= (g.base ? g.base.R : RULES.defaultBaseCm) + RULES.stompExtraCm)),
+    },
     formPct: g.formN ? Math.round((100 * g.formSum) / g.formN) : 0,
     score: g.score,
     liftTargetCm: g.limits.liftCm,

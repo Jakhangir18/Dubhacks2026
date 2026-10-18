@@ -1,6 +1,7 @@
 // Foot event bus. Every input source dispatches the same events here:
 // the keyboard (development), the browser camera tracker, and the Raspberry Pi bridge.
-// Event: {foot: 'L'|'R', kind: 'strike'} or {foot, kind: 'lift', liftCm}. The game stamps the time itself.
+// Event: {foot: 'L'|'R', kind: 'strike'} or {foot, kind: 'lift', liftCm}. Do not send a time: the game
+// stamps every event with its own clock on arrival, so senders on other clocks cannot break the timing windows.
 export const FOOT_EVENT = 'zombiewalk:foot';
 
 export function emitFoot(ev) {

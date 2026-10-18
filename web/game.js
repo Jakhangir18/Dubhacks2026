@@ -1,6 +1,6 @@
 // Zombie Walk Home: Phaser scenes, art, HUD and input. Rules live in logic.js.
 // Floor projection, top-down: the bottom band is the walking zone; flowers and seeds come from the top.
-import { newGame, step, addEvent, summary, needCm, RULES } from './logic.js';
+import { newGame, step, addEvent, summary, needCm, startAt, RULES } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
 
 const Phaser = window.Phaser;
@@ -61,6 +61,7 @@ function toggleCorners() {
 }
 
 window.addEventListener('keydown', (e) => {
+  if (e.repeat) return;   // a held key must not fake a stream of steps
   const k = e.key.toLowerCase();
   const map = {
     a: () => keyStep('L', 4), d: () => keyStep('R', 4),
@@ -143,7 +144,7 @@ class Boot extends Phaser.Scene {
     makeTextures(this);
     applyWarp();
     if (params.get('auto') === '1') toggleAutoWalk();
-    const sample = { score: 180, formPct: 82, steps: 412, cadence: 96, stompPct: 75, dodgePct: 70, liftAvgCm: { L: 11.5, R: 9 } };
+    const sample = { score: 180, formPct: 82, steps: 412, cadence: 96, stompPct: 75, dodgePct: 70, highLiftAvgCm: { L: 13.5, R: 11 } };
     const first = params.get('scene');
     if (first === 'home') this.scene.start('home', { summary: sample });   // development: preview the end screen
     else this.scene.start(first === 'play' ? 'play' : 'title');
@@ -173,8 +174,10 @@ class Title extends Phaser.Scene {
       if (steps.length >= 4) this.go();
     });
     this.input.keyboard.on('keydown-ENTER', () => this.go());
-    this.events.once('shutdown', () => this.off());
+    this.scale.on('resize', this.restartOnResize, this);
+    this.events.once('shutdown', () => { this.off(); this.scale.off('resize', this.restartOnResize, this); });
   }
+  restartOnResize() { if (!this.started) this.scene.restart(); }
   go() { if (!this.started) { this.started = true; this.scene.start('play'); } }
 }
 
@@ -195,6 +198,7 @@ class Play extends Phaser.Scene {
     this.lift = { L: 0, R: 0 };            // shown lift, decays
     this.footFlash = { L: 0, R: 0 };
     this.lastCue = 0;
+    this.frameWall = performance.now();
 
     const { width: W, height: H } = this.scale;
     this.bg = this.add.graphics();
@@ -221,7 +225,10 @@ class Play extends Phaser.Scene {
     };
 
     this.off = onFoot((ev) => {
-      const e = addEvent(this.g, ev);
+      if (this.paused) return;                          // the world is frozen; steps do not count
+      // Stamp with the game clock, interpolated to the moment the event arrived between two frames,
+      // so a slow frame rate does not bunch steps together.
+      const e = addEvent(this.g, { ...ev, t: this.g.t + (performance.now() - this.frameWall) / 1000 });
       if (!e) return;
       if (e.kind === 'strike') this.footFlash[e.foot] = 1;
       if (e.kind === 'lift') this.lift[e.foot] = Math.max(this.lift[e.foot], e.liftCm);
@@ -229,11 +236,7 @@ class Play extends Phaser.Scene {
     this.events.once('shutdown', () => this.off());
     this.input.keyboard.on('keydown-SPACE', () => { this.paused = !this.paused; });
     const jump = params.get('act');
-    if (jump === 'garden' || jump === 'storm') {   // development shortcut: skip to an act
-      this.g.act = jump;
-      this.g.base = { L: 4, R: 4 };
-      if (jump === 'storm') this.g.log = Array.from({ length: this.g.limits.gardenPlants }, () => ({}));
-    }
+    if (jump) { startAt(this.g, jump); params.delete('act'); }   // development shortcut, first game only
     this.showAct();
   }
 
@@ -273,10 +276,9 @@ class Play extends Phaser.Scene {
 
   progress() {
     const g = this.g;
-    const resolved = g.log.length;
-    if (g.act === 'walk') return (g.walkGoodS / g.limits.walkSeconds) / 3;
-    if (g.act === 'garden') return 1 / 3 + Math.min(1, resolved / g.limits.gardenPlants) / 3;
-    if (g.act === 'storm') return 2 / 3 + Math.min(1, (resolved - g.limits.gardenPlants) / g.limits.stormSeeds) / 3;
+    if (g.act === 'walk') return Math.min(1, g.walkGoodS / g.limits.walkSeconds) / 3;
+    if (g.act === 'garden') return 1 / 3 + Math.min(1, g.actResolved / g.limits.gardenPlants) / 3;
+    if (g.act === 'storm') return 2 / 3 + Math.min(1, g.actResolved / g.limits.stormSeeds) / 3;
     return 1;
   }
 
@@ -291,6 +293,7 @@ class Play extends Phaser.Scene {
   update(_time, deltaMs) {
     if (this.paused) return;
     const dt = Math.min(1, deltaMs / 1000);   // only a stalled tab is capped: events arrive in real time, game time must keep up
+    this.frameWall = performance.now();
     const out = step(this.g, dt);
     const L = this.layout();
 
@@ -394,6 +397,13 @@ class Play extends Phaser.Scene {
     h.fillStyle(0x222222); h.fillRoundedRect(W - 236, 66, 212, 20, 10);
     h.fillStyle(fc); h.fillRoundedRect(W - 236, 66, Math.max(20, 212 * out.form), 20, 10);
 
+    // positions follow the current size (fullscreen or a projector resolution change)
+    this.scoreText.setPosition(W - 24, 14);
+    this.paceText.setPosition(W - 24, 100);
+    this.coachText.setPosition(W / 2, H * 0.3);
+    this.waitText.setPosition(W / 2, H * 0.56);
+    this.banner.setPosition(W / 2, H * 0.4);
+    this.trees.forEach((tr, i) => tr.setX(i % 2 ? W * 0.07 : W * 0.93));
     this.actText.setText(ACTS[g.act] ? ACTS[g.act].title : '');
     this.scoreText.setText(`${g.score} pts${g.streak >= 5 ? '  x2' : ''}`);
     this.paceText.setText(`form · ${out.pace.cadence} steps/min (min ${g.limits.minCadence})`);
@@ -416,12 +426,17 @@ class Home extends Phaser.Scene {
       `Score ${s.score}   ·   Form ${s.formPct}%`,
       `${s.steps} steps   ·   ${s.cadence} steps/min`,
       `Flowers stomped ${s.stompPct ?? 0}%   ·   Seeds dodged ${s.dodgePct ?? 0}%`,
-      `Lift  left ${s.liftAvgCm.L ?? '-'} cm   right ${s.liftAvgCm.R ?? '-'} cm`,
+      `High steps  left ${s.highLiftAvgCm?.L ?? '-'} cm   right ${s.highLiftAvgCm?.R ?? '-'} cm`,
     ];
     lines.forEach((l, i) => this.add.text(W / 2, H * 0.58 + i * 50, l, txt(32)).setOrigin(0.5));
     this.add.text(W / 2, H * 0.92, 'Press R to walk again', txt(28, C.yellow)).setOrigin(0.5);
     say(`You made it home. ${s.stompPct ?? 0} percent of flowers stomped. Great walking.`);
     this.input.keyboard.on('keydown-R', () => this.scene.start('title'));
+    const again = () => this.scene.restart(data);
+    this.scale.once('resize', again);
+    this.events.once('shutdown', () => this.scale.off('resize', again));
+    if (data.replay) return;
+    data.replay = true;
     window.dispatchEvent(new CustomEvent('zombiewalk:session', { detail: s }));
   }
 }
