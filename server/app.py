@@ -30,7 +30,7 @@ from typing import Any
 import segno
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -358,7 +358,24 @@ def index() -> FileResponse:
     return FileResponse(WEB / "index.html")
 
 
-DASHBOARD = ROOT / "dashboard" / "dist"   # built with `npm run build` in dashboard/; absent until then
-if DASHBOARD.is_dir():
-    app.mount("/dashboard", StaticFiles(directory=DASHBOARD, html=True), name="dashboard")
+DASHBOARD = ROOT / "dashboard" / "dist"   # built with `npm run build` in dashboard/; served once it exists, no restart
+
+
+@app.get("/dashboard", include_in_schema=False)
+def dashboard_root() -> RedirectResponse:
+    return RedirectResponse("/dashboard/")   # the build's asset paths are relative to the slash
+
+
+@app.api_route("/dashboard/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+def dashboard(path: str) -> FileResponse:
+    """The results dashboard (dashboard/). Unknown paths get its page, so /dashboard/?session=<id> always opens it."""
+    root = DASHBOARD.resolve()
+    if not (root / "index.html").is_file():
+        raise HTTPException(404, "dashboard not built: cd dashboard && npm install && npm run build")
+    file = (root / path).resolve()
+    if not file.is_relative_to(root) or not file.is_file():
+        file = root / "index.html"
+    return FileResponse(file)
+
+
 app.mount("/", StaticFiles(directory=WEB), name="web")

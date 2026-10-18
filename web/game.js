@@ -322,10 +322,16 @@ window.addEventListener('keydown', (e) => {
 
 // The finished walk review opens in its own tab, always the same one, so walks do not pile up tabs. Opened without a
 // click, the browser may block it (allow pop-ups for this site once); P opens it from a key press, which always works.
+// It opens in the results dashboard when the server has its build (dashboard/, `npm run build`), else in report.html.
 let lastReportId = null;
+let dashboardBuilt = false;
+fetch('/dashboard/', { method: 'HEAD' }).then((r) => { dashboardBuilt = r.ok; }).catch(() => {});
+function reviewUrl(id) {
+  return dashboardBuilt ? `/dashboard/?session=${encodeURIComponent(id)}` : `/report.html?id=${encodeURIComponent(id)}`;
+}
 function openReport(id) {
   lastReportId = id;
-  return window.open(`/report.html?id=${encodeURIComponent(id)}`, 'zombiewalk-report') !== null;
+  return window.open(reviewUrl(id), 'zombiewalk-report') !== null;
 }
 
 // The belt keeps moving after the game, so walking would start the next game before the walk review arrives: a
@@ -1172,8 +1178,10 @@ class Home extends Phaser.Scene {
     if (data.gaitStatus) this.showGait();
     say(`${ENDING} ${s.stompPct ?? 0} percent of flowers stomped. Great walking.`);
     const playAgain = () => {
-      if (this.restarting || zone.active) return;   // once, and not under the zone setup
-      this.restarting = true;
+      // Once per walk, and not under the zone setup. The flag lives on this walk's data, not on the scene: Phaser
+      // reuses the scene for every game, and a flag left on it from the last walk ignored every later restart.
+      if (data.restarting || zone.active) return;
+      data.restarting = true;
       data.cancelled = true; data.uploadAbort?.abort(); clip.cancel();
       playerReady = loadPlayer();
       playerReady.then(() => { if (this.sys.isActive() || this.sys.isPaused()) this.scene.start('play'); });   // the panel's new limits apply

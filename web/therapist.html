@@ -280,7 +280,11 @@
         || (g.status === 'done' ? `done · ${g.source === 'gemini' ? 'Gemini' : 'rules'}` : g.status);
     }
 
-    // The short version of a review under its session row; the full one is report.html.
+    // The dashboard's build (dashboard/) is served at /dashboard/ once it exists; until then the report is the full view.
+    let dashboardBuilt = false;
+    fetch('/dashboard/', { method: 'HEAD' }).then((r) => { dashboardBuilt = r.ok; }).catch(() => {});
+
+    // The short version of a review under its session row; the full one is the dashboard (or report.html).
     function reviewDetail(r) {
       const g = r.gaitReview, v = g.review || {};
       const cell = el('td'); cell.colSpan = 11;
@@ -308,7 +312,13 @@
         b.onclick = () => applySuggestion(next);
         row.append(b); box.append(row);
       }
-      if (r.id) { const a = el('a', 'Full report'); a.href = `/report.html?id=${encodeURIComponent(r.id)}`; a.target = '_blank'; box.append(a); }
+      if (r.id) {
+        const links = el('div', null, 'row');
+        const link = (text, href) => { const a = el('a', text); a.href = href; a.target = '_blank'; return a; };
+        if (dashboardBuilt) links.append(link('Open in the dashboard', `/dashboard/?session=${encodeURIComponent(r.id)}`));
+        links.append(link('Printable report', `/report.html?id=${encodeURIComponent(r.id)}`));
+        box.append(links);
+      }
       cell.append(box);
       const tr = el('tr', null, 'detail'); tr.append(cell);
       return tr;
