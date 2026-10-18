@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, type ReactNode } from "react"
-import { motion, useMotionValue, useReducedMotion, useSpring, useTransform } from "motion/react"
+import { motion, useMotionValue, useReducedMotion, useSpring } from "motion/react"
 import { cn } from "cn"
 
 /** Pointer parallax: children drift against the cursor; off under reduced motion. */
@@ -97,11 +97,10 @@ export function Tilt({ children, className, max = 6 }: { children: ReactNode; cl
   const ry = useMotionValue(0)
   const srx = useSpring(rx, { stiffness: 200, damping: 18 })
   const sry = useSpring(ry, { stiffness: 200, damping: 18 })
-  const shadow = useTransform(srx, [-max, max], ["0 18px 40px rgba(7,11,16,0.18)", "0 8px 20px rgba(7,11,16,0.12)"])
   return (
     <motion.div
-      className={cn("[transform-style:preserve-3d]", className)}
-      style={{ rotateX: srx, rotateY: sry, transformPerspective: 900, boxShadow: shadow }}
+      className={className}
+      style={{ rotateX: srx, rotateY: sry, transformPerspective: 900 }}
       onPointerMove={(event) => {
         if (reduce) return
         const rect = event.currentTarget.getBoundingClientRect()
