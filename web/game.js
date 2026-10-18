@@ -48,7 +48,8 @@ async function api(path, body) {
 }
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error('timeout')), ms))]);
 
-const DEMO = { walkSeconds: 8, gardenPlants: 4, stormSeeds: 4 };
+const DEMO = { walkSeconds: 8, gardenPlants: 5, stormSeeds: 4, rounds: 2 };
+const SHARE = params.get('share') === '1';   // the clip and QR code are off unless asked for
 // Called before every game, so limits saved in the therapist panel apply to the next walk without a reload.
 async function loadPlayer() {
   const name = encodeURIComponent(settings.player);
@@ -138,7 +139,8 @@ window.addEventListener(SHOES_EVENT, (e) => {
   if (!camH) return;
   const play = window.zombieGame?.scene.getScene('play');
   if (play?.sys.isActive() && !play.paused && !zone.active) { play.feedShoes(e.detail.boxes); return; }
-  if (!window.zombieGame?.scene.isActive('title') || zone.active) return;   // only the title's walk-to-start needs steps
+  const g = window.zombieGame;
+  if (!(g?.scene.isActive('title') || g?.scene.isActive('home')) || zone.active) return;   // walk-to-start on the title and home screens
   const before = scratch.stats.steps;
   scratch.t = performance.now() / 1000;
   addShoes(scratch, mapShoes(e.detail.boxes, scratchLayout));
@@ -692,7 +694,7 @@ class Play extends Phaser.Scene {
     const a = ACTS[this.g.act];
     if (!a) return;
     sound.play('act');
-    if (this.g.act === 'storm') clip.start(this.game.canvas, sound.capture?.stream);
+    if (this.g.act === 'storm' && SHARE) clip.start(this.game.canvas, sound.capture?.stream);
     this.actIntroUntil = this.g.t + 4.4;
     this.coachLine = shoesLive(this.g) ? a.how : a.hint;   // shoe mode: say what to do with the foot, plainly
     this.nextGardenUpdate = 0;
@@ -759,10 +761,14 @@ class Play extends Phaser.Scene {
 
   progress() {
     const g = this.g;
-    if (g.act === 'walk') return Math.min(1, g.walkGoodS / g.limits.walkSeconds) / 3;
-    if (g.act === 'garden') return 1 / 3 + Math.min(1, g.actResolved / g.limits.gardenPlants) / 3;
-    if (g.act === 'storm') return 2 / 3 + Math.min(1, g.actResolved / g.limits.stormSeeds) / 3;
-    return 1;
+    const rounds = Math.max(1, Math.round(Number(g.limits.rounds) || 1));
+    const total = 1 + 2 * rounds;   // the walk, then flowers and seeds per round
+    let done, within;
+    if (g.act === 'walk') { done = 0; within = Math.min(1, g.walkGoodS / g.limits.walkSeconds); }
+    else if (g.act === 'garden') { done = 1 + 2 * (g.round - 1); within = Math.min(1, g.actResolved / g.limits.gardenPlants); }
+    else if (g.act === 'storm') { done = 2 + 2 * (g.round - 1); within = Math.min(1, g.actResolved / g.limits.stormSeeds); }
+    else return 1;
+    return (done + within) / total;
   }
 
   async askCoach() {
@@ -927,7 +933,7 @@ class Play extends Phaser.Scene {
       this.nextGardenUpdate = g.t + .2;
       const act = ACTS[g.act];
       publishGarden({ cadence: out.pace.cadence, act: g.act, paceOk: out.pace.ok || g.t <= 3,
-        paused: this.paused, title: act?.title || '', score: `${g.score} pts${g.streak >= 5 ? '  x2' : ''}`,
+        paused: this.paused, title: `${act?.title || ''}${g.round > 1 && g.act !== 'walk' ? ` · round ${g.round}` : ''}`, score: `${g.score} pts${g.streak >= 5 ? '  x2' : ''}`,
         progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · speed x${speedScale(g).toFixed(1)}${shoesLive(g) ? ' · shoes' : ''} · form ${Math.round(out.form * 100)}%${out.pace.asym !== null ? ` · even L/R ${Math.max(0, Math.round(100 - out.pace.asym * 100))}%` : ''}${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
         coachColor: g.t < this.feedbackUntil ? this.feedbackColor : '',
         coach: g.t < this.feedbackUntil ? this.feedback : g.t < this.actIntroUntil ? (shoesLive(g) ? `${act.title.split(' · ')[1]}: ${act.how}` : act.intro.join(' ')) : this.coachLine });
@@ -976,20 +982,31 @@ class Home extends Phaser.Scene {
     this.rewardText = text('Ag\nAg', bodySize, C.magenta);
     this.rewardHeight = this.rewardText.height;
     this.rewardText.setText('');
-    this.footer = text('Press R to walk again', small ? 22 : 24, C.yellow);
-    this.shareText = text(data.shareStatus || 'Preparing your walk clip…', small ? 20 : 24, C.yellow);
+    this.footer = text('Walk to play again · R', small ? 22 : 24, C.yellow);
+    this.shareText = text(SHARE ? data.shareStatus || 'Preparing your walk clip…' : '', small ? 20 : 24, C.yellow);
     this.qrImage = null;
     this.layoutCard();
     if (data.share) this.showShare(data.share);
-    if (!data.clipTask) {
+    if (SHARE && !data.clipTask) {
       data.clipTask = this.prepareClip(data);
     }
     if (data.result) this.showResult(data.result);
     say(`${ENDING} ${s.stompPct ?? 0} percent of flowers stomped. Great walking.`);
-    this.input.keyboard.on('keydown-R', () => {
+    const playAgain = () => {
       data.cancelled = true; data.uploadAbort?.abort(); clip.cancel();
-      playerReady = loadPlayer(); this.scene.start('title');
+      playerReady = loadPlayer(); this.scene.start('play');
+    };
+    this.input.keyboard.on('keydown-R', playAgain);
+    // Walking again starts the next game by itself, once the card has been on screen for a moment.
+    const steps = [];
+    const shownAt = performance.now();
+    this.offFoot = onFoot((ev) => {
+      if (doubleCamera(ev) || ev.kind !== 'strike' || performance.now() - shownAt < 8000) return;
+      steps.push(performance.now());
+      while (steps.length && performance.now() - steps[0] > 3000) steps.shift();
+      if (steps.length >= 4) playAgain();
     });
+    this.events.once('shutdown', () => this.offFoot());
     const again = () => restartWhenShown(this, data);
     this.scale.once('resize', again);
     this.events.once('shutdown', () => this.scale.off('resize', again));

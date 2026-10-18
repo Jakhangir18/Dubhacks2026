@@ -163,3 +163,9 @@ def test_shoe_calibration_round_trip_and_validation():
     assert client.get("/api/shoecal").json()["h"] == [1, 0, 0, 0, 1, 0, 0, 0]
     assert client.put("/api/shoecal", json={"h": [1, 2, 3]}).status_code == 422
     assert client.put("/api/shoecal", json={"h": [1] * 8, "points": [[0, 0]]}).status_code == 422
+
+
+def test_rounds_limit_is_a_whole_number_of_at_least_one():
+    assert clean_limits({"rounds": 0})["rounds"] == 1
+    assert clean_limits({"rounds": 3.6})["rounds"] == 4
+    assert clean_limits({})["rounds"] == 2

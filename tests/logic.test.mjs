@@ -322,3 +322,11 @@ test('the toe line follows where the shoes stand, so a flower reaches feet that 
   step(g, DT);
   assert.equal(th.result, 'hit');
 });
+
+test('rounds: flowers and seeds repeat before home, and the summary counts them', () => {
+  const g = newGame({ walkSeconds: 2, gardenPlants: 2, stormSeeds: 2, rounds: 2 }, 5);
+  const acts = [];
+  walkUntil(g, () => { if (acts[acts.length - 1] !== g.act) acts.push(g.act); return g.act === 'home'; }, 300);
+  assert.deepEqual(acts, ['walk', 'garden', 'storm', 'garden', 'storm', 'home']);
+  assert.equal(summary(g).rounds, 2);
+});

@@ -15,6 +15,7 @@ export const LIMITS = {          // set by the therapist (Therapist panel); the 
   spacingCm: 140,                // distance between plants
   spacingRange: [90, 220],
   speedScale: 0.7,               // how fast plants come, times the walking speed (0.3 to 2); 1 felt too fast on the pad
+  rounds: 2,                     // flowers then seeds, this many times, before home
 };
 
 export const RULES = {
@@ -54,6 +55,7 @@ export function newGame(limits = {}, seed = 1) {
     rand: rng(seed),
     t: 0,
     act: 'walk',
+    round: 1,                    // which flowers-and-seeds round (1 to limits.rounds)
     actT: 0,                     // seconds spent in the current act
     walkGoodS: 0,                // act 1 seconds at a good pace
     travelledCm: 0,
@@ -307,7 +309,9 @@ function nextAct(g, out) {
       R: median(g.walkLifts.R) ?? RULES.defaultBaseCm,
     };
   }
-  g.act = { walk: 'garden', garden: 'storm', storm: 'home' }[g.act];
+  const rounds = Math.max(1, Math.round(Number(g.limits.rounds) || 1));
+  if (g.act === 'storm' && g.round < rounds) { g.round += 1; g.act = 'garden'; }   // another round of flowers and seeds
+  else g.act = { walk: 'garden', garden: 'storm', storm: 'home' }[g.act];
   g.actT = 0;
   g.actResolved = 0;
   g.spawned = 0;
@@ -356,5 +360,6 @@ export function summary(g) {
     spacingCm: g.limits.spacingCm,
     normalStepCm: g.base,
     shoeMode: g.shoeMode,
+    rounds: g.round,
   };
 }
