@@ -188,6 +188,8 @@ def main():
     p.add_argument("--no-preview", action="store_true", help="no window (headless)")
     p.add_argument("--rotate", type=int, default=0, choices=(0, 90, 180, 270),
                    help="rotate the camera picture clockwise before detection (a camera mounted on its side)")
+    p.add_argument("--gamma", type=float, default=1.0,
+                   help="brighten a dark picture before detection, e.g. 0.5 (1 = as the camera gives it)")
     args = p.parse_args()
 
     sender = ShoeSender(args.server) if args.server else None   # a bad URL fails here, before the model and the camera load
@@ -204,6 +206,11 @@ def main():
         print("Recording to", path)
 
     rotation = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}.get(args.rotate)
+    # A dark room (projector only): a gamma curve lifts the shoes out of the dark before the detector sees them.
+    gamma_table = None
+    if args.gamma > 0 and abs(args.gamma - 1.0) > 1e-3:
+        import numpy as np
+        gamma_table = np.array([min(255, round(255 * (i / 255) ** args.gamma)) for i in range(256)], dtype="uint8")
     times = []
     last_frame_sent = 0.0
     while True:
@@ -212,6 +219,8 @@ def main():
             break
         if rotation is not None:
             frame = cv2.rotate(frame, rotation)
+        if gamma_table is not None:
+            frame = cv2.LUT(frame, gamma_table)
         t0 = time.perf_counter()
         feet = det(frame)
         times.append(time.perf_counter() - t0)
