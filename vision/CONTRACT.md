@@ -47,7 +47,7 @@ gait.py polls GET /api/session/active every 1 s: sees the id, marks the start; e
 game Home --POST /api/session {id, summary}--> saved; gaitReview {status: waiting} when a side camera checked in
 gait.py sees the active session end --GET /api/session/{id}--> act segments --POST /api/gait/final--> server
 server, in the background: checked metrics + game results + history --Gemini (numbers only, with consent)--> session.gaitReview
-home card, dashboard (/dashboard.html?session=<id>) read GET /api/session/{id}
+home card, therapist panel and /report.html?id=<id> read GET /api/session/{id}
 ```
 
 ### Session endpoints

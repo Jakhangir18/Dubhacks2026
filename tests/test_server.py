@@ -97,9 +97,16 @@ def test_marks_are_cleaned():
     assert clean_event({"kind": "marks", "marks": "no"}) is None
 
 
-def test_old_dashboard_addresses_land_on_the_one_dashboard():
-    go = lambda path: client.get(path, follow_redirects=False).headers["location"]
-    assert go("/dashboard") == go("/therapist.html") == "/dashboard.html"
-    assert go("/report.html?id=ab12") == go("/dashboard/?session=ab12") == "/dashboard.html?session=ab12"
-    assert go("/report.html?id=a%26b") == "/dashboard.html?session=a%26b"   # an id cannot add parameters
-    assert "Walk Dashboard" in client.get("/dashboard.html").text
+def test_dashboard_is_served_once_built_and_keeps_inside_its_folder(tmp_path, monkeypatch):
+    from server import app as app_module
+    monkeypatch.setattr(app_module, "DASHBOARD", tmp_path / "dist")
+    assert client.get("/dashboard/").status_code == 404                       # not built yet
+    (tmp_path / "dist" / "assets").mkdir(parents=True)
+    (tmp_path / "dist" / "index.html").write_text("<div id=root></div>")
+    (tmp_path / "dist" / "assets" / "app.js").write_text("console.log(1)")
+    (tmp_path / "secret.txt").write_text("no")
+    assert client.get("/dashboard", follow_redirects=False).headers["location"] == "/dashboard/"
+    assert "root" in client.get("/dashboard/?session=abc").text              # the page, for any session link
+    assert client.get("/dashboard/assets/app.js").text == "console.log(1)"
+    assert client.head("/dashboard/").status_code == 200
+    assert "root" in client.get("/dashboard/..%2Fsecret.txt").text           # never outside the build

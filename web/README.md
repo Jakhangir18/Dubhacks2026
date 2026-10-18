@@ -21,17 +21,14 @@ Put the projector and camera **in front of the player**. The player faces them w
 3. Use **Rotate 90°** for a projector mounted at the side. Arrow keys adjust a focused handle; Shift makes larger adjustments. Leave generous space in front of the zone for the large game text.
 4. **Enter** or **Done** saves and continues to the title; explicit `?scene` previews still open their requested scene. Saved corners skip setup and stay compatible with `calibrate.html`. During a game, setup pauses play and the clip, then resumes them on Done. **K** shows the normally hidden keys bar.
 
-## Dashboard (therapist and parent)
+## Therapist and parent panel
 
-Open http://localhost:8000/dashboard.html (with the server running), or press **J** in the game. One page in the game's look, top to bottom:
+Open http://localhost:8000/therapist.html (with the server running).
 
-- **Progress:** each metric of the latest walk, its change since the walk before, and a trend line over the last 12.
-- **Live walk:** the game's and the side camera's numbers while someone plays.
-- **AI coach:** the selected walk's coach note and AI gait review (findings with the numbers they cite, focus, notes for the therapist and parent, **Apply suggested settings**, all measurements). After a reviewed walk the game opens it at `?session=<id>` (**P** opens the last one again).
-- **Sessions:** every finished walk; click one to show it in the AI coach panel.
-- **Perceptron lab** and **Settings** (player, consent, limits, rewards, notes for the coach) are folded at the bottom. **Play as this player** makes the selected player current and goes to the game; Gus in the corner goes back too.
-- **AI gait review** needs a side camera running `gait.py --server` and the consent tick; without it the review uses fixed rules and no numbers leave the laptop. Shapes: `vision/CONTRACT.md`.
-- Old addresses (`/therapist.html`, `/report.html?id=…`, `/dashboard`) redirect here.
+- Pick or create a player, set the limits the coach must stay inside (minimum pace, act lengths, lift target and range, flower spacing, session length), add the parent's reward list, write notes for the coach.
+- **Play as this player** makes that player current for the game (limits, greeting, memory, rewards).
+- The session table shows every finished game with the coach's note.
+- **AI gait review** (off by default): with a side camera running `gait.py --server`, each game's walk is reviewed after Home. The session row shows the review's state; **details** opens a short version with **Apply suggested settings** (the server keeps them inside the ranges), and **Full report** opens `report.html?id=<session>` (printable). Without the consent tick the review uses fixed rules and no numbers leave the laptop. Shapes: `vision/CONTRACT.md`.
 - Chips at the top show which keys are set. **Check integrations** makes a real call to Gemini, MongoDB and Backboard and turns each chip green or red (hover for the reason); Perceptron is not called, its calls are paid.
 
 ## Keys and sponsor features
@@ -48,7 +45,7 @@ PUBLIC_URL=https://...    # optional: public address for the clip QR (e.g. Tails
 
 Switching to MongoDB with games already played offline: `python -m server.store` copies `data/store.json` into Atlas (players and settings already there are kept, sessions are added once).
 
-Perceptron also needs consent: tick "Perceptron double-check" for the player in the dashboard's Settings and save. Without it no frame leaves the laptop.
+Perceptron also needs consent: tick "Perceptron double-check" for the player in the therapist panel and save. Without it no frame leaves the laptop.
 
 Restart the server after editing it. Without keys everything still works on rule-based fallbacks and a local file; the Visa checkout stays a labelled mock until Visa sandbox credentials exist.
 

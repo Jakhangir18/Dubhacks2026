@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Walk review</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root { --bg: #0d0f0d; --card: #161a16; --line: #2a302a; --text: #e8efe8; --dim: #8a978a; --green: #7cff4f;
+      --yellow: #ffe44d; --pink: #ff2d95; --cyan: #2de2ff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; }
+    header { padding: 18px 24px; border-bottom: 1px solid var(--line); }
+    h1 { margin: 0 0 6px; font-size: 20px; } h1 b { color: var(--green); }
+    main { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; padding: 16px 24px; max-width: 1200px; }
+    section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+    section:empty { display: none; }
+    h2 { margin: 0 0 10px; font-size: 16px; color: var(--yellow); }
+    h3 { margin: 12px 0 6px; font-size: 14px; color: var(--dim); }
+    p { margin: 6px 0; } ul { margin: 6px 0; padding-left: 20px; } li { margin: 6px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--dim); font-weight: 600; }
+    .wide { grid-column: 1 / -1; }
+    .hint { color: var(--dim); font-size: 13px; }
+    .chip { display: inline-block; font-size: 12px; padding: 2px 9px; margin: 3px 4px 0 0; border-radius: 99px;
+      border: 1px solid var(--green); color: var(--text); }
+    .chip.low { border-color: var(--line); color: var(--dim); }
+    .tag { font-size: 12px; color: var(--dim); }
+    .big { font-size: 17px; }
+    #status { color: var(--cyan); }
+    footer { padding: 8px 24px 24px; color: var(--dim); font-size: 13px; }
+    @media print {
+      body { background: #fff; color: #000; }
+      section { background: #fff; border-color: #bbb; break-inside: avoid; }
+      h2 { color: #000; } .chip { border-color: #000; color: #000; } .chip.low { border-style: dashed; }
+      #status:empty { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><b>Zombie Walk Home</b> · walk review</h1>
+    <div id="meta" class="hint"></div>
+    <div id="status"></div>
+  </header>
+  <main>
+    <section class="wide" id="overview"></section>
+    <section id="strengths"></section>
+    <section id="findings"></section>
+    <section id="game-vs-gait"></section>
+    <section id="acts"></section>
+    <section id="focus"></section>
+    <section id="notes" class="wide"></section>
+    <section id="metrics" class="wide"></section>
+    <section id="game" class="wide"></section>
+  </main>
+  <footer>Wellness observations, not a medical assessment.</footer>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const id = new URLSearchParams(location.search).get('id');
+    const el = (tag, text, cls) => { const e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; };
+    const fmt = (v) => (typeof v === 'number' ? String(Math.round(v * 10) / 10) : v ?? '-');
+    const heading = (text) => el('h2', text);
+    let metrics = new Map();   // metric id -> metric, for the evidence chips
+
+    // One chip per cited metric: its label and value; the tooltip has the typical value and how far to trust it.
+    function chips(ids) {
+      const box = el('div');
+      for (const key of ids || []) {
+        const m = metrics.get(key);
+        const chip = el('span', m ? `${m.label}: ${fmt(m.value)}${m.unit ? ` ${m.unit}` : ''}` : key, `chip${m?.trust === 'low' ? ' low' : ''}`);
+        if (m) chip.title = [m.typical && `typical ${m.typical}`, `trust ${m.trust}`, m.prev != null && `earlier ${fmt(m.prev)}`].filter(Boolean).join(' · ');
+        box.append(chip);
+      }
+      return box;
+    }
+
+    function fillSection(sectionId, title, nodes) {
+      const s = $(sectionId);
+      s.replaceChildren();
+      const kept = nodes.filter(Boolean);
+      if (kept.length) s.append(heading(title), ...kept);
+    }
+
+    function list(items, render) {
+      if (!items?.length) return null;
+      const ul = el('ul');
+      for (const item of items) ul.append(render(item));
+      return ul;
+    }
+
+    function para(label, text) {
+      if (!text) return null;
+      const p = el('p');
+      if (label) p.append(el('b', `${label}: `));
+      p.append(document.createTextNode(text));
+      return p;
+    }
+
+    function drawReview(row) {
+      const g = row.gaitReview;
+      const v = g.review || {};
+      metrics = new Map((g.metrics || []).map((m) => [m.id, m]));
+      const quality = g.dataQuality ? `data quality ${g.dataQuality.level}${g.dataQuality.issues?.length ? `: ${g.dataQuality.issues.join('; ')}` : ''}` : '';
+      const source = g.source === 'gemini' ? `reviewed by Gemini${g.model ? ` (${g.model})` : ''}` : `rule-based review${g.reason ? ` (${g.reason})` : ''}`;
+      // Parts the model left out or got wrong are written by the rules; say which.
+      const rules = g.source === 'gemini' && g.filledByRules?.length ? `some parts written by the rules: ${g.filledByRules.join(', ')}` : '';
+      fillSection('overview', 'Overview', [el('p', v.overview, 'big'), el('p', [source, quality, rules].filter(Boolean).join(' · '), 'hint')]);
+      fillSection('strengths', 'Strengths', [list(v.strengths, (s) => { const li = el('li', s.text); li.append(chips(s.evidence)); return li; })]);
+      fillSection('findings', 'Findings', [list(v.findings, (f) => {
+        const li = el('li');
+        li.append(el('div', `${f.area}${f.side && f.side !== 'none' ? ` · ${f.side === 'both' ? 'both sides' : f.side === 'L' ? 'left' : 'right'}` : ''} · confidence ${f.confidence}`, 'tag'));
+        li.append(el('div', f.text), chips(f.evidence));
+        return li;
+      })]);
+      fillSection('game-vs-gait', 'The game and the walk together', [list(v.gameVsGait, (x) => { const li = el('li', x.text); li.append(chips(x.evidence)); return li; })]);
+      fillSection('acts', 'Acts and trend', [para('Walking, flowers, seeds', v.actComparison), para('Compared with earlier walks', v.trend)]);
+      const next = v.nextSession || {};
+      const keys = [['liftCm', 'lift target', 'cm'], ['spacingCm', 'flower spacing', 'cm'], ['minCadence', 'minimum pace', 'steps/min']]
+        .filter(([k]) => Number.isFinite(next[k]));
+      const focusChips = v.focus?.evidence?.length ? chips(v.focus.evidence) : null;
+      fillSection('focus', 'Focus for next time', [
+        v.focus?.text && el('p', v.focus.text, 'big'), para('Why', v.focus?.why), focusChips,
+        keys.length && para('Suggested settings', `${keys.map(([k, label, unit]) => `${label} ${next[k]} ${unit}`).join(', ')}${next.why ? ` (${next.why})` : ''}`),
+        keys.length && el('p', 'A suggestion inside the therapist’s ranges; it changes nothing until the therapist applies it in the panel.', 'hint'),
+        v.cues?.length && el('h3', 'Cues'), list(v.cues, (c) => el('li', c)),
+      ]);
+      fillSection('notes', 'Notes', [para('For the player', v.playerFeedback), para('For the parent', v.parentNote),
+        para('For the therapist', v.therapistNote), para('Next recording', v.nextRecording)]);
+      drawMetrics(g);
+    }
+
+    function drawMetrics(g) {
+      const groups = new Map();
+      for (const m of g.metrics || []) {
+        if (!groups.has(m.group)) groups.set(m.group, []);
+        groups.get(m.group).push(m);
+      }
+      const order = ['gait', 'game', 'gait@walk', 'gait@garden', 'gait@storm'];
+      const names = { gait: 'Side camera, whole walk', game: 'Game', 'gait@walk': 'Side camera, act 1 walking',
+        'gait@garden': 'Side camera, flowers', 'gait@storm': 'Side camera, seeds' };
+      const nodes = [];
+      for (const key of [...order.filter((k) => groups.has(k)), ...[...groups.keys()].filter((k) => !order.includes(k))]) {
+        nodes.push(el('h3', names[key] || key));
+        const table = el('table');
+        const head = el('tr');
+        for (const h of ['Metric', 'Side', 'Value', 'Typical', 'Trust', 'Earlier']) head.append(el('th', h));
+        table.append(head);
+        for (const m of groups.get(key)) {
+          const tr = el('tr');
+          for (const v of [m.label, m.side === 'L' ? 'left' : m.side === 'R' ? 'right' : '', `${fmt(m.value)}${m.unit ? ` ${m.unit}` : ''}`,
+            m.typical || '', m.trust, m.prev == null ? '' : fmt(m.prev)]) tr.append(el('td', v));
+          table.append(tr);
+        }
+        nodes.push(table);
+      }
+      if (g.withheld?.length) {
+        nodes.push(el('h3', 'Not used (the camera could not measure them reliably)'));
+        nodes.push(list(g.withheld, (w) => el('li', `${w.id}: ${w.reason}`)));
+      }
+      fillSection('metrics', 'Measurements', nodes);
+    }
+
+    function drawGame(s) {
+      const pair = (o, unit = '') => (o ? `left ${fmt(o.L)}${unit} · right ${fmt(o.R)}${unit}` : null);
+      const lane = (o) => (o ? `left ${o.L[0]}/${o.L[1]} · right ${o.R[0]}/${o.R[1]}` : null);
+      const rows = [
+        ['Mode', s.shoeMode ? 'shoe camera (feet.py)' : 'lift sensor'],
+        ['Time', s.wallSeconds != null ? `${fmt(s.wallSeconds)} s (${fmt(s.seconds)} s playing)` : s.seconds != null ? `${s.seconds} s` : null],
+        ['Steps', s.steps != null ? `${s.steps}${s.stepsByFoot ? ` (left ${s.stepsByFoot.L}, right ${s.stepsByFoot.R})` : ''}` : null],
+        ['Pace at the end', s.cadence != null ? `${s.cadence} steps/min` : null],
+        ['Even left/right', s.asymmetryPct != null ? `${Math.max(0, 100 - s.asymmetryPct)}%` : null],
+        ['Flowers stomped', s.stompPct != null ? `${s.stompPct}%` : null], ['Flowers per lane', lane(s.byLane?.flower)],
+        ['Seeds dodged', s.dodgePct != null ? `${s.dodgePct}%` : null], ['Seeds per lane', lane(s.byLane?.seed)],
+        ['Shoe to flower', pair(s.placementCm, ' cm')], ['Forward swing per step', pair(s.swingCm, ' cm')],
+        ['Lift timing (+ = late)', pair(s.timingS, ' s')], ['Form', s.formPct != null ? `${s.formPct}%` : null],
+        ['Score', s.score], ['Rounds', s.rounds],
+      ].filter(([, v]) => v != null && v !== '');
+      const table = el('table');
+      for (const [k, v] of rows) { const tr = el('tr'); tr.append(el('th', k), el('td', String(v))); table.append(tr); }
+      fillSection('game', 'Game results', [table]);
+    }
+
+    // The same walk in the results dashboard, when the server has its build.
+    if (id) fetch('/dashboard/', { method: 'HEAD' }).then((r) => {
+      if (!r.ok) return;
+      const a = el('a', 'Open in the dashboard', 'hint');
+      a.href = `/dashboard/?session=${encodeURIComponent(id)}`;
+      $('meta').after(a);
+    }).catch(() => {});
+
+    let timer = null;
+    async function load() {
+      clearTimeout(timer);
+      if (!id) { $('status').textContent = 'No session id: open this page from the therapist panel.'; return; }
+      let row;
+      try {
+        const r = await fetch(`/api/session/${encodeURIComponent(id)}`);
+        if (r.status === 404) { $('status').textContent = 'Session not found.'; return; }
+        if (!r.ok) throw new Error(String(r.status));
+        row = await r.json();
+      } catch {
+        $('status').textContent = 'The game server did not answer; trying again…';
+        timer = setTimeout(load, 3000);
+        return;
+      }
+      const s = row.summary || {};
+      $('meta').textContent = [row.player, row.ts && new Date(row.ts * 1000).toLocaleString(), s.shoeMode ? 'walking pad, shoe camera' : null]
+        .filter(Boolean).join(' · ');
+      drawGame(s);
+      const g = row.gaitReview;
+      if (!g) { $('status').textContent = 'No side camera recorded this walk, so there is no gait review; the game results are below.'; return; }
+      if (g.status === 'waiting' || g.status === 'reviewing') {
+        $('status').textContent = g.status === 'waiting' ? 'Waiting for the side camera’s walk…' : 'The coach is reviewing the walk…';
+        timer = setTimeout(load, 3000);
+        return;
+      }
+      if (g.status === 'failed') { $('status').textContent = `The review failed${g.reason ? `: ${g.reason}` : ''}.`; return; }
+      $('status').textContent = '';
+      drawReview(row);
+    }
+    load();
+  </script>
+</body>
+</html>
