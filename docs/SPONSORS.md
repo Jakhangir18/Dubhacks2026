@@ -22,8 +22,8 @@ Rules: exactly one title track, up to three sponsored side tracks, any number of
 ## Recommended stack
 
 - **Title:** Community Kitchen (healthcare, accessibility, community support).
-- **Sponsored 1, Visa:** family sponsor pool and pay per verified session. The generative-AI host agent creates the Visa payment link for the sponsor, picks each winner's reward and checks it out. Visa Acceptance Agent Toolkit is MIT-licensed, ships an MCP server and covers invoices and payment links; the sandbox is self-serve.
-- **Sponsored 2, CloudForce Most Viral:** the "Grandma vs Zombies" clip; every session ends with an auto-cut 10-second highlight and a QR code to share it.
+- **Sponsored 1, Visa:** parent-funded rewards for completed therapy sessions, and pay per verified session. This mirrors the 2025 DubHacks Visa winner (Minty, a kids' tooth-brushing app with parent-controlled rewards that grow with each verified brush). The generative-AI host agent creates the Visa payment link for the sponsor, picks each winner's reward and checks it out. Visa Acceptance Agent Toolkit is MIT-licensed, ships an MCP server and covers invoices and payment links; the sandbox is self-serve.
+- **Sponsored 2, CloudForce Most Viral:** a kid-vs-zombies clip (own art and name); every session ends with an auto-cut 10-second highlight and a QR code to share it.
 - **Sponsored 3, SideShift or DubHacks Next:** SideShift if its brief is about creators or UGC (each session becomes a ready-to-post vertical highlight with an AI caption, so families and care homes become creators); otherwise DubHacks Next with the business story (families, employers and insurers pay per verified session).
 - **Non-sponsored and MLH, cheap and real:** Gemini API (the coach and the host, the core of the AI); MongoDB Atlas (sessions and league); GoDaddy domain; DEV write-up after the event; Commit Fellowship form ("a real problem worth solving"). Backboard (coach memory across sessions) and Tiger Data (gait time series) only if time allows.
 

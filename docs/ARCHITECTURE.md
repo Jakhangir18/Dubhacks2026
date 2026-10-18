@@ -4,51 +4,50 @@ Status: draft for the team, Sat Oct 17. Decisions below follow [research/hardwar
 
 ## Decisions from the hardware brief
 
-- **Pose runs on the laptop**, in the browser with MediaPipe Pose: measured about 81 to 92 fps on a laptop versus about 10 fps on a Raspberry Pi 4 and 17 fps on a Pi 5. The Pi is not needed for the camera.
-- **Camera:** a USB webcam on the laptop, side view; 30 fps is enough, 60 fps is better.
-- **Projector:** standard throw (throw ratio about 1.25 to 1.7) with at least 3,000 lumens, on a light stand with a boom; not a short-throw and not a 300 to 500 lumen mini. Tilting a lamp projector steeply down is undocumented and an Epson manual warns about tilt over 3 degrees: prefer an LED projector rated for any angle, or keep the projector level and use a 45-degree mirror.
-- **Sound module (KY-037/038):** skip it; it is only a threshold comparator. Optional: one piezo under the deck on the ESP32 as a "foot landed" trigger; left and right come from the camera.
-- The sections below still show the Pi and the sensors as options; the decisions above take precedence.
-
+- **Projector bought:** Vankyo Leisure 3W Flip (about 150 lumens on the box, flip stand). It can point at the floor from a table, so no boom stand is needed, but it is dim: project onto a white mat or board, keep the image small (about 1 m), use a dark corner and high-contrast art (bright plants on black). Screen mode stays the fallback. Test visibility in the hall first.
+- **Pose runs on the laptop**, in the browser with MediaPipe Pose: measured about 81 to 92 fps on a laptop versus about 10 fps on a Raspberry Pi 4 and 17 fps on a Pi 5. The Pi is not needed.
+- **Camera:** a USB webcam or an iPhone as a webcam (Continuity Camera on a Mac, an app such as Camo on Windows); 30 fps is enough, 60 fps is better. Floor mode: camera low at the side of the play area. Walking-pad mode: side view at foot height.
+- **No footstep sensors:** the camera does it.
 ## Physical layout
 
 ```
-            [ projector on a stand with a boom, pointing down ]
-                              |
-                              v
-   [ support rail ]   ===== walking pad belt =====   [ side camera on the Raspberry Pi, at foot height ]
-                       piezo/sound sensor under left edge, right edge  ->  ESP32
-   [ TV or wall in front: screen mode until the projector arrives ]
-   [ laptop: game in Chrome + local server ]   [ stop button ]
+FLOOR MODE (children, core)
+   [ projector on a table or shelf, flipped to point at the floor ]
+                         |
+                         v
+          [ white mat ~1 m: projected garden, two lanes ]      [ camera low at the side ]
+   [ laptop: game in Chrome + local server ]   [ parent / therapist screen ]
+
+WALKING-PAD MODE (teens and adults 14+, supervised)
+   [ screen or wall in front: the garden ]
+   [ support rail ]  ===== walking pad belt =====  [ side camera at foot height ]
+   [ person beside the pad ]  [ stop button ]
 ```
 
 - **Walking pad:** speed set by its handheld remote; the software never controls the motor directly.
-- **Projector:** above the pad, image covering the belt (about 40-50 cm by 100-120 cm). Four-corner calibration in the browser maps the game onto the pad outline.
-- **Camera on the Raspberry Pi:** side view at foot height, both lower legs in frame. Side view measures step timing and step length far better than a front view.
-- **Footstep sensors (optional):** a piezo disc or the sound module under each side of the deck gives exact heel-strike timing and which side struck; the camera gives lift height. **Decision:** keep or drop after a 30-minute test.
-- **Belt speed:** two or three bright tape stripes across the belt; the camera times them passing a fixed box.
-- **ESP32 (optional):** a big physical stop button; a servo on the remote only if time allows.
+- **Projector:** floor mode only; four-corner calibration in the browser maps the game onto the mat.
+- **Camera:** side view; both lower legs in frame. Side view measures step timing and step length far better than a front view.
+- **Belt speed (walking-pad mode):** two or three bright tape stripes across the belt; the camera times them passing a fixed box; manual km/h fallback.
+- **ESP32 (optional):** a big physical stop button for walking-pad mode.
 
 ## Software components
 
 | Component | Runs on | Job |
 |---|---|---|
-| Capture and pose | Raspberry Pi or laptop (**Decision**) | camera frames, pose landmarks (heel, toe, ankle, knee per side) |
-| Gait events | same place as pose | turns landmarks into events: heel strike, swing peak with lift height |
+| Capture and pose | laptop browser | camera frames, pose landmarks (heel, toe, ankle, knee per side) |
+| Gait events | laptop browser | turns landmarks into events: heel strike, swing peak with lift height |
 | Belt meter | laptop browser | stripe crossings to belt speed; manual km/h fallback |
 | Game engine | laptop browser | plants, lanes, scrolling at belt speed, hit judging, scoring, anti-cheat |
-| Renderer | laptop browser | screen mode (road view) and projector mode (top-down, warped to the pad) |
+| Renderer | laptop browser | floor mode (top-down, warped onto the mat) and screen mode (road view for the walking pad) |
 | Coach | local server + Gemini API | summary in, one spoken cue and next-wave parameters out; rule-based fallback |
 | Voice | laptop browser | speech recognition for answers, speech synthesis for cues |
-| League and Visa | local server | sessions, weekly table, sponsor pool payout through the Visa sandbox (mock offline) |
-
-**Decision, where pose runs:** either the Pi runs pose and sends only events (light network, Pi may be slow), or the Pi streams video and the laptop runs pose in the browser (faster model, more bandwidth). Pick after the fps numbers in the hardware brief.
+| Rewards and Visa | local server | sessions, parent-funded rewards, family table, checkout through the Visa sandbox (mock offline) |
 
 ## Data flow
 
 ```
 camera -> pose -> gait events --\
-piezo  -> ESP32 -> strike events -+--> game engine --> renderer --> projector / TV
+                                  +--> game engine --> renderer --> projector (floor) / screen (walking pad)
 stripes -> belt meter -----------/        |
                                           +--> summary every 20-30 s --> coach --> cue (speech) + wave parameters
                                           +--> session at finish --> league --> payout (Visa sandbox)

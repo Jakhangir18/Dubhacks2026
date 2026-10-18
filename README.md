@@ -1,51 +1,58 @@
 # Stride Defense (working name)
 
-**An AI therapist-style coach that turns any home treadmill into balance and walking training, gamified with a projector.**
+**An AI therapist-style coach that turns the exercises a therapist assigns into a projected game kids actually want to play.**
 
 DubHacks '26, University of Washington, Oct 17-18 2026.
 
 ## The problem
 
-- More than 14 million US adults aged 65+ fall every year, and the fall death rate rose 21% from 2018 to 2024 (CDC).
-- The training that works is known: treadmill walking with obstacles to step over cut falls by about 42% in the V-TIME trial (The Lancet, 2016), and step training roughly halves the rate of falls (meta-analysis of 7 RCTs).
-- People do not get it: the clinical systems live in clinics, and only about 21% of people given home fall-prevention exercise do the full dose.
-- A game alone is not enough: an unsupervised home stepping game failed in a randomized trial in Parkinson's disease. The missing piece is a therapist watching every step.
+- About 1 in 345 US children has cerebral palsy (CDC), and 5% to 6% of school-aged children have developmental coordination disorder (CMAJ 2015). Many more children and teens are given movement exercises after sports injuries.
+- Therapy happens mostly at home, and home programmes fall apart: across 13 studies, 34% to 79.2% of parents of children with cerebral palsy did not keep up the home exercise programme (PLOS ONE 2024).
+- Access is thin: in one US region only 14% of the physical therapy clinics that answered a survey took children with Medicaid-type insurance (JPOSNA 2024).
+- Games help movement skills when they are part of therapy: active video games improved gross motor skills in children with developmental disabilities (12 trials, g = 0.833; the authors ask for caution).
 
-Sources and more numbers: [docs/research/evidence.md](docs/research/evidence.md).
+Sources and more numbers: [docs/research/kids-evidence.md](docs/research/kids-evidence.md).
 
 ## The solution
 
-You walk on a walking pad. A projector above it paints a garden on the moving belt; you are the zombie walking through it.
+A projector paints a garden on the floor; the child is a zombie walking through it.
 
-- **Step on the sunflowers** with the right foot: step placement and step length training.
-- **Lift your foot when a cactus spits at it:** obstacle clearance training, measured in centimetres.
-- **Answer the sign out loud** while walking: dual-task training.
+- **Step on the sunflowers** with the right foot: step placement and coordination.
+- **Lift your foot when a cactus spits at it:** foot clearance and balance, measured in centimetres.
+- **Answer the sign out loud** while moving: dual-task practice.
 
-An **AI therapist** watches through a camera, speaks one short cue every 20 to 30 seconds ("lift your left foot like stepping over a curb"), adapts the game to you, and writes a report for your family and your clinician. A **family league** turns verified sessions into rewards paid through Visa.
+An **AI coach with a therapist's rules** watches through a camera (a laptop webcam or an iPhone), gives feedback on every step at first and fades it slowly, speaks one short cue at a time, and adapts the game only inside limits the child's therapist sets. Parents get a report after every session; a family reward pool turns completed sessions into rewards paid through Visa.
+
+## Two modes
+
+| Mode | Who | Where | Why |
+|---|---|---|---|
+| **Floor** (core) | children | targets projected on a firm floor or a white mat | no moving parts; walking-pad manuals tell children to keep away |
+| **Walking pad** (optional, supervised) | teens and adults within the pad's rated age (14+ on KingSmith manuals) | targets on a screen or wall in front, not on the belt | the treadmill adds continuous walking practice |
 
 ## How a session works
 
-1. Set a slow speed on the treadmill remote. Calibrate for about 10 seconds: stand still, take a few steps.
-2. Play. Plants scroll with the belt at its measured speed. Points count only while the camera sees you really walking.
-3. The coach adapts difficulty and suggests speed changes; you press the remote.
-4. Finish: a report card (distance, hit rates, lift height per foot, trend) and a verified session in the family league.
+1. The therapist (or a preset) sets the exercise plan and limits; a parent starts the session.
+2. Ten-second calibration: stand still, take a few steps.
+3. Play for about 15 to 20 minutes (a parent-run home programme dose for cerebral palsy averaged 16.5 minutes), then the game locks until the next session.
+4. Report card for the parent and the therapist; the session counts toward the family reward.
 
 ## Repository map
 
 | Path | What |
 |---|---|
-| [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md) | mechanics, the therapist, the family league |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | hardware layout, software components, data flow, interfaces |
-| [docs/BUILD_PLAN.md](docs/BUILD_PLAN.md) | roles, first spikes, timeline, demo script, risks |
-| [docs/SPONSORS.md](docs/SPONSORS.md) | which tracks we enter and how each sponsor's tech is used |
+| [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md) | mechanics, the coach, rewards, demo |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | hardware decisions, layout, data flow, interfaces |
+| [docs/BUILD_PLAN.md](docs/BUILD_PLAN.md) | roles, first spikes, timeline, risks |
+| [docs/SPONSORS.md](docs/SPONSORS.md) | tracks we enter and how each sponsor's tech is used |
 | [docs/research/](docs/research/) | research briefs in English and Russian (`*.ru.md`) |
 
 ## Tracks
 
-Title track: **Community Kitchen** (healthcare, accessibility, community support). Side tracks: Visa (family reward pool), CloudForce Most Viral, and SideShift or DubHacks Next, plus MLH Best Use of Gemini API. Details in [docs/SPONSORS.md](docs/SPONSORS.md).
+Title track: **Community Kitchen** (accessibility, healthcare, community support). Side tracks: Visa (parent-funded rewards; the 2025 DubHacks Visa winner was a kids' habit app with parent-controlled rewards), CloudForce Most Viral, and SideShift or DubHacks Next, plus MLH Best Use of Gemini API. Details in [docs/SPONSORS.md](docs/SPONSORS.md).
 
-## Safety and claims
+## Safety, privacy and claims
 
-This is a wellness training game modelled on published trials, not a medical device. It does not diagnose, treat or prevent disease. Under the FDA's general wellness guidance (January 2026), claims such as improving coordination, multitasking and general mobility are wellness claims, while a claim to restore a function impaired by injury or disease is not. So the product and the pitch talk about balance, coordination and walking confidence; injury rehabilitation under a clinician is future work, not a demo claim. Details: [docs/research/therapist.md](docs/research/therapist.md).
-
-Walking pads have no handrails: use a support rail next to the pad, keep speeds low, keep a person beside the walker, and screen every player with the PAR-Q+ questionnaire before a session.
+- A tool for the therapist and the family, not a replacement for therapy and not a medical device. Product wording stays inside the FDA general wellness terms: coordination, balance, strength, endurance, general mobility. No disease names or recovery claims in the app.
+- Children play on the floor, never on the walking pad. Teens and adults use the pad only with a person beside them, low speed and a stop button.
+- Camera video stays on the device; only step numbers leave it. Under COPPA a child's video and movement patterns count as personal information.
