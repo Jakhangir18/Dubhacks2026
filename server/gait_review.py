@@ -534,7 +534,7 @@ async def review(game: dict[str, Any], gait: dict[str, Any], history: list[dict[
     rules = rules_review(view, limits)
     base = {"status": "done", "dataQuality": view["dataQuality"], "metrics": view["metrics"], "withheld": view["withheld"]}
     if not player.get("aiReviewConsent"):
-        return {**base, "source": "rules", "model": None, "reason": "no AI review consent (therapist panel)", "review": rules, "ts": time.time()}
+        return {**base, "source": "rules", "model": None, "reason": "no AI review consent (dashboard settings)", "review": rules, "ts": time.time()}
     model = gemini.model_name(MODEL_ENV)
     out, err = await gemini.generate_json(REVIEW_SYSTEM, json.dumps(model_input(view)), schema=REVIEW_SCHEMA, model=model,
                                           timeout=60, temperature=0.3)

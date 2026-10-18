@@ -7,7 +7,7 @@ What works today, what to test now, the known problems, and who owns what. Inter
 - The game in the browser: three acts and Home, portrait field warped onto the marked zone (Z), sound, clip and QR.
 - Foot events from the phone camera in the browser (MediaPipe, `web/vision.js`), the keyboard, or any sender to `/api/events`.
 - Perceptron: step and form checks during play, and the Perceptron lab report at Home (live key on the demo server).
-- Therapist panel (`/therapist.html`): limits, rewards, sessions, Perceptron consent and lab.
+- Dashboard (`/dashboard.html`, **J** in the game): progress, live walk, AI review, sessions, Perceptron lab, and the settings (limits, rewards, consent).
 - Coach, notes and memory run on rule-based fallbacks until the Gemini, Backboard and MongoDB keys are in.
 
 ## Test on the pad now (about 15 minutes)

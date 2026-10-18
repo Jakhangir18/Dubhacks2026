@@ -317,6 +317,7 @@ window.addEventListener('keydown', (e) => {
     v: () => cameraPanel.toggle(),
     o: () => window.open('camera.html', 'zombiewalk-camera'),   // the camera window for the laptop screen
     p: () => { if (lastReportId) openReport(lastReportId); },     // the last walk review again (a key press is never blocked)
+    j: () => window.open('/dashboard.html', 'zombiewalk-report'),   // the walk journal: progress, data, the AI coach
     '[': () => nudgeSpeed(-0.1), ']': () => nudgeSpeed(0.1),
   };
   if (zone.active && ['a', 'd', 'q', 'e', 'w', 'c', 'z'].includes(k)) return;
@@ -325,16 +326,11 @@ window.addEventListener('keydown', (e) => {
 
 // The finished walk review opens in its own tab, always the same one, so walks do not pile up tabs. Opened without a
 // click, the browser may block it (allow pop-ups for this site once); P opens it from a key press, which always works.
-// It opens in the results dashboard when the server has its build (dashboard/, `npm run build`), else in report.html.
+// It opens in the dashboard, at that walk.
 let lastReportId = null;
-let dashboardBuilt = false;
-fetch('/dashboard/', { method: 'HEAD' }).then((r) => { dashboardBuilt = r.ok; }).catch(() => {});
-function reviewUrl(id) {
-  return dashboardBuilt ? `/dashboard/?session=${encodeURIComponent(id)}` : `/report.html?id=${encodeURIComponent(id)}`;
-}
 function openReport(id) {
   lastReportId = id;
-  return window.open(reviewUrl(id), 'zombiewalk-report') !== null;
+  return window.open(`/dashboard.html?session=${encodeURIComponent(id)}`, 'zombiewalk-report') !== null;
 }
 
 // The belt keeps moving after the game, so walking would start the next game before the walk review arrives: a
@@ -1399,7 +1395,7 @@ class Home extends Phaser.Scene {
     if (this.sys.isActive()) publishGarden({ coach: `Welcome home, Gus! · ${holding ? 'Your walk review is coming' : 'Walk to play again'}` });
     this.gaitText.setText(d.gaitStatus === 'done' && r ? [r.playerFeedback, next, report].filter(Boolean).join('\n')
       : d.gaitStatus === 'waiting' || d.gaitStatus === 'reviewing' ? 'The coach is reviewing your walk…'
-        : d.gaitStatus === 'late' ? 'Your walk review will be in the therapist panel.'
+        : d.gaitStatus === 'late' ? 'Your walk review will be in the dashboard (J).'
           : d.gaitStatus === 'failed' ? `No walk review this time${d.gaitReview?.reason ? `: ${d.gaitReview.reason}` : ''}` : '');
     this.layoutCard();
   }

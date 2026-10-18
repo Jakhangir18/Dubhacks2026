@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Walk Dashboard</title>
+  <link rel="icon" href="data:,">
+  <style>
+    /* The game's palette (docs/ART_DIRECTION.md): near-black night, glowing lime and marigold, chunky dark outlines. */
+    :root { --bg: #070b10; --card: #14242a; --card2: #0f1c21; --line: #22383f; --outline: #0b1a14; --text: #f0ffe8; --dim: #9db5a8;
+      --lime: #9cff5a; --teal: #2de2c4; --cyan: #2de2ff; --marigold: #ffb21e; --moon: #ffd76a; --pink: #ff5fa2; --violet: #a46bff; --red: #ff4d4d; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--text); font: 15px/1.45 'Trebuchet MS', system-ui, sans-serif;
+      background: radial-gradient(ellipse at 50% -10%, #12302a 0, transparent 60%), var(--bg); }
+    header { padding: 14px 24px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; border-bottom: 3px solid var(--outline); }
+    .brand { display: flex; align-items: center; gap: 12px; margin-right: 8px; text-decoration: none; }
+    .brand img { height: 64px; filter: drop-shadow(0 3px 0 var(--outline)); }
+    h1 { margin: 0; font-size: 24px; line-height: 1.05; color: var(--lime); font-weight: 700;
+      text-shadow: 0 2px 0 var(--outline), 0 0 18px rgba(156, 255, 90, .35); }
+    h1 small { display: block; font-size: 13px; color: var(--moon); text-shadow: none; letter-spacing: .04em; }
+    .chip { font-size: 12px; padding: 3px 10px; border-radius: 99px; border: 2px solid var(--line); color: var(--dim); font-weight: 700; }
+    .chip.on { color: var(--outline); background: var(--lime); border-color: var(--lime); }
+    .chip.bad { color: var(--outline); background: var(--red); border-color: var(--red); }
+    .chip.ev { color: var(--text); border-color: var(--teal); display: inline-block; margin: 3px 4px 0 0; font-weight: 400; }
+    .chip.ev.low { border-color: var(--line); color: var(--dim); }
+    .spacer { flex: 1; }
+    main { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 18px; padding: 18px 24px; max-width: 1200px; margin: 0 auto; }
+    @media (max-width: 600px) { main, header { padding-left: 16px; padding-right: 16px; } #msg { margin: 0 16px; } .brand img { height: 48px; } }
+    section, details.card { background: var(--card); border: 3px solid var(--outline); box-shadow: 0 0 0 1px var(--line) inset, 0 6px 0 var(--outline);
+      border-radius: 20px; padding: 18px; min-width: 0; overflow-x: auto; }   /* wide tables scroll inside their card */
+    .wide { grid-column: 1 / -1; }
+    h2 { margin: 0 0 12px; font-size: 19px; color: var(--marigold); text-shadow: 0 2px 0 var(--outline); }
+    h2 .hint { text-shadow: none; font-weight: 400; }
+    h3 { margin: 14px 0 6px; font-size: 14px; color: var(--teal); text-transform: uppercase; letter-spacing: .06em; }
+    summary { cursor: pointer; color: var(--marigold); font-weight: 700; font-size: 17px; }
+    label { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 6px 0; color: var(--dim); }
+    input, select, textarea { background: var(--card2); color: var(--text); border: 2px solid var(--line); border-radius: 10px; padding: 6px 8px; font: inherit; }
+    input[type=number] { width: 90px; } textarea { width: 100%; min-height: 70px; }
+    button, .button { background: var(--card2); color: var(--text); border: 2px solid var(--line); border-radius: 12px; padding: 8px 14px; cursor: pointer;
+      font: inherit; font-weight: 700; text-decoration: none; display: inline-block; }
+    button.primary, .button.primary { background: var(--lime); color: var(--outline); border-color: var(--outline); box-shadow: 0 4px 0 var(--outline); }
+    button.primary:active, .button.primary:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--outline); }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--dim); font-weight: 700; }
+    tbody#sessions tr { cursor: pointer; } tbody#sessions tr:hover { background: #1b3036; }
+    tbody#sessions tr.sel { background: #21402f; box-shadow: inset 4px 0 0 var(--lime); }
+    .hint { color: var(--dim); font-size: 13px; }
+    #msg { color: var(--cyan); min-height: 1.4em; margin: 0 24px; text-align: center; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .stat b { display: block; font-size: 28px; line-height: 1.1; color: var(--lime); } .stat small { color: var(--dim); font-size: 12px; }
+    .stat.off b { color: var(--dim); }
+    .tile { background: var(--card2); border: 2px solid var(--line); border-radius: 16px; padding: 12px; }
+    .tile .v { font-size: 32px; font-weight: 700; color: var(--text); text-shadow: 0 2px 0 var(--outline); } .tile .v small { font-size: 13px; color: var(--dim); font-weight: 400; text-shadow: none; }
+    .up { color: var(--lime); font-weight: 700; } .down { color: var(--pink); font-weight: 700; } .same { color: var(--dim); }
+    .tile svg { width: 100%; height: 30px; display: block; margin-top: 6px; }
+    .big { font-size: 18px; }
+    .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 0 24px; }
+    ul { margin: 6px 0; padding-left: 20px; } li { margin: 6px 0; }
+    .tag { font-size: 12px; color: var(--dim); }
+    .lab-grid { display: flex; flex-wrap: wrap; gap: 24px; }
+    .lab-copy { flex: 1; min-width: 260px; }
+    #lab-frame { width: 320px; max-width: 100%; background: var(--card2); border-radius: 12px; }
+    #lab-timeline { position: relative; height: 24px; background: var(--line); border-radius: 8px; overflow: hidden; }
+    .lab-moment { position: absolute; top: 3px; height: 18px; min-width: 3px; background: var(--marigold); }
+    a { color: var(--cyan); }
+    footer { text-align: center; color: var(--dim); font-size: 13px; padding: 8px 16px 0; }
+    footer img { display: block; width: min(720px, 100%); margin: 12px auto 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="brand" href="/" title="Back to the game"><img src="art/gus-pvz.png" alt=""><h1>Zombie Walk Home<small>Gus's walk journal · progress, data and the AI coach</small></h1></a>
+    <select id="players" aria-label="Player"></select>
+    <button class="primary" id="play">Play as this player</button>
+    <span class="spacer"></span>
+    <span id="st-gemini" class="chip">Gemini</span>
+    <span id="st-backboard" class="chip">Backboard</span>
+    <span id="st-storage" class="chip">storage</span>
+    <span id="st-perceptron" class="chip">Perceptron</span>
+    <button id="check" title="Makes a real call to each service (not Perceptron: its calls are paid)">Check integrations</button>
+  </header>
+  <p id="msg"></p>
+  <main>
+    <section class="wide">
+      <h2>Progress <span class="hint" id="progress-sub"></span></h2>
+      <div class="grid" id="progress"><p class="hint">No sessions yet: play a walk.</p></div>
+    </section>
+
+    <section class="wide" id="live">
+      <h2>Live walk</h2>
+      <div class="grid">
+        <div class="stat off"><b id="lv-state">no game running</b><small id="lv-sub">the game opens a session when the walk starts</small></div>
+        <div class="stat"><b id="lv-pace">–</b><small>steps per minute · game</small></div>
+        <div class="stat"><b id="lv-steps">–</b><small>steps</small></div>
+        <div class="stat"><b id="lv-flowers">–</b><small>flowers hit / judged</small></div>
+        <div class="stat"><b id="lv-form">–</b><small>form (pace, both feet, evenness)</small></div>
+        <div class="stat"><b id="lv-knee">–</b><small>knee bend in swing, near leg · side camera</small></div>
+        <div class="stat"><b id="lv-stride">–</b><small>stride time · variation · side camera</small></div>
+        <div class="stat off"><b id="lv-cam">–</b><small>side camera (the phone)</small></div>
+      </div>
+      <p class="hint" id="lv-last"></p>
+    </section>
+
+    <section class="wide" id="ai">
+      <h2>AI coach <span class="hint" id="ai-when"></span></h2>
+      <div id="ai-body"><p class="hint">Pick a session below.</p></div>
+    </section>
+
+    <section class="wide">
+      <h2>Sessions <span class="hint">click one to see its AI review</span></h2>
+      <table><thead><tr><th>When</th><th>Steps</th><th>Pace</th><th>Flowers</th><th>Form</th><th>Verified</th><th>Perceptron</th><th>AI review</th></tr></thead>
+        <tbody id="sessions"><tr><td colspan="8" class="hint">no sessions yet</td></tr></tbody></table>
+    </section>
+
+    <details class="card wide" id="perceptron-lab">
+      <summary>Perceptron lab</summary>
+      <p id="lab-empty" class="hint">Turn on Perceptron consent in Settings, save, then finish a camera walk to see a report.</p>
+      <div id="lab-report" hidden>
+        <div class="lab-grid">
+          <div>
+            <canvas id="lab-frame" width="320" height="240" aria-label="Leg-only key frame with detected points and foot tracks"></canvas>
+            <p class="hint" id="lab-detect"></p>
+            <p class="hint" id="lab-tracks"></p>
+          </div>
+          <div class="lab-copy">
+            <p><b>Multilook · Clip caption</b><br><span id="lab-caption"></span></p>
+            <p><b>Multilook · Gait note</b><br><span id="lab-gait"></span></p>
+            <p><b>Multilook · Safety</b><br><span id="lab-safety"></span></p>
+            <p class="hint" id="lab-usage"></p>
+          </div>
+        </div>
+        <p><b>Video clipping · High-step moments</b> <span class="hint" id="lab-duration"></span></p>
+        <div id="lab-timeline" role="img" aria-label="High-step moments in seconds from the game start"></div>
+        <p class="hint" id="lab-clips"></p>
+      </div>
+    </details>
+
+    <details class="card wide" id="settings">
+      <summary>Settings: player, consent, limits, rewards</summary>
+      <div class="two">
+        <div>
+          <h3>Player</h3>
+          <div class="row"><input id="newname" placeholder="new player name"><button id="load">Add or load</button></div>
+          <label>Perceptron double-check: send leg-only frames (knees down, no face) <input type="checkbox" id="perceptronConsent"></label>
+          <label>AI gait review: send the side camera's numbers (no video) to Gemini <input type="checkbox" id="aiReviewConsent"></label>
+          <p class="hint">Off by default. Without consent the gait review uses fixed rules on this computer.</p>
+          <h3>Rewards (parent)</h3>
+          <table><tbody id="rewards"></tbody></table>
+          <div class="row"><input id="rname" placeholder="e.g. ice cream"><input id="rusd" type="number" min="0" max="100" step="0.5" placeholder="5"><button id="radd">Add</button></div>
+          <h3>Notes for the coach</h3>
+          <textarea id="notes" placeholder="e.g. prefers short cues; left side tires first"></textarea>
+        </div>
+        <div>
+          <h3>Limits (the coach adapts only inside these)</h3>
+          <label>Minimum pace, steps per minute <input type="number" id="minCadence" min="40" max="160"></label>
+          <label>Act 1 walking, seconds <input type="number" id="walkSeconds" min="10" max="300"></label>
+          <label>Act 2 flowers <input type="number" id="gardenPlants" min="1" max="60"></label>
+          <label>Act 3 seeds (0: none) <input type="number" id="stormSeeds" min="0" max="60"></label>
+          <label>Rounds of flowers and seeds <input type="number" id="rounds" min="1" max="10"></label>
+          <label>Lift target, cm <input type="number" id="liftCm" min="2" max="40" step="0.5"></label>
+          <label>Lift range, cm <span><input type="number" id="liftMin" step="0.5"> – <input type="number" id="liftMax" step="0.5"></span></label>
+          <label>Flower spacing, cm <input type="number" id="spacingCm" min="40" max="400"></label>
+          <label>Spacing range, cm <span><input type="number" id="spacingMin"> – <input type="number" id="spacingMax"></span></label>
+          <label>Session length, minutes <input type="number" id="sessionMinutes" min="3" max="60"></label>
+          <label>Plant speed, times walking speed <input type="number" id="speedScale" min="0.3" max="2" step="0.1"></label>
+        </div>
+      </div>
+      <div class="row"><button class="primary" id="save">Save settings</button></div>
+    </details>
+  </main>
+  <footer>Wellness training game, not a medical device. Observations, not a medical assessment.<img src="art/home-view.png" alt=""></footer>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const store = {
+      get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+      set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* blocked */ } },
+    };
+    let player = null;
+    let rewards = [];
+    let rows = [];                                                        // the player's sessions, newest first
+    let selected = new URLSearchParams(location.search).get('session');   // the session shown in the AI panel
+    const say = (t) => { $('msg').textContent = t; };
+    const el = (tag, text, cls) => { const e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; };
+    const td = (v) => el('td', v ?? '-');
+    const fmt = (v) => (typeof v === 'number' ? String(Math.round(v * 10) / 10) : v ?? '-');
+    const when = (ts) => new Date(ts * 1000).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+    async function api(path, opts = {}) {
+      const r = await fetch(path, { headers: { 'content-type': 'application/json' }, ...opts });
+      if (!r.ok) throw new Error(`${r.status} ${path}`);
+      return r.json();
+    }
+
+    // ---------- integrations: the chips say a key is set; Check makes a real call ----------
+    async function status() {
+      try {
+        const s = await api('/api/status');
+        $('st-gemini').classList.toggle('on', s.gemini);
+        $('st-backboard').classList.toggle('on', s.backboard);
+        $('st-storage').textContent = s.storage === 'mongodb' ? 'MongoDB Atlas' : 'storage: local file';
+        $('st-storage').classList.toggle('on', s.storage === 'mongodb');
+        $('st-perceptron').classList.toggle('on', s.perceptron);
+      } catch { say('server not reachable: run the game server (see web/README.md)'); }
+    }
+
+    async function checkIntegrations() {
+      say('checking integrations…');
+      try {
+        const h = await api('/api/health');
+        const chips = { gemini: 'st-gemini', backboard: 'st-backboard', mongodb: 'st-storage', perceptron: 'st-perceptron' };
+        for (const [k, id] of Object.entries(chips)) {
+          $(id).classList.toggle('on', h[k].ok);
+          $(id).classList.toggle('bad', !h[k].ok);
+          $(id).title = h[k].detail;
+        }
+        say(Object.entries(h).map(([k, v]) => `${k}: ${v.ok ? 'ok' : v.detail}`).join(' · '));
+      } catch { say('integration check failed: is the game server running?'); }
+    }
+
+    // ---------- progress: each metric now, its change since the last walk, and its trend ----------
+    const METRICS = [
+      { label: 'Pace', unit: 'steps/min', get: (s) => s.cadence },
+      { label: 'Form', unit: '%', get: (s) => s.formPct },
+      { label: 'Flowers hit', unit: '%', get: (s) => s.stompPct },
+      { label: 'Seeds dodged', unit: '%', get: (s) => s.dodgePct },
+      { label: 'Even left/right', unit: '%', get: (s) => (s.asymmetryPct == null ? null : Math.max(0, 100 - s.asymmetryPct)) },
+      { label: 'Steps', unit: '', get: (s) => s.steps },
+    ];
+
+    function sparkline(values) {
+      const pts = values.map((v, i) => [i, v]).filter(([, v]) => v != null);
+      if (pts.length < 2) return null;
+      const lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1]));
+      const x = (i) => (values.length < 2 ? 0 : (i / (values.length - 1)) * 100), y = (v) => 28 - (hi === lo ? 14 : ((v - lo) / (hi - lo)) * 24) - 2;
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 100 30'); svg.setAttribute('preserveAspectRatio', 'none');
+      svg.innerHTML = `<polyline fill="none" stroke="#9cff5a" stroke-width="2" vector-effect="non-scaling-stroke" points="${pts.map(([i, v]) => `${x(i)},${y(v)}`).join(' ')}"/>`;
+      return svg;
+    }
+
+    function drawProgress() {
+      if (!rows.length) { $('progress').replaceChildren(el('p', 'No sessions yet: play a walk.', 'hint')); $('progress-sub').textContent = ''; return; }
+      const [now, before] = rows;
+      const trend = rows.slice(0, 12).reverse();   // oldest to newest
+      $('progress-sub').textContent = `${rows.length} walk${rows.length === 1 ? '' : 's'}${before ? ` · change since ${when(before.ts)}` : ''}`;
+      $('progress').replaceChildren(...METRICS.filter((m) => rows.some((r) => m.get(r.summary || {}) != null)).map((m) => {
+        const a = m.get(now.summary || {}), b = before ? m.get(before.summary || {}) : null;
+        const delta = a == null || b == null ? null : Math.round((a - b) * 10) / 10;
+        const tile = el('div', null, 'tile');
+        tile.append(el('div', m.label, 'hint'));
+        const v = el('div', fmt(a), 'v'); if (m.unit) v.append(el('small', ` ${m.unit}`)); tile.append(v);
+        tile.append(el('div', delta == null ? (before ? 'no data' : 'first walk') : `${delta > 0 ? '+' : ''}${delta} since last`,
+          delta == null || delta === 0 ? 'same' : delta > 0 ? 'up' : 'down'));
+        const line = sparkline(trend.map((r) => m.get(r.summary || {})));
+        if (line) tile.append(line);
+        return tile;
+      }));
+    }
+
+    // ---------- AI coach: the selected session's note and gait review ----------
+    function reviewState(r) {
+      const g = r.gaitReview;
+      if (!g) return '-';
+      if (g.status === 'failed') return `failed${g.reason ? `: ${g.reason}` : ''}`;
+      return { waiting: 'waiting for the side camera', reviewing: 'reviewing…' }[g.status]
+        || (g.status === 'done' ? (g.source === 'gemini' ? 'Gemini' : 'rules') : g.status);
+    }
+
+    let metrics = new Map();   // metric id -> metric, for the evidence chips
+    function chips(ids) {
+      const box = el('div');
+      for (const key of ids || []) {
+        const m = metrics.get(key);
+        const chip = el('span', m ? `${m.label}: ${fmt(m.value)}${m.unit ? ` ${m.unit}` : ''}` : key, `chip ev${m?.trust === 'low' ? ' low' : ''}`);
+        if (m) chip.title = [m.typical && `typical ${m.typical}`, `trust ${m.trust}`, m.prev != null && `earlier ${fmt(m.prev)}`].filter(Boolean).join(' · ');
+        box.append(chip);
+      }
+      return box;
+    }
+    const para = (label, text) => { if (!text) return null; const p = el('p'); p.append(el('b', `${label}: `), document.createTextNode(text)); return p; };
+    const list = (items, render) => { if (!items?.length) return null; const ul = el('ul'); for (const x of items) ul.append(render(x)); return ul; };
+
+    function measurements(g) {
+      const names = { gait: 'Side camera, whole walk', game: 'Game', 'gait@walk': 'Side camera, walking', 'gait@garden': 'Side camera, flowers', 'gait@storm': 'Side camera, seeds' };
+      const table = el('table');
+      const head = el('tr'); for (const h of ['Group', 'Metric', 'Side', 'Value', 'Typical', 'Trust', 'Earlier']) head.append(el('th', h)); table.append(head);
+      for (const m of g.metrics || []) {
+        const tr = el('tr');
+        for (const v of [names[m.group] || m.group, m.label, m.side === 'L' ? 'left' : m.side === 'R' ? 'right' : '', `${fmt(m.value)}${m.unit ? ` ${m.unit}` : ''}`,
+          m.typical || '', m.trust, m.prev == null ? '' : fmt(m.prev)]) tr.append(el('td', v));
+        table.append(tr);
+      }
+      const d = el('details'); d.append(el('summary', `All measurements (${(g.metrics || []).length})`), table);
+      if (g.withheld?.length) d.append(el('h3', 'Not used (the camera could not measure them reliably)'), list(g.withheld, (w) => el('li', `${w.id}: ${w.reason}`)));
+      return d;
+    }
+
+    let aiTimer = null;
+    async function drawAI() {
+      clearTimeout(aiTimer);
+      const id = selected;
+      if (!id) { $('ai-when').textContent = ''; $('ai-body').replaceChildren(el('p', 'Pick a session below.', 'hint')); return; }
+      let r;
+      try { r = await api(`/api/session/${encodeURIComponent(id)}`); } catch { $('ai-body').replaceChildren(el('p', 'Session not found.', 'hint')); return; }
+      if (selected !== id) return;   // another session was picked meanwhile
+      $('ai-when').textContent = `${r.player} · ${when(r.ts)}`;
+      const g = r.gaitReview, v = g?.review || {};
+      const nodes = [para('Coach note', r.note)];
+      if (!g) nodes.push(el('p', 'No side camera recorded this walk, so there is no gait review.', 'hint'));
+      else if (g.status !== 'done') {
+        nodes.push(el('p', reviewState(r), 'hint'));
+        if (g.status === 'waiting' || g.status === 'reviewing') aiTimer = setTimeout(() => drawAI().catch(() => {}), 4000);
+      } else {
+        metrics = new Map((g.metrics || []).map((m) => [m.id, m]));
+        const source = g.source === 'gemini' ? `Reviewed by Gemini${g.model ? ` (${g.model})` : ''}` : `Rule-based review${g.reason ? ` (${g.reason})` : ''}`;
+        const quality = g.dataQuality ? `data ${g.dataQuality.level}${g.dataQuality.issues?.length ? `: ${g.dataQuality.issues.join('; ')}` : ''}` : '';
+        const filled = g.source === 'gemini' && g.filledByRules?.length ? `some parts by the rules: ${g.filledByRules.join(', ')}` : '';
+        nodes.push(el('p', v.overview, 'big'), el('p', [source, quality, filled].filter(Boolean).join(' · '), 'hint'));
+        if (v.focus?.text) {
+          const f = el('div'); f.append(el('h3', 'Focus for next time'), el('p', v.focus.text, 'big'));
+          if (v.focus.why) f.append(el('p', v.focus.why, 'hint'));
+          f.append(chips(v.focus.evidence)); nodes.push(f);
+        }
+        const cols = el('div', null, 'two');
+        const left = el('div'), right = el('div');
+        if (v.findings?.length) left.append(el('h3', 'Findings'), list(v.findings, (f) => {
+          const li = el('li');
+          li.append(el('div', `${f.area}${f.side && f.side !== 'none' ? ` · ${f.side === 'both' ? 'both sides' : f.side === 'L' ? 'left' : 'right'}` : ''} · confidence ${f.confidence}`, 'tag'), el('div', f.text), chips(f.evidence));
+          return li;
+        }));
+        if (v.strengths?.length) left.append(el('h3', 'Strengths'), list(v.strengths, (s) => { const li = el('li', s.text); li.append(chips(s.evidence)); return li; }));
+        if (v.gameVsGait?.length) right.append(el('h3', 'The game and the walk together'), list(v.gameVsGait, (x) => { const li = el('li', x.text); li.append(chips(x.evidence)); return li; }));
+        for (const n of [para('Trend', v.trend), para('For the therapist', v.therapistNote), para('For the parent', v.parentNote)]) if (n) right.append(n);
+        cols.append(left, right); nodes.push(cols);
+        const next = v.nextSession || {};
+        const keys = [['liftCm', 'lift target', 'cm'], ['spacingCm', 'flower spacing', 'cm'], ['minCadence', 'minimum pace', 'steps/min']].filter(([k]) => Number.isFinite(next[k]));
+        if (keys.length) {
+          const row = el('div', null, 'row');
+          row.append(el('span', `Suggested next time: ${keys.map(([k, label, unit]) => `${label} ${next[k]} ${unit}`).join(', ')}${next.why ? ` (${next.why})` : ''}`));
+          const b = el('button', 'Apply suggested settings'); b.onclick = () => applySuggestion(next);
+          row.append(b); nodes.push(row);
+        }
+        if (g.metrics?.length) nodes.push(measurements(g));
+      }
+      $('ai-body').replaceChildren(...nodes.filter(Boolean));
+    }
+
+    // ---------- sessions ----------
+    let sessionsTimer = null;
+    async function sessions(name) {
+      clearTimeout(sessionsTimer);
+      const got = await api(`/api/sessions/${encodeURIComponent(name)}`);
+      if (player?.name !== name) return;   // another player was loaded meanwhile
+      rows = got;
+      if (!selected || !rows.some((r) => r.id === selected)) {
+        selected = (rows.find((r) => r.gaitReview?.status === 'done') || rows[0])?.id ?? null;   // the latest reviewed walk
+      }
+      drawProgress();
+      if (!rows.length) { $('sessions').innerHTML = '<tr><td colspan="8" class="hint">no sessions yet</td></tr>'; drawAI(); return; }
+      $('sessions').replaceChildren(...rows.map((r) => {
+        const s = r.summary || {};
+        const tr = el('tr', null, r.id === selected ? 'sel' : '');
+        tr.append(td(when(r.ts)), td(s.steps), td(s.cadence), td(s.stompPct == null ? '-' : `${s.stompPct}%`), td(s.formPct == null ? '-' : `${s.formPct}%`),
+          td(r.verified ? 'yes' : 'no'), td(s.perceptron?.checked ? `${s.perceptron.agree}/${s.perceptron.checked} agree` : '-'), td(reviewState(r)));
+        tr.onclick = () => { selected = r.id; sessions(name).catch(() => {}); };
+        return tr;
+      }));
+      drawAI().catch(() => {});
+      // A review on its way: look again in a few seconds.
+      if (rows.some((r) => ['waiting', 'reviewing'].includes(r.gaitReview?.status))) sessionsTimer = setTimeout(() => sessions(name).catch(() => {}), 5000);
+    }
+
+    // ---------- Perceptron lab ----------
+    let labGeneration = 0;
+    function drawLab(report) {
+      const generation = ++labGeneration;
+      $('lab-empty').hidden = !!report;
+      $('lab-report').hidden = !report;
+      const canvas = $('lab-frame');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!report) return;
+      $('lab-caption').textContent = report.caption || 'Caption unavailable.';
+      $('lab-gait').textContent = report.gaitNote || 'Gait note unavailable.';
+      $('lab-safety').textContent = report.safety || 'Safety observation unavailable.';
+      $('lab-usage').textContent = `${report.usage?.requests ?? 0} requests · Reasoning effort: low for clipping and tracking; none for Multilook and the Detect API.`;
+      $('lab-detect').textContent = report.points == null ? 'Detect API · unavailable' : `Detect API · ${report.points.length} labelled points`;
+      $('lab-tracks').textContent = report.tracks == null ? 'Object tracking · unavailable' : 'Object tracking · left foot cyan / right foot pink';
+      const tracks = report.tracks || {};
+      const clips = report.clips || [];
+      const end = Math.max(1, ...clips.map((c) => c.t1), ...Object.values(tracks).flat().map((p) => p.t));
+      $('lab-duration').textContent = `0–${end.toFixed(1)} s (last annotation)`;
+      $('lab-clips').textContent = report.clips == null ? 'Video clipping unavailable.' : clips.length
+        ? clips.map((c) => `${c.mention}: ${c.t0.toFixed(1)}${c.t1 !== c.t0 ? `–${c.t1.toFixed(1)}` : ''} s`).join(' · ')
+        : 'No high-step moments marked.';
+      $('lab-timeline').replaceChildren(...clips.map((c) => {
+        const mark = el('span', null, 'lab-moment');
+        mark.style.left = `${Math.min(99.5, c.t0 / end * 100)}%`;
+        mark.style.width = `${Math.max(0.5, (c.t1 - c.t0) / end * 100)}%`;
+        mark.title = `${c.mention}: ${c.t0}–${c.t1} s`;
+        return mark;
+      }));
+      const draw = (image) => {
+        if (generation !== labGeneration) return;
+        if (image) ctx.drawImage(image, 0, 0, 320, 240);
+        for (const [foot, color] of [['left foot', '#2de2ff'], ['right foot', '#ff2d95']]) {
+          ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+          (tracks[foot] || []).forEach(({ box }, i) => {
+            const x = (box[0] + box[2]) / 2 * 0.32;
+            const y = (box[1] + box[3]) / 2 * 0.24;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          });
+          ctx.stroke();
+        }
+        ctx.font = '12px system-ui';
+        for (const { mention, point } of report.points || []) {
+          const x = point.x * 0.32; const y = point.y * 0.24;
+          ctx.fillStyle = '#ffe44d'; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+          const labelX = Math.max(2, Math.min(x + 7, 318 - ctx.measureText(mention).width));
+          const labelY = Math.max(13, y - 7);
+          ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.strokeText(mention, labelX, labelY);
+          ctx.fillText(mention, labelX, labelY);
+        }
+      };
+      const image = new Image();
+      image.onload = () => draw(image);
+      image.onerror = () => draw(null);
+      if (report.keyFrame) image.src = report.keyFrame; else draw(null);
+    }
+
+    // ---------- player and settings ----------
+    async function listPlayers(select) {
+      const names = await api('/api/players');
+      $('players').replaceChildren(...names.map((n) => new Option(n, n)));
+      if (select && names.includes(select)) $('players').value = select;
+    }
+
+    function fill(p) {
+      const L = p.limits;
+      for (const k of ['minCadence', 'walkSeconds', 'gardenPlants', 'stormSeeds', 'liftCm', 'spacingCm', 'sessionMinutes', 'speedScale', 'rounds']) $(k).value = L[k];
+      $('liftMin').value = L.liftRange[0]; $('liftMax').value = L.liftRange[1];
+      $('spacingMin').value = L.spacingRange[0]; $('spacingMax').value = L.spacingRange[1];
+      rewards = p.rewards || [];
+      $('notes').value = p.notes || '';
+      $('perceptronConsent').checked = !!p.perceptronConsent;
+      $('aiReviewConsent').checked = !!p.aiReviewConsent;
+      drawLab(p.perceptronReports?.[0]);
+      drawRewards();
+    }
+
+    function drawRewards() {
+      $('rewards').replaceChildren(...rewards.map((r, i) => {
+        const tr = el('tr');
+        tr.append(td(r.name), td(`$${r.usd}`));
+        const b = el('button', 'remove'); b.onclick = () => { rewards.splice(i, 1); drawRewards(); };
+        const c = el('td'); c.append(b); tr.append(c);
+        return tr;
+      }));
+    }
+
+    async function load(name) {
+      if (!name) return;
+      if (player?.name !== name) selected = player ? null : selected;   // a new player starts at their latest walk
+      player = await api(`/api/player/${encodeURIComponent(name)}?reports=1`);
+      fill(player);
+      await sessions(player.name);
+      say('');
+    }
+
+    // The review's suggestion goes through the normal save, so the server clamps it to the ranges.
+    async function applySuggestion(next) {
+      if (!player) return say('load a player first');
+      for (const k of ['liftCm', 'spacingCm', 'minCadence']) if (Number.isFinite(next[k])) $(k).value = next[k];
+      await save();
+      say(`applied the suggested settings to ${player.name}`);
+    }
+
+    async function save() {
+      if (!player) return say('load a player first');
+      const n = (id) => Number($(id).value);
+      const limits = { minCadence: n('minCadence'), walkSeconds: n('walkSeconds'), gardenPlants: n('gardenPlants'),
+        stormSeeds: n('stormSeeds'), liftCm: n('liftCm'), liftRange: [n('liftMin'), n('liftMax')], spacingCm: n('spacingCm'),
+        spacingRange: [n('spacingMin'), n('spacingMax')], sessionMinutes: n('sessionMinutes'), rounds: n('rounds') || 1,
+        speedScale: $('speedScale').value === '' ? undefined : n('speedScale') };   // empty: the server's default
+      try { localStorage.removeItem('zombiewalk.speedScale'); } catch { /* blocked */ }   // the therapist's speed wins over the operator's [ ] keys
+      player = await api(`/api/player/${encodeURIComponent(player.name)}`, { method: 'PUT', body: JSON.stringify({ limits, rewards, notes: $('notes').value,
+        perceptronConsent: $('perceptronConsent').checked, aiReviewConsent: $('aiReviewConsent').checked }) });
+      fill(player);
+      await listPlayers(player.name);
+      say(`saved ${player.name}`);
+    }
+
+    // ---------- live walk: the game's own numbers and the side camera's, refreshed every 3 s ----------
+    async function live() {
+      try {
+        const active = await api('/api/session/active');
+        const running = !!active.id;
+        $('lv-state').textContent = running ? `${active.player} is walking` : 'no game running';
+        $('lv-state').parentElement.classList.toggle('off', !running);
+        $('lv-sub').textContent = running ? `${Math.round(active.serverTime - active.startedAt)} s since the start` : 'the game opens a session when the walk starts';
+        const log = await api('/api/log?n=120');
+        const pace = [...log].reverse().find((r) => r.what === 'pace');
+        const things = log.filter((r) => r.what === 'flower' || r.what === 'seed');
+        const hits = things.filter((r) => r.result === 'hit').length;
+        $('lv-pace').textContent = pace ? pace.cadence : '–';
+        $('lv-steps').textContent = pace ? pace.steps : '–';
+        $('lv-form').textContent = pace ? `${pace.form}%` : '–';
+        $('lv-flowers').textContent = things.length ? `${hits} / ${things.length}` : '–';
+        $('lv-last').textContent = things.length ? `last: ${things.slice(-6).map((r) => `${r.what} ${r.lane} ${r.result}`).join(' · ')}` : '';
+        const name = active.player || $('players').value;
+        const p = name ? await api(`/api/player/${encodeURIComponent(name)}`) : null;
+        const g = p?.gait, s = g?.summary;
+        const age = g ? Math.round(Date.now() / 1000 - g.ts) : null;
+        const near = s ? ((s.seen_frames?.L ?? 0) >= (s.seen_frames?.R ?? 0) ? 'L' : 'R') : null;   // the leg nearer the phone
+        const knee = s?.flexion?.[near], stride = s?.stride?.[near], cvv = s?.stride_cv?.[near];
+        $('lv-knee').textContent = knee != null ? `${Math.round(180 - knee)}°` : '–';   // the camera reports the knee angle, 180 = straight
+        $('lv-stride').textContent = stride != null ? `${stride.toFixed(2)} s${cvv != null ? ` · ±${Math.round(cvv)}%` : ''}`   /* gait.py's stride_cv is already a percent */ : '–';
+        $('lv-cam').textContent = !g ? 'not seen yet' : age < 40 ? `live · ${age} s ago` : `last seen ${Math.round(age / 60)} min ago`;
+        $('lv-cam').parentElement.classList.toggle('off', !g || age >= 40);
+      } catch { $('lv-state').textContent = 'live view: server not reachable'; }
+    }
+    setInterval(() => live().catch(() => {}), 3000); live().catch(() => {});
+
+    $('players').onchange = () => load($('players').value);
+    $('load').onclick = async () => { const n = $('newname').value.trim(); if (!n) return; await load(n); await listPlayers(player.name); $('newname').value = ''; };
+    $('radd').onclick = () => {
+      const name = $('rname').value.trim();
+      const usd = Number($('rusd').value || 0);
+      if (!name) return;
+      rewards.push({ name, usd }); $('rname').value = ''; $('rusd').value = ''; drawRewards();
+    };
+    $('save').onclick = save;
+    $('check').onclick = checkIntegrations;
+    $('play').onclick = () => {
+      if (!player) return say('load a player first');
+      store.set('zombiewalk.player', player.name);
+      location.href = '/';   // the game reads the current player on load
+    };
+
+    (async () => {
+      await status();
+      try {
+        // ?session=<id> (the game opens this page after a walk) shows that walk's player.
+        const first = (selected && (await api(`/api/session/${encodeURIComponent(selected)}`).catch(() => null))?.player)
+          || store.get('zombiewalk.player', null);
+        await listPlayers(first);
+        await load(first && [...$('players').options].some((o) => o.value === first) ? first : $('players').value);
+      } catch { /* server offline: status shows it */ }
+    })();
+  </script>
+</body>
+</html>
