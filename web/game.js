@@ -393,6 +393,9 @@ function makeFloor(scene, L) {
   const rows = Math.ceil((L.H - L.top) / L.rowH) + 3;
   scene.board = Array.from({ length: rows * 2 }, () => scene.add.image(0, 0, 'tile-grass-light').setDepth(-18));
   scene.hitLine = scene.add.graphics().setDepth(2);
+  // Shoe mode: the belt part is a plain light so the camera sees pale socks on a black belt, not a green pattern on legs.
+  scene.beltLight = scene.add.rectangle(L.W / 2, (L.zoneY + 30 + L.H) / 2, L.laneW * 2 + L.gap, L.H - L.zoneY - 30, 0xe9f1e6, 0.9)
+    .setDepth(-17).setVisible(false);
   scene.feet = Object.fromEntries(['L', 'R'].map(lane => [lane,
     scene.add.image(L.lanes[lane], L.toeY, `foot-ghost-${lane.toLowerCase()}`).setAlpha(0.3).setDepth(12)
       .setScale(BOARD ? 0.5 : 1)]));   // on the board the feet are a small metronome under the hit line
@@ -400,6 +403,7 @@ function makeFloor(scene, L) {
 }
 
 function drawFloor(scene, L, travelledCm, t, gated = false) {
+  scene.beltLight.setVisible(!!camH && !BOARD).setAlpha(gated ? 0.5 : 0.9);
   const rowsTravelled = travelledCm / (RULES.aheadCm / 6);
   const offset = (rowsTravelled % 1) * L.rowH;
   const rowIndex = Math.floor(rowsTravelled);

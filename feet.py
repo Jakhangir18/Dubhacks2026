@@ -89,7 +89,7 @@ class BlobDetector:
     """Fallback for a dark room: white socks or light shoes on a black belt are the brightest filled blobs.
     Returns Foot boxes like FeetDetector; used when the model finds nothing (or alone with --blobs-only)."""
 
-    def __init__(self, min_frac=0.002, max_frac=0.06, fill=0.45, label="blob"):   # a sock is about 1 % of the frame; the hit-line chevrons are under 0.1 %
+    def __init__(self, min_frac=0.002, max_frac=0.14, fill=0.45, label="blob"):   # a sock with its lit shin can be a tall column; the chevrons are under 0.1 %
         self.min_frac, self.max_frac, self.fill, self.label = min_frac, max_frac, fill, label
         self.threshold = 0
         self.zone = None   # polygon of the projected zone, fractions of the frame; outside it nothing counts (console, walls)
@@ -99,6 +99,9 @@ class BlobDetector:
         if self.zone is None:
             return []   # without the calibrated zone the console and the walls would count as feet
         gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (7, 7), 0)
+        # pale things only: white socks and grey shoes pass, the projected green lawn and coloured flowers do not
+        sat = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)[:, :, 1]
+        gray[sat > 110] = 0
         if self.zone is not None:
             h, w = gray.shape
             keep = np.zeros_like(gray)
