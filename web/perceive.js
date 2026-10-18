@@ -92,7 +92,8 @@ export class Perceiver {
     while (this.frames.length && now - this.frames[0].tsMs > KEEP_MS) this.frames.shift();
     if (now - this.lastForm > FORM_EVERY_MS && this.frames.length >= MAX_FRAMES) {
       this.lastForm = now;
-      this.send({ kind: 'form', frames: this.frames.slice(-MAX_FRAMES) }, (out) => { this.form = out; });
+      const sent = this.frames.slice(-MAX_FRAMES);
+      this.send({ kind: 'form', frames: sent }, (out) => { this.form = out; this.onResult?.({ kind: 'form', out, frame: sent.at(-1)?.url }); });
     }
   }
 
@@ -103,6 +104,7 @@ export class Perceiver {
     const frames = this.frames.filter((f) => now - f.tsMs <= STEP_WINDOW_MS).slice(-MAX_FRAMES);   // keep the newest: the step itself
     if (frames.length < 2) return;
     this.send({ kind: 'step', foot: th.lane, thing: th.kind, frames }, (out) => {
+      this.onResult?.({ kind: 'step', th, out, frame: frames.at(-1)?.url });   // the camera window shows each verdict
       if (out.verdict !== 'yes' && out.verdict !== 'no') return;   // unclear: not counted either way
       this.checked++;
       if ((out.verdict === 'yes') === (th.result === 'hit')) this.agree++;
