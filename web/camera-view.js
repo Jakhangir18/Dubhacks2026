@@ -88,8 +88,12 @@ function logLine(text, cls = '') {
 }
 onFoot((ev) => {
   send('foot', { foot: ev.foot, kind: ev.kind, liftCm: ev.liftCm });
-  if (ev.kind === 'lift') logLine(`${ev.foot} lift ${ev.liftCm} cm`);
+  logEvent(ev);
 });
+function logEvent(ev) {
+  const from = ev.source && ev.source !== 'camera' ? ` (${ev.source})` : '';
+  logLine(ev.kind === 'lift' ? `${ev.foot} lift ${ev.liftCm} cm${from}` : `${ev.foot} strike${from}`);
+}
 
 // Camera start and stop, as in the game's camera panel.
 let starting = false;
@@ -153,6 +157,7 @@ listen((m) => {
   else if (m.type === 'perceiver-stop') perceiver.stop();
   else if (m.type === 'perceiver-step') perceiver.checkStep(m.th);
   else if (m.type === 'perceiver-report-request') perceiver.sessionReport().then((report) => send('perceiver-report', { id: m.id, report }));
+  else if (m.type === 'foot-seen' && m.ev) logEvent(m.ev);
   else if (m.type === 'mirror') { $('mirror').src = m.url; gameSeen = performance.now(); }
   else if (m.type === 'game') {
     gameSeen = performance.now();

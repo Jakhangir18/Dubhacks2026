@@ -193,5 +193,5 @@ test('plant speed scales the world speed inside its limits', () => {
 
 test('a zero or missing plant speed never stops the world', () => {
   assert.equal(speedScale(newGame({ speedScale: 0 }, 1)), 0.3);
-  assert.equal(speedScale(newGame({ speedScale: 'x' }, 1)), 1);
+  assert.equal(speedScale(newGame({ speedScale: 'x' }, 1)), 0.7);   // the default
 });

@@ -24,7 +24,7 @@ DEFAULT_LIMITS: dict[str, Any] = {
     "spacingCm": 140,
     "spacingRange": [90, 220],
     "sessionMinutes": 17,
-    "speedScale": 1.0,   # how fast plants come, times the walking speed
+    "speedScale": 0.7,   # how fast plants come, times the walking speed; 1 felt too fast on the pad
 }
 
 
