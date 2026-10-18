@@ -152,6 +152,18 @@ const POSE_SOURCES = new Set(['camera', 'camera-window']);
 const readCamToField = () => { const h = Warp.store.get(Warp.CAM_KEY, null); return Array.isArray(h) && h.length === 8 && h.every(Number.isFinite) ? h : null; };
 let camH = readCamToField();
 window.addEventListener('storage', (e) => { if (e.key === Warp.CAM_KEY) camH = readCamToField(); });   // the camera window writes it
+// The server keeps the calibration too (saved by the camera window, or set by hand): a newer one replaces the local copy.
+async function pullShoeCal() {
+  try {
+    const cal = await withTimeout(api('/api/shoecal'), 3000);
+    if (!cal.h || !(cal.ts > Warp.store.get(Warp.CAM_KEY + '.ts', 0))) return;
+    Warp.store.set(Warp.CAM_KEY, cal.h); Warp.store.set(Warp.CAM_KEY + '.ts', cal.ts);
+    Warp.store.set(Warp.CAM_KEY + '.points', cal.points || null); Warp.store.set(Warp.CAM_KEY + '.picture', cal.picture || 'feed');
+    camH = readCamToField();
+  } catch { /* offline: the local copy stays */ }
+}
+pullShoeCal();
+setInterval(pullShoeCal, 4000);
 
 // Field y of a thing at distCm from the hit line, and back.
 const fieldY = (distCm, L) => L.zoneY - (distCm / RULES.aheadCm) * (L.zoneY - L.top);
