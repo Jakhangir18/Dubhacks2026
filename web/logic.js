@@ -43,11 +43,12 @@ export const RULES = {
   slowDownS: 1.0,
   restCmS: 1,
   // The pace warning follows a leaky share of recent time at a bad pace (time constant paceWarnS): it comes on above
-  // paceWarnOn and goes off below paceWarnOff, so one missed step never flashes the floor, a cadence hovering at the
-  // minimum neither flickers nor sticks, and a sustained drop shows within about 1.5 s. Not before paceGraceS.
-  paceWarnS: 1.2,
-  paceWarnOn: 0.7,
-  paceWarnOff: 0.45,
+  // paceWarnOn (about 1.6 s of a bad pace) and goes off below paceWarnOff (about 1.2 s of a good one), so one missed
+  // step never flashes the floor and a pace that flips every second or so settles instead of flickering. Not before
+  // paceGraceS. See warnGate.
+  paceWarnS: 1.0,
+  paceWarnOn: 0.8,
+  paceWarnOff: 0.3,
   paceGraceS: 3,
   points: { stomp: 10, dodge: 15 },
   // Shoe mode (feet.py boxes on the camera): a flower is smashed when a shoe covers it, a seed splats; a thing
@@ -246,11 +247,10 @@ function spawnThing(g, lane, distCm) {
 // foot that lands when it gets there; the rest follow on the beat, so a steady walker meets each with the other foot.
 function spawnOnStep(g, foot) {
   const stepCm = RULES.strideCm * speedScale(g);
-  const steps = Math.max(1, Math.round(RULES.aheadCm / stepCm));
-  g.nextSpawnCm = g.travelledCm;
+  const steps = Math.max(1, Math.floor(RULES.aheadCm / stepCm));   // whole steps, inside the field
   g.spawnDist = steps * stepCm;
   spawnThing(g, steps % 2 === 0 ? foot : foot === 'L' ? 'R' : 'L', g.spawnDist);
-  g.nextSpawnCm += beatCm(g);
+  g.nextSpawnCm = g.travelledCm + beatCm(g);   // the next is one beat after this landing
 }
 
 // The beat: the therapist's spacing in world cm, snapped to the nearest odd number of steps (ties go down; the world
@@ -306,6 +306,14 @@ function judge(g, th) {
 // Frame-rate independent easing: the share of the gap to close this frame for a time constant tauS.
 export function ease(dt, tauS) { return 1 - Math.exp(-dt / tauS); }
 
+// The pace warning gate (see RULES.paceWarnS): feed it whether this frame's pace is bad; it returns the warning.
+export function warnGate(g, bad, dt) {
+  g.paceBad += ((bad ? 1 : 0) - g.paceBad) * ease(dt, RULES.paceWarnS);
+  if (g.paceBad > RULES.paceWarnOn) g.paceGated = true;
+  else if (g.paceBad < RULES.paceWarnOff) g.paceGated = false;
+  return g.paceGated;
+}
+
 // ---------- main step ----------
 // Advance by dt seconds. Returns {resolved: [...], actChanged: bool, pace, form, speed}.
 export function step(g, dt) {
@@ -313,11 +321,7 @@ export function step(g, dt) {
   g.actT += dt;
   const p = pace(g);
   const f = form(p);
-  const bad = !p.ok && g.t > RULES.paceGraceS ? 1 : 0;
-  g.paceBad += (bad - g.paceBad) * ease(dt, RULES.paceWarnS);
-  if (g.paceBad > RULES.paceWarnOn) g.paceGated = true;
-  else if (g.paceBad < RULES.paceWarnOff) g.paceGated = false;
-  p.gated = g.paceGated;
+  p.gated = warnGate(g, !p.ok && g.t > RULES.paceGraceS, dt);
   if (g.act !== 'home') { g.formSum += f * dt; g.formN += dt; }   // time-weighted, independent of frame rate
   const scale = speedScale(g);
   const walking = p.cadence > 0;
@@ -443,7 +447,10 @@ export function summary(g) {
     formPct: g.formN ? Math.round((100 * g.formSum) / g.formN) : 0,
     score: g.score,
     liftTargetCm: g.limits.liftCm,
-    spacingCm: Math.round(beatCm(g)),   // the spacing as played: the therapist's setting snapped to the beat
+    spacingCm: g.limits.spacingCm,                      // the therapist's setting
+    beatCm: Math.round(beatCm(g)),                      // the spacing as played: the setting snapped to the beat
+    stepCm: RULES.strideCm * speedScale(g),             // world cm per step at this plant speed (the beat's quantum)
+    seedAct: plan(g).seeds,                             // false: the game had no seed act at all
     normalStepCm: g.base,
     shoeMode: g.shoeMode,
     rounds: g.round,

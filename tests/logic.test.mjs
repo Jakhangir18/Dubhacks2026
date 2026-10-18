@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RULES, beatCm, plan, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, pace, form, applyParams, summary, needCm, startAt, speedScale } from '../web/logic.js';
+import { RULES, beatCm, plan, warnGate, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, pace, form, applyParams, summary, needCm, startAt, speedScale } from '../web/logic.js';
 
 const DT = 0.05;
 
@@ -70,7 +70,29 @@ test('the world speed glides: no jump when the pace starts, flips or stops', () 
   assert.ok(Math.abs(glided - expected) < 0.1 * expected, `glides ${glided} cm, expected about ${expected}`);
 });
 
-test('the pace warning holds: it comes after a sustained bad pace and leaves after a sustained good one', () => {
+test('the pace warning gate: comes on after about 1.6 s of a bad pace, off after about 1.2 s of a good one, steady under a 1.2 s flip', () => {
+  const run = (g, bad, seconds) => { for (let t = 0; t < seconds - 1e-9; t += DT) warnGate(g, bad, DT); return g.paceGated; };
+  const g = newGame();
+  assert.equal(run(g, true, 1.4), false, 'not yet at 1.4 s');
+  assert.equal(run(g, true, 0.4), true, 'on by 1.8 s');
+  assert.equal(run(g, false, 1.0), true, 'not yet off at 1.0 s');
+  assert.equal(run(g, false, 0.4), false, 'off by 1.4 s');
+  const flips = (halfPeriodS) => {
+    const h = newGame();
+    let last = h.paceGated, n = 0;
+    for (let cycle = 0; cycle < 20; cycle++) for (const bad of [true, false]) {
+      run(h, bad, halfPeriodS);
+      if (cycle >= 4 && h.paceGated !== last) n += 1;
+      last = h.paceGated;
+    }
+    return n;
+  };
+  assert.equal(flips(1.2), 0);   // a pace flipping every 1.2 s settles
+  assert.equal(flips(1.0), 0);
+  assert.ok(flips(3.0) > 0);     // a pace that is bad for 3 s at a time is shown as such
+});
+
+test('the pace warning follows the pace in a game: on after a sustained slow stretch, off after a sustained good one', () => {
   const g = newGame({ walkSeconds: 60 });
   walk(g, 6, 0.6);                        // 100 steps per minute, past the grace period
   assert.equal(step(g, DT).pace.gated, false);
@@ -101,14 +123,18 @@ test('the beat snaps the spacing to the nearest odd number of steps, ties down, 
 });
 
 test('the first flower of an act appears on a landing, a whole number of steps out, in the lane of the foot that lands there', () => {
-  const g = toGarden();
-  assert.equal(g.spawned, 0);
-  walkUntil(g, () => g.spawned === 1);
-  const first = g.things[0];
-  const foot = g.strikes[g.strikes.length - 1].foot;   // the landing that placed it
-  const steps = Math.round(RULES.aheadCm / 35);          // 12 at the defaults: even, so the same foot lands on it
-  assert.equal(first.lane, steps % 2 === 0 ? foot : foot === 'L' ? 'R' : 'L');
-  assert.ok(Math.abs(first.distCm - steps * 35) < 8, `placed ${first.distCm} cm out`);   // minus up to two frames of travel
+  const firstOf = (limits) => {
+    const g = toGarden(limits);
+    assert.equal(g.spawned, 0);
+    walkUntil(g, () => g.spawned === 1);
+    return { first: g.things[0], foot: g.strikes[g.strikes.length - 1].foot };   // the landing that placed it
+  };
+  const even = firstOf({});                        // 420 cm ahead, 35 cm per step: 12 steps, the same foot lands on it
+  assert.equal(even.first.lane, even.foot);
+  assert.ok(Math.abs(even.first.distCm - 420) < 8, `placed ${even.first.distCm} cm out`);   // minus up to two frames of travel
+  const odd = firstOf({ speedScale: 1.2 });        // 60 cm per step: 7 whole steps (inside the field), the other foot
+  assert.equal(odd.first.lane, odd.foot === 'L' ? 'R' : 'L');
+  assert.ok(Math.abs(odd.first.distCm - 420) < 10 && odd.first.distCm <= 420, `placed ${odd.first.distCm} cm out`);
 });
 
 test('with no seeds the rounds are flowers only, lanes alternate, and each flower comes an odd number of steps after the last', () => {
@@ -132,7 +158,9 @@ test('with no seeds the rounds are flowers only, lanes alternate, and each flowe
   assert.equal(g.log.length, 8);
   assert.ok(g.log.every((l) => l.kind === 'flower'));
   for (let i = 1; i < g.log.length; i++) assert.notEqual(g.log[i].lane, g.log[i - 1].lane, 'lanes alternate');
-  assert.equal(summary(g).spacingCm, 105);   // the spacing as played
+  assert.equal(summary(g).beatCm, 105);      // the spacing as played
+  assert.equal(summary(g).spacingCm, 140);   // the therapist's setting, untouched
+  assert.equal(summary(g).seedAct, false);
 });
 
 test('a steady pace with both feet finishes act 1', () => {

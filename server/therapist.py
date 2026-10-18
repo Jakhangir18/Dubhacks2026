@@ -18,8 +18,9 @@ BACKBOARD_URL = "https://app.backboard.io/api/threads/messages"
 COACH_SYSTEM = (
     "You are the voice of a warm physical-therapy coach inside a walking game for children, teenagers and adults. "
     "The player walks in place. Act 1: keep a steady pace. Act 2: high-step onto flowers with the matching foot. "
-    "Act 3 (only when the therapist sets a seed count above 0; a seeds percentage of null means there was no act 3): "
-    "lift the foot a seed is aiming at. You get a summary of the last stretch and the therapist's limits. "
+    "Act 3 (only when the summary says seedAct is true): lift the foot a seed is aiming at. "
+    "You get a summary of the last stretch and the therapist's limits. Flowers come an odd number of steps apart "
+    "(the summary's beatCm, in steps of stepCm): change spacingCm by two steps or leave it, a smaller change does nothing. "
     "Reply with JSON only: {\"say\": \"<one cue, at most 12 words, one instruction, about a target in the game, "
     "saying what to do, encouraging>\", \"params\": {\"liftCm\": <number>, \"spacingCm\": <number>}}. "
     "Make it easier (lower liftCm, larger spacingCm) when success is below 60 percent, harder above 85 percent, "
@@ -102,10 +103,10 @@ def rule_cue(summary: dict[str, Any], limits: dict[str, Any]) -> dict[str, Any]:
     # Adjust from the game's current targets (the summary carries them), not from the base limits,
     # so repeated cues keep stepping in the same direction until the range stops them.
     lift = float(summary.get("liftTargetCm") or limits.get("liftCm", 10))
-    spacing = float(summary.get("spacingCm") or limits.get("spacingCm", 140))
-    # The game spaces flowers an odd number of steps apart (one stride times the plant speed per step), so a change
-    # smaller than two steps does nothing: one notch of spacing is two steps.
-    notch = 2 * 50 * float(limits.get("speedScale") or 0.7)
+    spacing = float(summary.get("beatCm") or summary.get("spacingCm") or limits.get("spacingCm", 140))
+    # The game spaces flowers an odd number of steps apart, so a change smaller than two steps does nothing: one notch
+    # of spacing is two steps. The game reports its step (its plant speed may be set on the laptop, not here).
+    notch = 2 * float(summary.get("stepCm") or 50 * float(limits.get("speedScale") or 0.7))
     if cadence < float(limits.get("minCadence", 80)):
         return {"say": "Keep stepping, a little faster, nice and steady", "params": {}}
     if asym is not None and asym > 20:
@@ -154,7 +155,7 @@ async def coach(summary: dict[str, Any], limits: dict[str, Any]) -> dict[str, An
 def describe(summary: dict[str, Any]) -> str:
     return (f"{summary.get('seconds', 0)} s, {summary.get('steps', 0)} steps, cadence {summary.get('cadence')} per min, "
             f"flowers {summary.get('stompPct')}%, "
-            + (f"seeds {summary.get('dodgePct')}%, " if summary.get("dodgePct") is not None else "no seed act, ")
+            + ("no seed act, " if summary.get("seedAct") is False else f"seeds {summary.get('dodgePct')}%, ")
             + f"form {summary.get('formPct')}%, "
             f"high-step lift L {summary.get('highLiftAvgCm', {}).get('L')} cm R {summary.get('highLiftAvgCm', {}).get('R')} cm"
             + ("; shoe mode: the lift numbers are forward step swings seen by the camera, not heights" if summary.get("shoeMode") else "")
