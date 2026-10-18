@@ -7,3 +7,9 @@ data/
 node_modules/
 .env
 .claude/
+
+# Next.js (StrideBloom)
+/.next/
+*.tsbuildinfo
+next-env.d.ts
+.import-cache/
