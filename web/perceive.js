@@ -1,7 +1,9 @@
-// Perceptron second opinion (Perceptron track). The browser detector still decides every step in real time;
+// Perceptron second opinion (Perceptron track). The game still decides every step in real time;
 // Perceptron Mk1.5 looks at a few timestamped frames afterwards and the agreement goes into the report.
-// Frames are cropped from the knees down (never a face), stay small, and are sent only when the
-// therapist panel has Perceptron consent on for this player and the server has a key.
+// The frames come from feet.py's camera above the belt whenever its pictures reach this window ("overhead": shoes
+// and projected flowers from above, never a face), else from this window's own camera cropped from the knees down
+// ("legs"). They stay small and are sent only when the therapist panel has Perceptron consent on for this player
+// and the server has a key.
 const W = 320;
 const H = 240;                  // every frame the same size: the API needs that
 const EVERY_MS = 200;
@@ -12,6 +14,7 @@ const MAX_SESSION_FRAMES = 32;  // server/perceive.py MAX_SESSION_FRAMES
 const FORM_EVERY_MS = 10000;
 const LEG = [25, 26, 27, 28, 29, 30, 31, 32];   // knees, ankles, heels, toes
 const KNEES = [25, 26];
+const FEED_LIVE_MS = 2500;      // overhead pictures newer than this make them the source (feet.py sends 4 a second in a game)
 
 export class Perceiver {
   constructor(tracker) {
@@ -21,6 +24,9 @@ export class Perceiver {
     this.canvas.height = H;
     this.ctx = this.canvas.getContext('2d');
     this.gen = 0;
+    this.view = 'legs';
+    this.lastFeed = -Infinity;
+    this.feedBusy = false;
     this.reset(false, 'Player');
     setInterval(() => this.capture(), EVERY_MS);
   }
@@ -53,10 +59,36 @@ export class Perceiver {
     this.frames = [];
   }
 
+  // Are feet.py's overhead pictures arriving? While they are, they are what Perceptron sees.
+  feedLive() { return performance.now() - this.lastFeed < FEED_LIVE_MS; }
+
+  // One overhead picture from feet.py (a JPEG data URL), drawn into the same small frame as the camera's, so every
+  // frame of a request has the same size and the server's points and the panel's lab need no change.
+  feed(jpeg) {
+    this.lastFeed = performance.now();
+    if (!this.enabled || this.feedBusy) return;
+    if (this.isPaused()) { this.frames = []; this.lastForm = performance.now(); return; }
+    this.feedBusy = true;
+    const img = new Image();
+    img.onload = () => {
+      this.feedBusy = false;
+      if (!this.enabled || !img.naturalWidth) return;
+      const s = Math.min(W / img.naturalWidth, H / img.naturalHeight);
+      const dw = img.naturalWidth * s, dh = img.naturalHeight * s;
+      this.ctx.fillStyle = '#000';
+      this.ctx.fillRect(0, 0, W, H);
+      this.ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+      this.addFrame(this.canvas.toDataURL('image/jpeg', 0.7), 'overhead');
+    };
+    img.onerror = () => { this.feedBusy = false; };
+    img.src = jpeg;
+  }
+
   capture() {
     const v = this.tracker.video;
     const lm = this.tracker.lastLm;
     if (this.isPaused()) { this.frames = []; this.lastForm = performance.now(); return; }   // no clip spans a pause
+    if (this.feedLive()) return;   // the overhead pictures are the source while they come
     if (!this.enabled || !this.tracker.running || !lm || v.readyState < 2 || !v.videoWidth) return;
     const seen = (i) => lm[i] && (lm[i].visibility ?? 1) > 0.5;
     const pts = LEG.filter(seen).map((i) => lm[i]);
@@ -78,8 +110,19 @@ export class Perceiver {
     this.ctx.fillStyle = '#000';
     this.ctx.fillRect(0, 0, W, H);
     this.ctx.drawImage(v, x0, y0, x1 - x0, y1 - y0, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    this.addFrame(this.canvas.toDataURL('image/jpeg', 0.7), 'legs');
+  }
+
+  // A new frame from either view: kept for the step checks, sampled for the walk report, and every 10 s a form check.
+  addFrame(url, view) {
     const now = Math.round(performance.now());
-    const url = this.canvas.toDataURL('image/jpeg', 0.7);
+    if (view !== this.view) {   // never mix the two cameras in one request or one report
+      this.view = view;
+      this.frames = [];
+      this.sessionFrames = [];
+      this.sampleEvery = 1500;
+      this.lastSample = -Infinity;
+    }
     this.frames.push({ url, tsMs: now });
     if (now - this.lastSample >= this.sampleEvery) {
       if (this.sessionFrames.length === MAX_SESSION_FRAMES) {
@@ -117,7 +160,7 @@ export class Perceiver {
     const gen = this.gen;
     try {
       const r = await fetch('/api/perceive', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ player: this.player, ...body }), signal: AbortSignal.timeout(15000) });
+        body: JSON.stringify({ player: this.player, view: this.view, ...body }), signal: AbortSignal.timeout(15000) });
       const out = r.ok ? await r.json() : null;
       if (gen !== this.gen || !out) return;
       if (out.source === 'no-consent') {
@@ -128,13 +171,14 @@ export class Perceiver {
     finally { if (gen === this.gen) this.busy[body.kind] = false; }
   }
 
-  async sessionReport() {
+  // sessionId: the walk this report belongs to, so the dashboard and the report show it with that walk.
+  async sessionReport(sessionId = null) {
     if (!this.used || !this.sessionAllowed || this.sessionFrames.length < 2) return null;
     const frames = this.sessionFrames;
     this.sessionFrames = [];
     try {
       const r = await fetch('/api/perceive/session', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ player: this.player, frames }), signal: AbortSignal.timeout(90000) });
+        body: JSON.stringify({ player: this.player, frames, view: this.view, ...(sessionId && { sessionId }) }), signal: AbortSignal.timeout(90000) });
       return r.ok ? await r.json() : null;
     } catch { return null; }
   }
@@ -146,7 +190,7 @@ export class Perceiver {
   summary() {
     if (!this.used) return null;
     const form = this.form && { onPad: this.form.onPad, holdingRail: this.form.holdingRail, steady: this.form.steady };
-    return { checked: this.checked, agree: this.agree,
+    return { checked: this.checked, agree: this.agree, view: this.view,
       agreePct: this.checked ? Math.round((100 * this.agree) / this.checked) : null, form };
   }
 }

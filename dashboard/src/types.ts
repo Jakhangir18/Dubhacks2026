@@ -23,6 +23,27 @@ export interface GameSummary {
   placementCm?: Sides | null;
   timingS?: Sides | null;
   swingCm?: Sides | null;
+  perceptron?: PerceptronAgreement | null;
+}
+
+/** The game's count of Perceptron's step checks (web/perceive.js summary()): unclear ones are not counted. */
+export interface PerceptronAgreement {
+  checked: number;
+  agree: number;
+  agreePct: number | null;
+  view?: "overhead" | "legs";
+  form?: { onPad: string; holdingRail: string; steady: string } | null;
+}
+
+/** Perceptron's report on the whole walk (session.perceptron, from POST /api/perceive/session). */
+export interface PerceptronLook {
+  view?: "overhead" | "legs";
+  clips?: { mention: string; t0: number; t1: number }[] | null;
+  points?: { mention: string; point: { x: number; y: number } }[] | null;   // 0-1000 across the key frame
+  keyFrame?: string | null;
+  caption?: string | null;
+  gaitNote?: string | null;
+  safety?: string | null;
 }
 export type Sides = { L: number | null; R: number | null };
 export type Lanes = { L: [number, number]; R: [number, number] }; // [hit, total] per lane
@@ -92,4 +113,5 @@ export interface Session {
   gait: GaitSummary | null;
   videos: { game: string | null; gait: string | null }; // URLs; null until recordings are linked to sessions
   gaitReview?: GaitReview | null;
+  perceptron?: PerceptronLook | null;
 }

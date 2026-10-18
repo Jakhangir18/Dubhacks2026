@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { compare } from "./improvements.ts";
 import { fmt, groupMetrics, isPending, metricIndex, reviewState, sideName, sourceLine, suggestions } from "./review.ts";
 import { SESSIONS } from "./seed.ts";
-import type { GaitReview, ReviewMetric, Session } from "./types";
+import type { GaitReview, PerceptronAgreement, PerceptronLook, ReviewMetric, Session } from "./types";
 
 // A GET /api/sessions/{player} row (server/api.py): the gait summary trimmed; /api/session/{id} has it all.
 type Row = Omit<Session, "gait" | "videos"> & { gait?: { summary?: Session["gait"] } | null };
@@ -18,6 +18,7 @@ const toSession = (r: Row): Session => ({
   gait: r.gait?.summary ?? null,
   videos: { game: null, gait: null },
   gaitReview: r.gaitReview ?? null,
+  perceptron: r.perceptron ?? null,
 });
 
 const keyOf = (s: Session) => s.id ?? `ts:${s.ts}`;   // older sessions have no id
@@ -169,6 +170,53 @@ function Measurements({ g }: { g: GaitReview }) {
         </details>
       ) : null}
     </>
+  );
+}
+
+// Perceptron's second look: its agreement with the game on each flower, and its report on the walk.
+function Perceptron({ agree, look }: { agree: PerceptronAgreement | null | undefined; look: PerceptronLook | null | undefined }) {
+  const overhead = (look?.view ?? agree?.view) === "overhead";
+  const things = overhead ? "flowers" : "steps";
+  return (
+    <div className="pp">
+      {look?.keyFrame && (
+        <figure className="pp-frame">
+          <img src={look.keyFrame} alt="the key frame Perceptron looked at" />
+          {(look.points ?? []).map((p, n) => (
+            <span key={n} className={`pp-dot${/flower/.test(p.mention) ? " flower" : ""}`} title={p.mention}
+              style={{ left: `${p.point.x / 10}%`, top: `${p.point.y / 10}%` }} />
+          ))}
+          <figcaption>{look.points?.length ? "Yellow: flowers · blue: shoes it pointed at" : "Key frame of the walk"}</figcaption>
+        </figure>
+      )}
+      <div>
+        {agree?.checked ? (
+          <>
+            <span className="tile-value">{agree.agree} / {agree.checked}</span>
+            <p className="lead small">
+              Perceptron agreed with the game on {agree.agree} of {agree.checked} {things}
+              {agree.agreePct !== null ? ` (${agree.agreePct}%)` : ""}. Moments it could not see clearly are not counted.
+            </p>
+          </>
+        ) : agree ? <p className="hint">Perceptron was on for this walk but could not judge any step clearly.</p> : null}
+        {agree?.form && (
+          <p className="hint">{overhead ? "Feet on the belt" : "On the pad"} {agree.form.onPad} · steady steps {agree.form.steady} · holding a rail {agree.form.holdingRail}</p>
+        )}
+        {look?.caption && <p className="lead">“{look.caption}”</p>}
+        {look?.clips?.length ? (
+          <div className="evidence">
+            {look.clips.map((c, n) => (
+              <span key={n} className="chip ev">{c.mention} · {c.t0.toFixed(1)}{c.t1 !== c.t0 ? `–${c.t1.toFixed(1)}` : ""} s</span>
+            ))}
+          </div>
+        ) : null}
+        {look?.gaitNote && <p><b>Note:</b> {look.gaitNote}</p>}
+        {look?.safety && <p><b>Safety:</b> {look.safety}</p>}
+        <p className="hint">
+          Perceptron Mk1.5 · {overhead ? "the camera above the belt (shoes and flowers, no faces)" : "the game camera, knees down"} · sent only with the family's consent
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -352,6 +400,12 @@ export default function App() {
           ) : <p className="hint">The first walk sets the starting point.</p>}
           {changes.some((c) => c.metric.lowTrust) && <p className="hint">* Less certain: it depends on the leg farther from the side camera.</p>}
         </Card>
+
+        {(current.summary.perceptron || current.perceptron) && (
+          <Card cls="span-12" i={i++} eyebrow="Perceptron" title="Second look">
+            <Perceptron agree={current.summary.perceptron} look={current.perceptron} />
+          </Card>
+        )}
 
         {done && (
           <Card cls="span-12" i={i++} eyebrow="Measurements" title="Every number the review used">

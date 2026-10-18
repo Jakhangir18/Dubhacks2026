@@ -239,7 +239,11 @@ window.addEventListener(MARKS_EVENT, (e) => {
 });
 
 // feet.py's camera picture goes on to the camera window, where the shoe calibration is clicked.
-window.addEventListener(FRAME_EVENT, (e) => { if (e.detail.source !== 'side' && cameraWindowAlive()) send('frame-seen', { jpeg: e.detail.jpeg }); });   // the side camera's pictures go to the dashboard, not here
+window.addEventListener(FRAME_EVENT, (e) => {
+  if (e.detail.source === 'side') return;   // the side camera's pictures go to the dashboard, not here
+  if (cameraWindowAlive()) send('frame-seen', { jpeg: e.detail.jpeg });
+  localPerceiver.feed?.(e.detail.jpeg);     // feet.py's view from above the belt: what Perceptron double-checks steps on (?.: a cached older perceive.js)
+});   // the side camera's pictures go to the dashboard, not here
 
 // Foot events from the camera window on the laptop screen; the game stamps them on arrival like any source.
 // While the camera window runs, this window's own camera (V) would count every step twice: ignore it.
@@ -773,7 +777,7 @@ class Play extends Phaser.Scene {
     for (const lane of ['L', 'R']) this.cueText[lane] = this.add.text(0, 0, '', txt(110, C.yellow)).setOrigin(0.5).setDepth(20).setVisible(false);
     this.bouquetText = this.add.text(0, 46, '', txt(40, C.yellow)).setOrigin(0, 0.5).setDepth(20);   // bouquets banked, beside the petals
     this.lastShoes = 0;
-    perceiver = cameraWindowAlive() ? remotePerceiver : localPerceiver;
+    perceiver = cameraWindowAlive() && !localPerceiver.feedLive?.() ? remotePerceiver : localPerceiver;   // the overhead feed wins
     perceiver.reset(settings.perceptron, settings.player, () => this.paused || this.sys.isPaused());
     this.events.once('shutdown', () => perceiver.stop());   // no frames leave on the Home or Title screens
     this.sprites = new Map();
@@ -1273,7 +1277,10 @@ class Home extends Phaser.Scene {
       s.shoeMode ? `Long steps  left ${s.highLiftAvgCm?.L ?? '-'}   right ${s.highLiftAvgCm?.R ?? '-'}  (swing, camera)`
         : `High steps  left ${s.highLiftAvgCm?.L ?? '-'} cm   right ${s.highLiftAvgCm?.R ?? '-'} cm`,
     ];
-    if (s.perceptron?.checked) lines.push(`Perceptron double-check agreed on ${s.perceptron.agree} of ${s.perceptron.checked} steps`);
+    if (s.perceptron?.checked) {
+      const seen = s.perceptron.view === 'overhead' ? ' (camera above the belt)' : '';
+      lines.push(`Perceptron agreed with the game on ${s.perceptron.agree} of ${s.perceptron.checked} ${s.perceptron.view === 'overhead' ? 'flowers' : 'steps'}${seen}`);
+    }
     this.stats = lines.map((line) => text(line, bodySize));
     this.labText = text(data.labStatus || (s.perceptron ? 'Perceptron lab is reviewing your walk…' : ''), small ? 18 : 22, C.cyan);
     // Measure a three-line slot before replacing the sample with the asynchronous note.
@@ -1327,11 +1334,12 @@ class Home extends Phaser.Scene {
     if (params.get('scene') === 'home') return;   // preview only, nothing to save
     if (s.perceptron) {
       data.labStatus = 'Perceptron lab is reviewing your walk…';   // kept across a zone-setup pause
-      data.labTask = perceiver.sessionReport().then((report) => {
+      data.labTask = perceiver.sessionReport(data.sessionId).then((report) => {
         data.labReport = report;
         data.caption = report?.caption || null;
+        const moments = report?.view === 'overhead' ? 'flower stomps' : 'high steps';
         data.labStatus = report?.source === 'perceptron'
-          ? `${report.clips ? `Perceptron saw ${report.clips.length} high steps` : 'Perceptron lab ready'}${data.caption ? ' · caption ready' : ''}`
+          ? `${report.clips ? `Perceptron saw ${report.clips.length} ${moments}` : 'Perceptron lab ready'}${data.caption ? ' · caption ready' : ''}`
           : 'Perceptron lab unavailable for this walk';
         if (!data.cancelled && this.homeData === data && this.sys.isActive()) this.showLab();
       });
