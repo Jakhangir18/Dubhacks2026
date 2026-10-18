@@ -45,7 +45,7 @@ export const RULES = {
   shoeGapS: 1,                   // a lane unseen this long starts its swing tracking afresh
   stanceS: 6,                    // the toe line follows where the shoes have stood over this window
   stanceMarginCm: 30,            // a thing is gone only this far behind the standing feet
-  markReachCm: 60,               // a camera-seen foot-on-mark resolves the nearest thing of that kind within this
+  markReachCm: 90,               // a camera-seen foot-on-mark resolves the nearest thing of that kind within this (the sock's centre is not the flower's)
 };
 
 export function rng(seed = 1) {
