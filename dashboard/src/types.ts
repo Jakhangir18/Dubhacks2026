@@ -1,6 +1,7 @@
 // Data shapes the dashboard consumes: built from GET /api/sessions and /api/session/{id} (src/seed.ts when offline).
+// The review shapes follow vision/CONTRACT.md, section "Session-linked gait review".
 
-/** Game summary, as sent by the game to POST /api/session (see web/game.js, server/therapist.py). */
+/** Game summary, as sent by the game to POST /api/session (see web/logic.js summary(), server/therapist.py). */
 export interface GameSummary {
   seconds: number;
   steps: number;
@@ -9,9 +10,24 @@ export interface GameSummary {
   dodgePct: number | null; // seeds dodged
   formPct: number | null;
   highLiftAvgCm: { L: number | null; R: number | null };
+  asymmetryPct?: number | null;
+  goldenPct?: number | null; // golden flowers hit
+  petals?: number;
+  score?: number;
+  rounds?: number;
+  shoeMode?: boolean;
+  seedAct?: boolean; // false: the game had no seed act
+  wallSeconds?: number;
+  stepsByFoot?: { L: number; R: number };
+  byLane?: { flower?: Lanes; seed?: Lanes };
+  placementCm?: Sides | null;
+  timingS?: Sides | null;
+  swingCm?: Sides | null;
 }
+export type Sides = { L: number | null; R: number | null };
+export type Lanes = { L: [number, number]; R: [number, number] }; // [hit, total] per lane
 
-/** Output of GaitTracker.summary() in gait.py, as stored by POST /api/gait. */
+/** Output of GaitTracker.summary() in gait.py, as stored by POST /api/gait/final (the parts the dashboard reads). */
 export interface GaitSummary {
   cadence: number | null;
   stride: { L: number | null; R: number | null }; // seconds
@@ -19,8 +35,55 @@ export interface GaitSummary {
   asymmetry: { stride: number | null; flexion: number | null }; // percent
 }
 
+/** One number the review may use: an id the review cites, with its unit, rough typical value and how far to trust it. */
+export interface ReviewMetric {
+  id: string;
+  label: string;
+  group: string; // gait | game | gait@walk | gait@garden | gait@storm
+  side: "L" | "R" | null;
+  value: number;
+  unit: string;
+  typical: string | null;
+  trust: "good" | "low";
+  prev: number | null; // the mean of earlier reviews
+}
+
+export interface Cited { text: string; evidence: string[] }
+export interface Finding extends Cited { area: string; side: "L" | "R" | "both" | "none"; confidence: "high" | "medium" | "low" }
+
+export interface Review {
+  overview: string;
+  strengths: Cited[];
+  findings: Finding[];
+  gameVsGait: Cited[];
+  actComparison: string;
+  trend: string;
+  focus: { text: string; why: string; evidence: string[] };
+  nextSession: { liftCm: number | null; spacingCm: number | null; minCadence: number | null; why: string };
+  cues: string[];
+  playerFeedback: string;
+  parentNote: string;
+  therapistNote: string;
+  nextRecording: string;
+}
+
+/** session.gaitReview: the AI therapist's review of one walk. */
+export interface GaitReview {
+  status: "waiting" | "reviewing" | "done" | "failed";
+  source?: "gemini" | "rules";
+  model?: string | null;
+  reason?: string | null;
+  dataQuality?: { level: "good" | "ok" | "poor"; issues: string[] };
+  metrics?: ReviewMetric[];
+  withheld?: { id: string; reason: string }[];
+  review?: Review;
+  filledByRules?: string[];
+  ts?: number;
+}
+
 /** One walking game session: a GET /api/sessions/{player} row, plus its gait walk and recordings. */
 export interface Session {
+  id?: string; // older sessions have none
   player: string;
   ts: number; // unix seconds
   verified: boolean;
@@ -28,5 +91,5 @@ export interface Session {
   summary: GameSummary;
   gait: GaitSummary | null;
   videos: { game: string | null; gait: string | null }; // URLs; null until recordings are linked to sessions
-  review?: string | null; // the AI gait review's overview, when one finished
+  gaitReview?: GaitReview | null;
 }

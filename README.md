@@ -1,3 +1,35 @@
+# Zombie Walk Home — family dashboard
+
+The browser dashboard for Zombie Walk Home: tonight's walk, the path of gardens home, progress, past walks, and Maya, the AI therapist. A projector paints a night garden on the floor, a camera scores each step, and Gus the zombie has to shuffle home before sunrise.
+
+The dashboard uses the game's night palette and sticker cards, art and a looping hero clip generated with Higgsfield, and motion built on `motion` plus Magic UI / 21st.dev pieces (number ticker, particles, blur fade). Every animation turns off under the system "reduce motion" setting.
+
+The form round stands in for the projected floor: two short waves that score the same cues.
+
+## Run the dashboard
+
+```bash
+npm install
+npm run dev
+```
+
+Open [http://127.0.0.1:4317](http://127.0.0.1:4317).
+
+## What you can do
+
+- Start today's goal from the overview, or pick any open goal on Play & practice. The walk is always stomping plants.
+- Walk the form round with the buttons or the keyboard: `A` / `←` left foot, `D` / `→` right foot, space to stand tall. Turn on the metronome if you want the beat.
+- Score 80 on the planned goal to open the next one. XP, the streak, and the walking score update from the round.
+- Review scores and the weekly minute goal on My progress. Open any past walk from Sessions.
+- Ask Maya about pace, symmetry, or the plan. Pain and injury go to Contact care team, not to her.
+- Open the movement kit to see the camera, trackpad, and projection, or mark a sensor offline and run a connection check.
+
+Practice data stays in this browser. Reset it from Jordan's profile.
+
+The existing game tests still run with `npm test`.
+
+---
+
 # Stride Defense (working name)
 
 **An AI therapist-style coach that turns the exercises a therapist assigns into a projected game kids actually want to play.**
