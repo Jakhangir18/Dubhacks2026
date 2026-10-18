@@ -6,22 +6,38 @@ DubHacks '26, University of Washington, Oct 17–18 2026.
 
 ## Technologies we use and how
 
-Each part below says what it does for the player or the therapist, where it lives, and whether it runs by default.
+Sponsor technologies first, in the order we lean on them. Every line names the file that does it and whether it runs by default in the demo.
 
-### Google Gemini
-- The coach: a short cue during the walk and a spoken summary in the rest between rounds, with game settings clamped to the therapist's limits (`server/therapist.py`, one JSON call helper in `server/gemini.py`).
-- The gait review after a walk, written from the side camera's numbers; every point must cite a measured metric, and suggestions are clamped to the therapist's ranges (`server/gait_review.py`).
-- Maya's chat on the dashboard: answers about the latest walk from its numbers, its review and up to four annotated side-camera leg photos sent as images (`server/maya.py`). The coach's voice is Gemini text-to-speech, cached per line, with the player's name removed (`server/tts.py`).
-- Status: on when `GEMINI_API_KEY` is set; rule-based text and the browser's voice otherwise. Side-camera numbers, the review and the photos go to Gemini only with the player's AI review consent; the coach's cue always receives the game's own score numbers.
+### MLH: Best Use of Gemini API (Google Gemini)
 
-### Backboard
-- Long-term memory per player: after each saved walk the session result is written to that player's Backboard assistant, and the next session's greeting, focus and coach cues read it back (`backboard`, `plan`, `recall`, `remember` in `server/therapist.py`; called from `server/api.py`).
-- Status: on when `BACKBOARD_API_KEY` is set; without it the plan comes from the stored sessions.
+Gemini is Maya, the AI therapist, end to end. Eight jobs, all on `gemini-3.1-flash-lite` (about 1 s) except the voice:
+
+1. **Coach cue during the walk:** one short line from the live numbers, with any game change clamped to the therapist's limits (`coach` in `server/therapist.py`, JSON helper `server/gemini.py`).
+2. **Analysis between rounds:** when a round ends the world stops and Maya speaks what went well and the one thing to fix, using the side camera's numbers when the family consented; then 3-2-1 and the next round starts by itself (`coach` with the rest act; `web/game.js`).
+3. **Session plan:** the greeting and today's focus, built from the player's past walks (`plan` in `server/therapist.py`).
+4. **End-of-walk note:** a note for the player, one for the parent and one for the therapist (`report` in `server/therapist.py`).
+5. **Gait review:** a structured review of the side-camera numbers; every finding must cite a measured metric id, and suggestions are clamped to the therapist's ranges (`server/gait_review.py`).
+6. **Maya's chat with photos (multimodal):** the dashboard chat sends the walk's numbers, its review and up to four annotated leg photos (the skeleton and knee angle drawn on them) as images, so Maya answers about what she sees in your own steps (`server/maya.py`, `src/` therapist page).
+7. **Reward pick:** after a completed walk Gemini picks the reward from the parents' wishlist that fits the effort (`pick_reward` in `server/therapist.py`).
+8. **Voice:** every spoken line is Gemini text-to-speech (`gemini-3.8-flash-tts`, voice Sulafat, a warm coach style), cached per line, the player's name removed (`server/tts.py`, `/api/tts`).
+
+Status: on in the demo (paid key). Without a key every job falls back to rules and the browser's voice. Side-camera numbers, the review and the photos go to Gemini only with the player's AI review consent.
+
+### MLH: Best Use of Backboard
+
+- **Memory across sessions:** each player has a Backboard assistant; after every saved walk the result is written to it (`remember`), and the next session's plan, greeting and coach context read it back (`recall`, `plan` in `server/therapist.py`; called from `server/api.py`). Maya's review and coach lines now include what she remembers.
+- Status: on in the demo (`BACKBOARD_API_KEY`).
 
 ### Perceptron
-- A second look at the steps the game scores: a few timestamped frames of the feet (from the overhead camera, or the game camera cropped below the knees) go to Perceptron Mk1.5, which answers whether the foot really landed on the flower; a form check runs every 10 s and a session report at the end of a walk (`server/perceive.py`, `web/perceive.js`).
-- The agreement count goes into the saved session, the game's Home screen, the session list in `web/therapist.html` and Maya's context.
-- Status: only with the player's Perceptron consent switched on in the panel and `PERCEPTRON_API_KEY` set; otherwise nothing is sent.
+
+Perceptron Mk1.5 is the game's second pair of eyes (`server/perceive.py`, `web/perceive.js`):
+
+1. **Step check:** after each flower, up to 8 timestamped frames of the feet go to `perceptron-mk1.5` as `video_frames` with a strict JSON schema (`STEP_SCHEMA`): did the named foot really land on the target? Two views: lower legs cropped at the knees, or the overhead camera (`check_step`).
+2. **Form check:** every 10 s a second schema (`FORM_SCHEMA`): both feet on the belt, hands on a rail, steady (`check_form`).
+3. **Session report** at the end of a walk, on up to 32 frames (`session_report`): video clipping marks every high step or flower stomp on a timeline, object tracking follows the feet and targets, point detection marks them on a key frame, and Multilook writes a gait note for the therapist and a safety line.
+4. **Into the AI therapist:** the agreement count between Perceptron and our own detector goes into Maya's gait review (`perceptron_check` in `server/gait_review.py`) and the coach's context (`perceptron_line` in `server/therapist.py`), and shows on the Home screen and in the session list.
+
+Status: runs only with the player's Perceptron consent switched on in the therapist settings and `PERCEPTRON_API_KEY` set (both available in the demo); spend capped at 40 calls a minute. Frames never show a face.
 
 ### MediaPipe Pose
 - Side camera: `gait.py` runs MediaPipe Pose on the phone's frames, measures knee bend, stride, step time and left-right balance, streams a live skeleton to the dashboard, and sends "moments" (knee stayed low, left and right differ, strong step) with an annotated leg photo; the server stores them per session in `server/moments.py`, only with the AI review consent.
