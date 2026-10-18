@@ -9,8 +9,12 @@ Frames are sent only when the player's therapist panel has Perceptron consent sw
 
 from __future__ import annotations
 
+import asyncio
+import html
 import json
+import math
 import os
+import re
 import time
 from collections import deque
 from typing import Any
@@ -20,6 +24,7 @@ import httpx
 URL = "https://api.perceptron.inc/v1/chat/completions"
 MODEL = os.environ.get("PERCEPTRON_MODEL", "perceptron-mk1.5")
 MAX_FRAMES = 8
+MAX_SESSION_FRAMES = 32
 MAX_FRAME_CHARS = 400_000   # a 320 px wide JPEG data URL is far below this
 CALLS_PER_MINUTE = 40       # one game sends about 30; the endpoint has no login, so cap the spend (per process: run one worker)
 _calls: deque[float] = deque()
@@ -58,12 +63,12 @@ def allow_call(now: float | None = None) -> bool:
     return True
 
 
-def clean_frames(frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep at most MAX_FRAMES JPEG or PNG data URLs with increasing integer timestamps."""
+def clean_frames(frames: list[dict[str, Any]], cap: int = MAX_FRAMES) -> list[dict[str, Any]]:
+    """Keep at most cap JPEG or PNG data URLs with increasing integer timestamps."""
     out: list[dict[str, Any]] = []
     last = -1
-    for f in frames[: MAX_FRAMES * 4]:   # look a little further than the cap so bad frames do not eat it
-        if len(out) == MAX_FRAMES:
+    for f in frames[: cap * 4]:   # look a little further than the cap so bad frames do not eat it
+        if len(out) == cap:
             break
         if not isinstance(f, dict):
             continue
@@ -137,3 +142,164 @@ async def check_form(frames: list[dict[str, Any]]) -> dict[str, Any]:
     pick = lambda k: out.get(k) if out.get(k) in {"yes", "no", "unclear"} else "unclear"
     return {"onPad": pick("onPad"), "holdingRail": pick("holdingRail"), "steady": pick("steady"),
             "note": str(out.get("note", ""))[:140], "source": "perceptron"}
+
+
+# Annotation markup is not HTML: in particular, <track> must retain its children.
+NUMBER = r"-?\d+(?:\.\d+)?"
+PAIR = re.compile(rf"\(\s*({NUMBER})\s*,\s*({NUMBER})\s*\)")
+
+
+def attributes(markup: str) -> dict[str, str]:
+    return {k: html.unescape(v) for k, _, v in re.findall(r'''([\w_]+)\s*=\s*(["'])(.*?)\2''', markup, re.DOTALL)}
+
+
+def times(value: str) -> list[float]:
+    return [float(n) for n in re.findall(rf"({NUMBER})\s*seconds?\b", value)]
+
+
+COLLECTION = re.compile(r"<collection\b([^>]*)>(.*?)</collection\s*>", re.DOTALL)
+
+
+def grouped(content: str) -> list[tuple[str | None, str]]:
+    """(mention, body) pairs: the live API wraps repeated clips and tracks in a <collection> and names only that."""
+    parts: list[tuple[str | None, str]] = [(attributes(tag).get("mention"), body) for tag, body in COLLECTION.findall(content)]
+    parts.append((None, COLLECTION.sub("", content)))
+    return parts
+
+
+def parse_clips(content: str) -> list[dict[str, Any]]:
+    clips = []
+    for group, tag in ((g, t) for g, body in grouped(content) for t in re.findall(r"<clip\b([^>]*)/?>", body)):
+        attrs = attributes(tag)
+        ts = times(attrs.get("t", ""))
+        if attrs.get("asset_idx", "0") != "0" or not 1 <= len(ts) <= 2:
+            continue
+        if not all(math.isfinite(t) and t >= 0 for t in ts) or ts[-1] < ts[0]:
+            continue
+        clips.append({"mention": attrs.get("mention") or group or "high step", "t0": ts[0], "t1": ts[-1]})
+    clips.sort(key=lambda c: c["t0"])
+    return clips
+
+
+def parse_tracks(content: str) -> dict[str, list[dict[str, Any]]]:
+    tracks: dict[str, list[dict[str, Any]]] = {}
+    found = ((g, t, b) for g, part in grouped(content) for t, b in re.findall(r"<track\b([^>]*)>(.*?)</track\s*>", part, re.DOTALL))
+    for group, tag, body in found:
+        attrs = attributes(tag)
+        mention = attrs.get("mention") or group or ""
+        if attrs.get("asset_idx", "0") != "0" or mention not in {"left foot", "right foot"}:
+            continue
+        points = []
+        for point_tag, coords in re.findall(r"<point_box\b([^>]*)>(.*?)</point_box\s*>", body, re.DOTALL):
+            point_attrs = attributes(point_tag)
+            ts = times(point_attrs.get("t", ""))
+            pairs = PAIR.findall(coords)
+            if point_attrs.get("asset_idx", "0") != "0" or len(ts) != 1 or len(pairs) != 2:
+                continue
+            box = [float(n) for pair in pairs for n in pair]
+            if (not math.isfinite(ts[0]) or ts[0] < 0 or not all(0 <= n <= 1000 for n in box)
+                    or box[0] > box[2] or box[1] > box[3]):
+                continue
+            points.append({"t": ts[0], "box": box})
+        tracks.setdefault(mention, []).extend(points)
+    for points in tracks.values():
+        points.sort(key=lambda p: p["t"])
+    return tracks
+
+
+def parse_points(result: dict[str, Any]) -> list[dict[str, Any]]:
+    points = []
+    for detection in result["detections"]:
+        try:
+            x, y = float(detection["point"]["x"]), float(detection["point"]["y"])
+            if not (0 <= x <= 320 and 0 <= y <= 240):
+                continue
+            points.append({"mention": str(detection["mention"]), "point": {"x": x * 1000 / 320, "y": y * 1000 / 240}})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return points
+
+
+def parse_multilook(result: dict[str, Any]) -> dict[str, str | None]:
+    fields = ["caption", "gaitNote", "safety"]
+    out: dict[str, str | None] = dict.fromkeys(fields)
+    for item in result["results"]:
+        try:
+            index = item["prompt_index"]
+            if item.get("error") or type(index) is not int or not 0 <= index < len(fields):
+                continue
+            content = item["completions"][0]["message"]["content"]
+            if isinstance(content, str) and content.strip():
+                out[fields[index]] = content.strip()
+        except (KeyError, IndexError, TypeError):
+            continue
+    return out
+
+
+async def ask_session(url: str, body: dict[str, Any], usage: dict[str, int]) -> dict[str, Any] | None:
+    key = os.environ.get("PERCEPTRON_API_KEY")
+    if not key or not allow_call():
+        return None
+    usage["requests"] += 1
+    try:
+        async with httpx.AsyncClient(timeout=75) as client:
+            response = await client.post(url, headers={"Authorization": f"Bearer {key}"}, json=body)
+            response.raise_for_status()
+            result = response.json()
+            return result if isinstance(result, dict) else None
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+async def session_report(frames: list[dict[str, Any]]) -> dict[str, Any]:
+    if len(frames) < 2 or not os.environ.get("PERCEPTRON_API_KEY"):
+        return {"source": "off"}
+    usage = {"requests": 0}
+    video = {"type": "video_frames", "video_frames": {"frames": frames}}
+    key_frame = frames[len(frames) // 2]["image_url"]["url"]
+
+    async def annotation(kind: str, question: str) -> Any:
+        result = await ask_session(URL, {
+            "model": MODEL, "messages": [{"role": "user", "content": [video, {"type": "text", "text": question}]}],
+            "vision_config": {"annotation_format": kind}, "reasoning_effort": "low", "max_completion_tokens": 2048,
+        }, usage)
+        if result is None:
+            return None
+        content = result["choices"][0]["message"]["content"]
+        if not isinstance(content, str) or not content.strip():
+            return None
+        return parse_clips(content) if kind == "clip" else parse_tracks(content)
+
+    async def detect() -> Any:
+        result = await ask_session("https://api.perceptron.inc/v1/detect", {
+            "media": {"type": "image", "image_url": key_frame}, "categories": ["foot", "flower", "seed ball"],
+            "config": {"output": "point", "reasoning_effort": "none"},
+        }, usage)
+        return parse_points(result) if result is not None else None
+
+    async def multilook() -> Any:
+        result = await ask_session(URL + "/multilook", {
+            "model": MODEL, "context": [{"role": "user", "content": [video]}],
+            "prompts": [
+                "Write a one-sentence social caption for this walk clip. Keep it kid-friendly and use no names.",
+                ("Write a two-sentence gait note for the therapist on cadence, symmetry and high-step quality. "
+                "Describe only what these sampled lower-leg frames show; acknowledge uncertainty."),
+                ("Write one safety line about holding a rail, stumbles and leaving the pad. "
+                "These frames show only lower legs; say when something is not visible rather than guessing."),
+            ], "n": 1, "reasoning_effort": "none", "max_completion_tokens": 400,   # with reasoning, 512 tokens came back empty
+        }, usage)
+        return parse_multilook(result) if result is not None else None
+
+    results = await asyncio.gather(
+        annotation("clip", "Mark every moment a foot is lifted clearly higher than a normal walking step; "
+                   "mention 'left high step' or 'right high step'."),
+        annotation("box", "Track both feet over these frames. Return one track per foot, with mentions "
+                   "'left foot' and 'right foot', using timestamped point_box annotations."),
+        detect(), multilook(), return_exceptions=True,
+    )
+    clips, tracks, points, looks = [None if isinstance(r, BaseException) else r for r in results]
+    if all(r is None for r in (clips, tracks, points, looks)):
+        return {"source": "off"}
+    return {"source": "perceptron", "clips": clips, "tracks": tracks, "points": points, "keyFrame": key_frame,
+            "caption": (looks or {}).get("caption"), "gaitNote": (looks or {}).get("gaitNote"),
+            "safety": (looks or {}).get("safety"), "usage": usage}
