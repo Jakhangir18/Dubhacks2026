@@ -63,7 +63,7 @@ Keyboard play (no camera needed): **A / D** normal step, **Q / E** high step (st
 
 Useful URLs: `?demo=1` short game for judges, `?scene=play&act=garden&auto=1` jump to act 2 with auto-walk, `?scene=home` preview the end screen.
 
-How it plays: act 1 walk home (keep at least 80 steps per minute; your normal step height is measured here), act 2 high-step onto the flowers in your foot's lane, act 3 lift the foot the seed is aiming at. Heights are relative to your own normal step, and the lift bars beside the footprints show your lift against the line you need.
+How it plays: act 1 walk home (keep at least 80 steps per minute; your normal step height is measured here), act 2 step onto the flowers at the white line. Flowers come on a beat: the lanes alternate and each flower is an odd number of steps after the last (three at the default plant speed), so a steady walker meets every flower with the other foot; the rounds repeat the garden. The seed act (lift the foot a seed is aiming at) is off until the therapist sets a seed count above 0. Heights are relative to your own normal step, and the lift bars beside the footprints show your lift against the line you need.
 
 Files: `logic.js` rules (tested), `game.js` Phaser scenes and art, `bus.js` foot events, `vision.js` camera step detector (tested), `camera-panel.js` the V panel, `bridge.js` events from the server, `warp.js` projector corners, `zone.js` guided zone setup, `ambient.js` garden and outside HUD, `projection.css` projector layout.
 

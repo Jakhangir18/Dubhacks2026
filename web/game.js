@@ -1,6 +1,6 @@
 // Zombie Walk Home: Phaser scenes, art, HUD and input. Rules live in logic.js.
 // Floor projection: things arrive at the pad's front edge; ghost feet mark the toes below.
-import { newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
+import { ease, plan, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
 import { connectBridge, SHOES_EVENT, FRAME_EVENT, MARKS_EVENT } from './bridge.js';
@@ -48,7 +48,9 @@ async function api(path, body) {
 }
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error('timeout')), ms))]);
 
-const DEMO = { walkSeconds: 8, gardenPlants: 5, stormSeeds: 4, rounds: 2 };
+const DEMO = { walkSeconds: 8, gardenPlants: 6, stormSeeds: 0, rounds: 2 };
+const RING_SNAP_PX = 60;   // shoe-box jitter on the field stays under this; a bigger move is a real step and snaps
+const RING_EASE_S = 0.08;  // how the ring settles under the jitter
 const SHARE = params.get('share') === '1';   // the clip and QR code are off unless asked for
 // Called before every game, so limits saved in the therapist panel apply to the next walk without a reload.
 async function loadPlayer() {
@@ -619,7 +621,7 @@ class Play extends Phaser.Scene {
     sound.setMusic(true);
     this.paused = false;
     this.highSound = { L: false, R: false };
-    this.g = newGame(settings.limits, Date.now() % 100000);
+    this.g = newGame(settings.limits);
     this.g.toeBaseCm = this.g.toeCm = -fieldDist(this.layout().toeY, this.layout());   // world cm from the hit line to the toes
     this.shoeRings = ['L', 'R'].map(() => this.add.ellipse(0, 0, 150, 80).setStrokeStyle(10, C.cyan, 0.8).setVisible(false).setDepth(11));
     this.lastShoes = 0;
@@ -748,7 +750,8 @@ class Play extends Phaser.Scene {
     const a = ACTS[this.g.act];
     if (!a) return;
     sound.play('act');
-    if (this.g.act === 'storm' && SHARE) clip.start(this.game.canvas, sound.capture?.stream);
+    const { rounds, seeds } = plan(this.g);   // the clip records the last act of the last round
+    if (SHARE && this.g.round === rounds && this.g.act === (seeds ? 'storm' : 'garden')) clip.start(this.game.canvas, sound.capture?.stream);
     this.actIntroUntil = this.g.t + 4.4;
     this.coachLine = shoesLive(this.g) ? a.how : a.hint;   // shoe mode: say what to do with the foot, plainly
     this.nextGardenUpdate = 0;
@@ -838,12 +841,13 @@ class Play extends Phaser.Scene {
 
   progress() {
     const g = this.g;
-    const rounds = Math.max(1, Math.round(Number(g.limits.rounds) || 1));
-    const total = 1 + 2 * rounds;   // the walk, then flowers and seeds per round
+    const { rounds, seeds } = plan(g);
+    const perRound = seeds ? 2 : 1;   // flowers, and seeds when there are any
+    const total = 1 + perRound * rounds;   // the walk, then the acts of each round
     let done, within;
     if (g.act === 'walk') { done = 0; within = Math.min(1, g.walkGoodS / g.limits.walkSeconds); }
-    else if (g.act === 'garden') { done = 1 + 2 * (g.round - 1); within = Math.min(1, g.actResolved / g.limits.gardenPlants); }
-    else if (g.act === 'storm') { done = 2 + 2 * (g.round - 1); within = Math.min(1, g.actResolved / g.limits.stormSeeds); }
+    else if (g.act === 'garden') { done = 1 + perRound * (g.round - 1); within = Math.min(1, g.actResolved / g.limits.gardenPlants); }
+    else if (g.act === 'storm') { done = 2 + perRound * (g.round - 1); within = Math.min(1, g.actResolved / g.limits.stormSeeds); }
     else return 1;
     return (done + within) / total;
   }
@@ -876,7 +880,7 @@ class Play extends Phaser.Scene {
 
   update(_time, deltaMs) {
     if (this.paused || zone.active) return;
-    const dt = Math.min(1, deltaMs / 1000);   // only a stalled tab is capped: events arrive in real time, game time must keep up
+    const dt = deltaMs / 1000;   // Phaser already bounds a stalled frame (minFps 5, smoothed over frames)
     this.frameWall = performance.now();
     const out = step(this.g, dt);
     const L = this.layout();
@@ -914,7 +918,7 @@ class Play extends Phaser.Scene {
   }
 
   drawWorld(L, out) {
-    drawFloor(this, L, this.g.travelledCm, this.g.t, !out.pace.ok && this.g.t > 3);
+    drawFloor(this, L, this.g.travelledCm, this.g.t, out.pace.gated);
     for (const lane of ['L', 'R']) this.pods[lane].setPosition(L.lanes[lane], Math.max(66, L.top - 20));
     this.aftermath = this.aftermath.filter(stamp => {
       stamp.art.y = stamp.y + (this.g.travelledCm - stamp.travelled) * (L.zoneY - L.top) / RULES.aheadCm;
@@ -966,7 +970,7 @@ class Play extends Phaser.Scene {
       const arc = s.list[3];
       arc.clear();
       if (windowOpen && !th.result && !shoesLive(g)) {   // the timing arc belongs to the lift rules
-        const arrival = th.arriveT ?? g.t + (out.speed > 0 ? th.distCm / out.speed : 0);   // the world stops when the pace drops
+        const arrival = th.arriveT ?? g.t + (out.speed > 0 ? th.distCm / out.speed : 0);   // at the current speed; a ramp shifts it
         const left = Math.max(0, Math.min(1, (arrival + RULES.afterS - g.t) / (RULES.beforeS + RULES.afterS)));
         if (left > 0) {
           arc.lineStyle(16, th.kind === 'seed' ? C.pink : C.white);
@@ -987,16 +991,22 @@ class Play extends Phaser.Scene {
   drawHud(L, out, dt) {
     // Rings under the detected shoes: the live check that the shoe calibration matches the floor.
     const fresh = shoesLive(this.g) && performance.now() - this.lastShoes < 400;
+    const k = ease(dt, RING_EASE_S);
     this.shoeRings.forEach((ring, i) => {
-      const s = this.g.shoes[i];
+      const s = this.g.shoes.find((sh) => sh.lane === (i ? 'R' : 'L'));
+      if (s) {
+        const x = s.xFrac * L.W, y = this.yFor((s.nearCm + s.farCm) / 2, L);   // where the shoe really is in its lane
+        // A step snaps (the ring is the live calibration check); only box jitter under the deadband is smoothed.
+        if (ring.visible && Math.hypot(x - ring.x, y - ring.y) < RING_SNAP_PX) ring.setPosition(ring.x + (x - ring.x) * k, ring.y + (y - ring.y) * k);
+        else ring.setPosition(x, y);
+      }
       ring.setVisible(fresh && !!s);
-      if (s) ring.setPosition(s.xFrac * L.W, this.yFor((s.nearCm + s.farCm) / 2, L));   // where the shoe really is, lane or not
     });
     const g = this.g;
     const h = this.hud;
     h.clear();
 
-    const gated = !out.pace.ok && g.t > 3;
+    const gated = out.pace.gated;
     const beat = g.t * (g.limits.minCadence + 20) / 60;
     const next = {};
     for (const th of g.things) if (!th.result && (!next[th.lane] || th.distCm < next[th.lane].distCm)) next[th.lane] = th;
@@ -1019,7 +1029,7 @@ class Play extends Phaser.Scene {
     if (g.t >= this.nextGardenUpdate) {
       this.nextGardenUpdate = g.t + .2;
       const act = ACTS[g.act];
-      publishGarden({ cadence: out.pace.cadence, act: g.act, paceOk: out.pace.ok || g.t <= 3,
+      publishGarden({ cadence: out.pace.cadence, act: g.act, paceOk: !out.pace.gated,
         paused: this.paused, title: `${act?.title || ''}${g.round > 1 && g.act !== 'walk' ? ` · round ${g.round}` : ''}`, score: `${g.score} pts${g.streak >= 5 ? '  x2' : ''}`,
         progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · speed x${speedScale(g).toFixed(1)}${shoesLive(g) ? ' · shoes' : ''} · form ${Math.round(out.form * 100)}%${out.pace.asym !== null ? ` · even L/R ${Math.max(0, Math.round(100 - out.pace.asym * 100))}%` : ''}${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
         coachColor: g.t < this.feedbackUntil ? this.feedbackColor : '',
@@ -1056,7 +1066,7 @@ class Home extends Phaser.Scene {
     const lines = [
       `Score ${s.score}   ·   Form ${s.formPct}%`,
       `${s.steps} steps   ·   ${s.cadence} steps/min`,
-      `Flowers stomped ${s.stompPct ?? 0}%   ·   Seeds dodged ${s.dodgePct ?? 0}%`,
+      `Flowers stomped ${s.stompPct ?? 0}%${s.dodgePct == null ? '' : `   ·   Seeds dodged ${s.dodgePct}%`}`,
       s.shoeMode ? `Long steps  left ${s.highLiftAvgCm?.L ?? '-'}   right ${s.highLiftAvgCm?.R ?? '-'}  (swing, camera)`
         : `High steps  left ${s.highLiftAvgCm?.L ?? '-'} cm   right ${s.highLiftAvgCm?.R ?? '-'} cm`,
     ];
@@ -1270,6 +1280,8 @@ window.zombieGame = new Phaser.Game({
   // RESIZE measures the parent's transformed bounds and would shrink the board twice.
   // Size the source canvas explicitly; Warp alone maps it to the walking zone.
   scale: { mode: Phaser.Scale.NONE, ...FIELD },
+  // A stalled frame is bounded here (Phaser's defaults, pinned): the rules get at most 200 ms per step, never a leap.
+  fps: { min: 5, smoothStep: true },
   scene: [Preload, Boot, ZonePreview, Title, Play, Home],
 });
 

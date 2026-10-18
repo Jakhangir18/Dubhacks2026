@@ -19,14 +19,14 @@ DEFAULT_LIMITS: dict[str, Any] = {
     "minCadence": 80,
     "walkSeconds": 45,
     "gardenPlants": 12,
-    "stormSeeds": 10,
+    "stormSeeds": 0,     # 0 leaves the seed act out: flowers only
     "liftCm": 10,
     "liftRange": [6, 18],
     "spacingCm": 140,
     "spacingRange": [90, 220],
     "sessionMinutes": 17,
     "speedScale": 0.7,   # how fast plants come, times the walking speed; 1 felt too fast on the pad
-    "rounds": 2,         # flowers then seeds, this many times, before home
+    "rounds": 2,         # flowers (then seeds, when there are any), this many times, before home
 }
 
 
@@ -52,8 +52,9 @@ def clean_limits(raw: dict[str, Any]) -> dict[str, Any]:
     out["liftCm"] = min(max(out["liftCm"], out["liftRange"][0]), out["liftRange"][1])
     out["spacingCm"] = min(max(out["spacingCm"], out["spacingRange"][0]), out["spacingRange"][1])
     out["speedScale"] = min(max(out["speedScale"], 0.3), 2.0)
-    for key in ("walkSeconds", "gardenPlants", "stormSeeds", "minCadence", "rounds"):
+    for key in ("walkSeconds", "gardenPlants", "minCadence", "rounds"):
         out[key] = max(1, round(out[key]))
+    out["stormSeeds"] = max(0, round(out["stormSeeds"]))
     return out
 
 

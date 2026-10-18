@@ -19,7 +19,9 @@ BACKBOARD_URL = "https://app.backboard.io/api/threads/messages"
 COACH_SYSTEM = (
     "You are the voice of a warm physical-therapy coach inside a walking game for children, teenagers and adults. "
     "The player walks in place. Act 1: keep a steady pace. Act 2: high-step onto flowers with the matching foot. "
-    "Act 3: lift the foot a seed is aiming at. You get a summary of the last stretch and the therapist's limits. "
+    "Act 3 (only when the summary says seedAct is true): lift the foot a seed is aiming at. "
+    "You get a summary of the last stretch and the therapist's limits. Flowers come an odd number of steps apart "
+    "(the summary's beatCm, in steps of stepCm): change spacingCm by two steps or leave it, a smaller change does nothing. "
     "Reply with JSON only: {\"say\": \"<one cue, at most 12 words, one instruction, about a target in the game, "
     "saying what to do, encouraging>\", \"params\": {\"liftCm\": <number>, \"spacingCm\": <number>}}. "
     "Make it easier (lower liftCm, larger spacingCm) when success is below 60 percent, harder above 85 percent, "
@@ -87,7 +89,10 @@ def rule_cue(summary: dict[str, Any], limits: dict[str, Any], side: dict[str, An
     # Adjust from the game's current targets (the summary carries them), not from the base limits,
     # so repeated cues keep stepping in the same direction until the range stops them.
     lift = float(summary.get("liftTargetCm") or limits.get("liftCm", 10))
-    spacing = float(summary.get("spacingCm") or limits.get("spacingCm", 140))
+    spacing = float(summary.get("beatCm") or summary.get("spacingCm") or limits.get("spacingCm", 140))
+    # The game spaces flowers an odd number of steps apart, so a change smaller than two steps does nothing: one notch
+    # of spacing is two steps. The game reports its step (its plant speed may be set on the laptop, not here).
+    notch = 2 * float(summary.get("stepCm") or 50 * float(limits.get("speedScale") or 0.7))
     if cadence < float(limits.get("minCadence", 80)):
         return {"say": "Keep stepping, a little faster, nice and steady", "params": {}}
     if asym is not None and asym > 20:
@@ -97,9 +102,9 @@ def rule_cue(summary: dict[str, Any], limits: dict[str, Any], side: dict[str, An
         pct = summary.get("stompPct")
         if pct is not None and pct < 60:
             say = "Step right onto the glowing flower" if shoes else "Knee up high, then stomp the glowing flower"
-            return {"say": say, "params": {"spacingCm": spacing + 30}}
+            return {"say": say, "params": {"spacingCm": spacing + notch}}
         if pct is not None and pct > 85:
-            return {"say": "Great stomping! Flowers are coming faster", "params": {"spacingCm": spacing - 20}}
+            return {"say": "Great stomping! Flowers are coming faster", "params": {"spacingCm": spacing - notch}}
     if act == "storm":
         pct = summary.get("dodgePct")
         if pct is not None and pct < 60:
@@ -148,7 +153,9 @@ async def coach(summary: dict[str, Any], limits: dict[str, Any], side: dict[str,
 # ---------------------------------------------------------------- plan, memory, report
 def describe(summary: dict[str, Any]) -> str:
     return (f"{summary.get('seconds', 0)} s, {summary.get('steps', 0)} steps, cadence {summary.get('cadence')} per min, "
-            f"flowers {summary.get('stompPct')}%, seeds {summary.get('dodgePct')}%, form {summary.get('formPct')}%, "
+            f"flowers {summary.get('stompPct')}%, "
+            + ("no seed act, " if summary.get("seedAct") is False else f"seeds {summary.get('dodgePct')}%, ")
+            + f"form {summary.get('formPct')}%, "
             f"high-step lift L {summary.get('highLiftAvgCm', {}).get('L')} cm R {summary.get('highLiftAvgCm', {}).get('R')} cm"
             + ("; shoe mode: the lift numbers are forward step swings seen by the camera, not heights" if summary.get("shoeMode") else "")
             + (f"; side camera gait: {json.dumps(summary['sideCamera'])[:600]}" if summary.get("sideCamera") else ""))
@@ -191,7 +198,8 @@ async def report(summary: dict[str, Any], recent: list[dict[str, Any]]) -> dict[
     out = await gemini_json(REPORT_SYSTEM, json.dumps({"today": describe(summary), "earlier": history}))
     if out and isinstance(out.get("note"), str):
         return {"note": out["note"], "source": "gemini"}
-    best = "lifting over the seeds" if (summary.get("dodgePct") or 0) >= (summary.get("stompPct") or 0) else "stomping the flowers"
+    dodge = summary.get("dodgePct")
+    best = "lifting over the seeds" if dodge is not None and dodge >= (summary.get("stompPct") or 0) else "stomping the flowers"
     return {"note": f"Steady walking at {summary.get('cadence')} steps a minute with {summary.get('formPct')}% good form. "
                     f"Strongest today: {best}. Next time, practise even left and right steps. Great job!",
             "source": "rules"}
