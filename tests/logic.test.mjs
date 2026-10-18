@@ -115,9 +115,9 @@ test('the beat snaps the spacing to the nearest odd number of steps, ties down, 
   const beat = (spacingCm, speedScale = 0.7) => beatCm(newGame({ spacingCm, speedScale }));
   assert.equal(beat(140), 3 * 35);          // 4 steps is a tie: 3
   assert.equal(beat(120, 1), 3 * 50);       // 2.4 steps: 3, never 1
-  assert.equal(beat(100, 1), 1 * 50);       // 2 steps is a tie: 1
+  assert.equal(beat(100, 1), 3 * 50);       // 2 steps would be a tie with 1: the floor of 3 holds
   assert.equal(beat(220), 7 * 35);          // 6.3 steps: 7
-  assert.equal(beat(90, 2), 1 * 100);       // under one step: 1
+  assert.equal(beat(90, 2), 3 * 100);       // under one step: the floor of 3
   let last = 0;
   for (let cm = 90; cm <= 220; cm += 5) { assert.ok(beat(cm) >= last); last = beat(cm); }
 });

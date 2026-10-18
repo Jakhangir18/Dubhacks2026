@@ -331,7 +331,8 @@ function openReport(id) {
 // The belt keeps moving after the game, so walking would start the next game before the walk review arrives: a
 // review on its way holds that restart, and a finished one gets REVIEW_READ_MS on screen. R always plays at once.
 const REVIEW_READ_MS = 12000;
-function reviewHolds(data) {
+function reviewHolds(data, shownAt = 0) {
+  if (data.sessionId && data.result === undefined && performance.now() - shownAt < 30000) return true;   // the save is still out
   if (data.gaitStatus === 'waiting' || data.gaitStatus === 'reviewing') return true;
   return data.gaitShownAt !== undefined && performance.now() - data.gaitShownAt < REVIEW_READ_MS;
 }
@@ -1183,7 +1184,7 @@ class Home extends Phaser.Scene {
     const steps = [];
     const shownAt = performance.now();
     this.offFoot = onFoot((ev) => {
-      if (doubleCamera(ev) || ev.kind !== 'strike' || performance.now() - shownAt < 8000 || reviewHolds(data)) return;
+      if (doubleCamera(ev) || ev.kind !== 'strike' || performance.now() - shownAt < 8000 || reviewHolds(data, shownAt)) return;
       steps.push(performance.now());
       while (steps.length && performance.now() - steps[0] > 3000) steps.shift();
       if (steps.length >= 4) playAgain();
@@ -1322,7 +1323,7 @@ class Home extends Phaser.Scene {
         if (review.status === 'done' && data.gaitShownAt === undefined) data.gaitShownAt = performance.now();
         if (review.status === 'done' && !data.reportOpened) {
           data.reportOpened = true;
-          data.reportBlocked = !openReport(id);
+          data.reportBlocked = true;   // never pop the report over the floor: P opens it, on the laptop
           if (this.sys.isActive()) this.showGait();
         }
         return;

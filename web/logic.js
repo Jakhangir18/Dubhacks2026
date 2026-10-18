@@ -289,7 +289,7 @@ function spawnOnStep(g, foot) {
 // moves one stride times the plant speed per step): 3 steps at the defaults.
 export function beatCm(g) {
   const stepCm = RULES.strideCm * speedScale(g);
-  const steps = Math.max(1, 2 * Math.ceil(g.limits.spacingCm / stepCm / 2 - 1) + 1);
+  const steps = Math.max(3, 2 * Math.ceil(g.limits.spacingCm / stepCm / 2 - 1) + 1);   // never denser than step, step, thing
   return steps * stepCm;
 }
 
@@ -320,7 +320,9 @@ function median(a) {
 export const SPEED_RANGE = [0.3, 2];
 export function speedScale(g) {
   const v = Number(g.limits.speedScale);
-  return Number.isFinite(v) ? Math.min(SPEED_RANGE[1], Math.max(SPEED_RANGE[0], v)) : LIMITS.speedScale;
+  const base = Number.isFinite(v) ? Math.min(SPEED_RANGE[1], Math.max(SPEED_RANGE[0], v)) : LIMITS.speedScale;
+  // Each round after the first is a little faster; the therapist's setting itself is never changed.
+  return Math.min(SPEED_RANGE[1], base + Math.max(0, (g.round || 1) - 1) * RULES.roundSpeedUp);
 }
 
 export function needCm(g, kind, foot) {
@@ -448,10 +450,9 @@ function nextAct(g, out) {
   }
   const { rounds, seeds } = plan(g);
   const roundEnd = seeds ? 'storm' : 'garden';
-  if (g.act === roundEnd && g.round < rounds) {   // another round, a little faster
+  if (g.act === roundEnd && g.round < rounds) {   // another round, a little faster (speedScale reads g.round)
     g.round += 1;
     g.act = 'garden';
-    g.limits.speedScale = Math.min(SPEED_RANGE[1], speedScale(g) + RULES.roundSpeedUp);
   }
   else g.act = { walk: 'garden', garden: seeds ? 'storm' : 'home', storm: 'home' }[g.act];
   g.actT = 0;

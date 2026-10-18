@@ -504,7 +504,7 @@ def validate(out: dict[str, Any], view: dict[str, Any], limits: dict[str, Any],
         kept = [x for x in (cited(i, extra) for i in raw) if x and keep(x)][:n]
         return kept if kept or not raw else None   # an honest empty list stands; a list that failed every check does not
 
-    gait_only = lambda f: not (poor and all(known[i]["group"].startswith("gait") for i in f["evidence"]))
+    gait_only = lambda f: not (poor and any(known[i]["group"].startswith("gait") for i in f["evidence"]))   # a poor walk: no gait claims at all
     put("overview", _text(out.get("overview"), 700))
     put("strengths", items("strengths", 4, keep=gait_only), empty_ok=True)
     put("findings", items("findings", 6, finding, gait_only), empty_ok=True)

@@ -786,7 +786,11 @@ class SessionFollower:
         if not rows:
             return
         res = slim(summarize(rows, rows[-1]["t"] - LIVE_SPAN, rows[-1]["t"]))
-        if res is None:
+        if res is None:   # nothing measurable yet: still check in, so the game knows a side camera follows this walk
+            try:
+                post_json(f"{self.server}/api/gait", {"player": cur["player"], "source": "side-camera", "summary": None, "sessionId": cur["id"]}, timeout=5)
+            except Exception:
+                pass
             return
         try:
             post_json(f"{self.server}/api/gait", json_safe({"player": cur["player"], "source": "side-camera",

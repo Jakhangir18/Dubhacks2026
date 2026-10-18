@@ -213,7 +213,10 @@ async def remember(player: dict[str, Any], summary: dict[str, Any]) -> str | Non
 
 
 async def report(summary: dict[str, Any], recent: list[dict[str, Any]]) -> dict[str, Any]:
-    history = [describe(r["summary"]) for r in recent[:5]]   # the five latest only
+    # The five latest only. Earlier side-camera numbers travel with them only while today's consent is on (today's
+    # summary carries sideCamera only then), so a withdrawn consent also silences the stored history.
+    share = "sideCamera" in summary
+    history = [describe({k: v for k, v in r["summary"].items() if share or k != "sideCamera"}) for r in recent[:5]]
     # The save waits for the note and the reward; the game waits 25 s in all, so 10 + 6 s leaves room.
     out = await gemini_json(REPORT_SYSTEM, json.dumps({"today": describe(summary), "earlier": history}), timeout=10)
     if out and isinstance(out.get("note"), str):

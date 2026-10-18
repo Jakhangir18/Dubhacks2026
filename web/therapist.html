@@ -365,7 +365,8 @@
         $('lv-state').textContent = running ? `${active.player} is walking` : 'no game running';
         $('lv-state').parentElement.classList.toggle('off', !running);
         $('lv-sub').textContent = running ? `${Math.round(active.serverTime - active.startedAt)} s since the start` : 'the game opens a session when the walk starts';
-        const log = await api('/api/log?n=120');
+        const since = active.startedAt || 0;   // this walk only, never an earlier game's rows
+        const log = (await api('/api/log?n=120')).filter((r) => (r.ts || 0) >= since);
         const pace = [...log].reverse().find((r) => r.what === 'pace');
         const things = log.filter((r) => r.what === 'flower' || r.what === 'seed');
         const hits = things.filter((r) => r.result === 'hit').length;
@@ -377,13 +378,13 @@
         const name = active.player || $('players').value;
         const p = name ? await api(`/api/player/${encodeURIComponent(name)}`) : null;
         const g = p?.gait, s = g?.summary;
-        const age = g ? Math.round(Date.now() / 1000 - g.ts) : null;
+        const age = g && g.ts ? Math.round(Date.now() / 1000 - g.ts) : null;   // a used-up walk has no ts
         const near = s ? ((s.seen_frames?.L ?? 0) >= (s.seen_frames?.R ?? 0) ? 'L' : 'R') : null;   // the leg nearer the phone
         const knee = s?.flexion?.[near], stride = s?.stride?.[near], cvv = s?.stride_cv?.[near];
         $('lv-knee').textContent = knee != null ? `${Math.round(180 - knee)}°` : '–';   // the camera reports the knee angle, 180 = straight
-        $('lv-stride').textContent = stride != null ? `${stride.toFixed(2)} s${cvv != null ? ` · ±${Math.round(cvv * 100)}%` : ''}` : '–';
-        $('lv-cam').textContent = !g ? 'not seen yet' : age < 40 ? `live · ${age} s ago` : `last seen ${Math.round(age / 60)} min ago`;
-        $('lv-cam').parentElement.classList.toggle('off', !g || age >= 40);
+        $('lv-stride').textContent = stride != null ? `${stride.toFixed(2)} s${cvv != null ? ` · ±${Math.round(cvv)}%` : ''}` : '–';   // cv is already a percent
+        $('lv-cam').textContent = age === null ? 'not seen yet' : age < 40 ? `live · ${age} s ago` : `last seen ${Math.round(age / 60)} min ago`;
+        $('lv-cam').parentElement.classList.toggle('off', age === null || age >= 40);
       } catch { $('lv-state').textContent = 'live view: server not reachable'; }
     }
     setInterval(() => live().catch(() => {}), 3000); live().catch(() => {});
