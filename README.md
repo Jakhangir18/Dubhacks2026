@@ -4,6 +4,50 @@
 
 DubHacks '26, University of Washington, Oct 17–18 2026.
 
+## Technologies we use and how
+
+Each part below says what it does for the player or the therapist, where it lives, and whether it runs by default.
+
+### Google Gemini
+- The coach: a short cue during the walk and a spoken summary in the rest between rounds, with game settings clamped to the therapist's limits (`server/therapist.py`, one JSON call helper in `server/gemini.py`).
+- The gait review after a walk, written from the side camera's numbers; every point must cite a measured metric, and suggestions are clamped to the therapist's ranges (`server/gait_review.py`).
+- Maya's chat on the dashboard: answers about the latest walk from its numbers, its review and up to four annotated side-camera leg photos sent as images (`server/maya.py`). The coach's voice is Gemini text-to-speech, cached per line, with the player's name removed (`server/tts.py`).
+- Status: on when `GEMINI_API_KEY` is set; rule-based text and the browser's voice otherwise. Side-camera numbers, the review and the photos go to Gemini only with the player's AI review consent; the coach's cue always receives the game's own score numbers.
+
+### Backboard
+- Long-term memory per player: after each saved walk the session result is written to that player's Backboard assistant, and the next session's greeting, focus and coach cues read it back (`backboard`, `plan`, `recall`, `remember` in `server/therapist.py`; called from `server/api.py`).
+- Status: on when `BACKBOARD_API_KEY` is set; without it the plan comes from the stored sessions.
+
+### Perceptron
+- A second look at the steps the game scores: a few timestamped frames of the feet (from the overhead camera, or the game camera cropped below the knees) go to Perceptron Mk1.5, which answers whether the foot really landed on the flower; a form check runs every 10 s and a session report at the end of a walk (`server/perceive.py`, `web/perceive.js`).
+- The agreement count goes into the saved session, the game's Home screen, the session list in `web/therapist.html` and Maya's context.
+- Status: only with the player's Perceptron consent switched on in the panel and `PERCEPTRON_API_KEY` set; otherwise nothing is sent.
+
+### MediaPipe Pose
+- Side camera: `gait.py` runs MediaPipe Pose on the phone's frames, measures knee bend, stride, step time and left-right balance, streams a live skeleton to the dashboard, and sends "moments" (knee stayed low, left and right differ, strong step) with an annotated leg photo; the server stores them per session in `server/moments.py`, only with the AI review consent.
+- An optional in-browser foot tracker (`web/vision.js`, MediaPipe Tasks) lets the game use its own camera.
+
+### YOLO-World
+- Overhead camera above the belt: `feet.py` finds each shoe with YOLO-World (`yolov8s-worldv2`, run locally) and sends shoe positions and a small preview picture to the server, so the game knows which flower each foot landed on. Coloured marks and a bright-blob fallback cover a dark room.
+
+### Next.js
+- The dashboard for the player, parent and therapist (`src/`): live cameras and skeleton, game controls, each walk with its review and moments, Maya's chat, therapist settings and consent. It is exported statically and served by the game server at `/app/` (`next.config.ts`, `mount_app` in `server/app.py`).
+
+### FastAPI
+- The game server (`server/app.py`, `server/api.py`): serves the game and the dashboard, relays camera events over a WebSocket, stores players, limits and sessions, and runs every AI call above with a rule-based fallback.
+
+### Phaser
+- The projected game (`web/game.js`, Phaser 3.80.1 from `web/vendor/`; rules in `web/logic.js`): scenes, flowers, scoring at the hit line, the coach's lines and the end-of-walk screen. A short clip of the walk (about 15 s) with a QR code is recorded only when the game is opened with `?share=1` (`web/clip.js`).
+
+### Tailscale Funnel
+- The public link: Tailscale Funnel forwards HTTPS to the game server so judges and phones outside the tailnet can open the dashboard and clips. The server limits remote game commands to 5 a second because this link is public (`CONTROL_PER_S` and `clip_url` in `server/app.py`).
+
+### MongoDB Atlas
+- `server/store.py` keeps players, limits and sessions in MongoDB Atlas when `MONGODB_URI` is set. Status: code ready, not connected in the live demo; the live server uses the local JSON file (`data/store.json`).
+
+### Visa
+- A reward the parents chose is "bought" after a completed walk (`visa_checkout` in `server/api.py`). Status: mock only; no payment is made and the receipt says so.
+
 ## The problem
 
 - About 1 in 345 US children has cerebral palsy (CDC), and 5% to 6% of school-aged children have developmental coordination disorder (CMAJ 2015). Many more children and teens get movement exercises after sports injuries.
@@ -55,7 +99,7 @@ Sources and more numbers: [docs/research/kids-evidence.md](docs/research/kids-ev
 | Results dashboard | `dashboard/` (React, Vite) | Each walk with its full review and the change since the last session. Served by the game server at `/dashboard/` once built; the panel embeds it. |
 | Printable report | `web/report.html` | The same review on one page, for printing or sharing. |
 | Camera window | `web/camera.html` | Shoe calibration (click the projected corners in the camera picture) and the event log, for the laptop screen. |
-| Family app prototype | `src/` (Next.js) | A design prototype of a family-facing app: tonight's walk, progress, and Maya the AI therapist, with Higgsfield art and `motion` animations. It runs on its own sample data in the browser and is not yet connected to the game server. |
+| Dashboard app | `src/` (Next.js) | The player, parent and therapist dashboard: live cameras, game controls, walks with their review and moments, Maya's chat, settings and consent. Talks to the game server's API and WebSocket; its static export is served at `/app/`. |
 
 Interfaces between the parts (events, sessions, the gait review): [vision/CONTRACT.md](vision/CONTRACT.md).
 
@@ -65,7 +109,7 @@ Interfaces between the parts (events, sessions, the gait review): [vision/CONTRA
 
 | Track | What we built |
 |---|---|
-| **MLH: Best Use of Gemini API** | The coach's thinking and voice: a tip every 20 seconds, coaching between rounds, a review after every walk written from the gait numbers, notes for each reader, and the coach speaking in Gemini's voice. Gemini gets numbers only, with the family's consent, and every point it makes must be backed by a measurement. |
+| **MLH: Best Use of Gemini API** | The coach's thinking and voice: a tip every 20 seconds, coaching between rounds, a review after every walk written from the gait numbers, notes for each reader, and the coach speaking in Gemini's voice. Side-camera numbers and Maya's leg photos reach Gemini only with the family's consent, and every point in a review must be backed by a measurement. |
 | **MLH: Best Use of Backboard** | A personal memory for each player. After each walk it stores how it went and what to work on; the next session opens with that focus, across sessions and devices. |
 | **Perceptron** | A second pair of eyes: Perceptron checks the steps the game scores ("did the foot really land on the flower?"), watches that the steps stay steady, and sums up each walk. Its agreement with the game shows on the Home screen and in the panel. It sees only pictures of the feet and lower legs, never a face, and only with consent. |
 
@@ -134,4 +178,4 @@ npm test                             # game rules (web/logic.js)
 
 - A tool for the therapist and the family: not a replacement for therapy and not a medical device. Wording stays inside the FDA general wellness terms (coordination, balance, strength, endurance, general mobility); no disease names or recovery claims in the app.
 - On the walking pad: teens and adults within the pad's rated age (14+ on KingSmith manuals), with a person beside them, a low speed and a stop button.
-- Gemini receives numbers only, and only with the family's consent; the player's name is taken out of anything spoken through Gemini's voice. Perceptron receives pictures of the feet and lower legs only, also only with consent. The server keeps no video; `gait.py`'s own recordings stay on the laptop. Under COPPA a child's video and movement patterns count as personal information.
+- Gemini always receives the game's score numbers for the coach's cues; side-camera gait numbers and the annotated leg photos for Maya's chat go to it only with the family's consent. The player's name is taken out of anything spoken through Gemini's voice. Perceptron receives pictures of the feet and lower legs only, also only with consent. The server keeps no video; `gait.py`'s own recordings stay on the laptop. Under COPPA a child's video and movement patterns count as personal information.
