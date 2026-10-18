@@ -1,10 +1,10 @@
 "use client"
 
-import { useEffect, useState, type ReactNode } from "react"
+import { useSyncExternalStore, type ReactNode } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Bell, House, Moon, Play, Sparkles, Sun, TrendingUp } from "lucide-react"
-import { useTheme } from "next-themes"
+import { Bell, House, Play, Sparkles, TrendingUp } from "lucide-react"
+import { motion } from "motion/react"
 import { Logo } from "@/components/logo"
 import { ContactDialog } from "@/components/contact-dialog"
 import { KitSheet } from "@/components/kit-sheet"
@@ -17,52 +17,38 @@ import { cn } from "cn"
 
 const NAV = [
   { href: "/", label: "Overview", icon: House },
-  { href: "/play", label: "Play & practice", icon: Play },
+  { href: "/play", label: "Walk home", icon: Play },
   { href: "/progress", label: "My progress", icon: TrendingUp },
-  { href: "/therapist", label: "AI therapist", icon: Sparkles },
+  { href: "/therapist", label: "Maya", icon: Sparkles },
 ]
 
-function ThemeToggle() {
-  const { resolvedTheme, setTheme } = useTheme()
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
-  const dark = mounted && resolvedTheme === "dark"
-  return (
-    <button
-      type="button"
-      onClick={() => setTheme(document.documentElement.classList.contains("dark") ? "light" : "dark")}
-      className="grid size-10 place-items-center rounded-full border border-border bg-card text-foreground shadow-sm transition hover:bg-muted"
-      aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
-    >
-      <Sun className="hidden size-4 dark:block" />
-      <Moon className="size-4 dark:hidden" />
-    </button>
-  )
-}
+const noopSubscribe = () => () => {}
 
 export function PageActions() {
   const { setContactOpen, setNotesOpen, derived } = useStride()
-  const [ready, setReady] = useState(false)
-  useEffect(() => setReady(true), [])
+  // False during server render and hydration, true after: keeps the badge out of the SSR markup.
+  const ready = useSyncExternalStore(noopSubscribe, () => true, () => false)
   const unread = ready ? derived.unreadCount : 0
   return (
     <div className="flex items-center gap-2">
       <button
         type="button"
         onClick={() => setNotesOpen(true)}
-        className="relative grid size-10 place-items-center rounded-full border border-border bg-card text-foreground shadow-sm transition hover:bg-muted"
+        className="relative grid size-10 place-items-center rounded-full border-[2.5px] border-[#2c4639] bg-[#0d171c] text-foreground transition hover:-translate-y-0.5 hover:border-[#9cff5a]"
         aria-label={unread ? `Updates, ${unread} unread` : "Updates"}
       >
         <Bell className="size-4" />
         {unread > 0 ? (
-          <span className="absolute right-2.5 top-2.5 size-2 rounded-full bg-orange ring-2 ring-card" />
+          <>
+            <span className="absolute right-2 top-2 size-2.5 animate-ping rounded-full bg-orange" />
+            <span className="absolute right-2 top-2 size-2.5 rounded-full bg-orange ring-2 ring-[#0d171c]" />
+          </>
         ) : null}
       </button>
-      <ThemeToggle />
       <Button
         type="button"
         variant="outline"
-        className="h-10 rounded-full bg-card px-4 text-sm font-semibold text-foreground shadow-sm hover:bg-muted dark:bg-card dark:hover:bg-muted"
+        className="h-10 rounded-full border-[2.5px] border-[#ff3d8b] bg-[#2a1220] px-4 text-sm font-semibold text-foreground shadow-[3px_3px_0_#9c2457] hover:bg-[#3a1830] dark:bg-[#2a1220] dark:hover:bg-[#3a1830]"
         onClick={() => setContactOpen(true)}
       >
         <span className="hidden sm:inline">Contact care team</span>
@@ -86,16 +72,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex min-h-screen max-w-[1440px]">
-        <Sidebar />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex items-center justify-between gap-3 px-4 py-3 lg:hidden">
-            <Logo />
-            <PageActions />
-          </header>
-          <main className="flex-1 px-4 pb-28 pt-2 sm:px-6 lg:px-8 lg:pb-12 lg:pt-7">{children}</main>
-        </div>
+    <div className="relative min-h-screen bg-background text-foreground">
+      <NightSky />
+      <div className="relative mx-auto max-w-[1280px] px-4 sm:px-6">
+        <TopBar />
+        <main className="pb-28 pt-2 lg:pb-12">{children}</main>
       </div>
       <MobileNav />
       <ContactDialog />
@@ -106,23 +87,27 @@ export function AppShell({ children }: { children: ReactNode }) {
   )
 }
 
-function Sidebar() {
+/** Fixed starry backdrop with soft violet and teal glows. */
+function NightSky() {
+  return (
+    <div className="pointer-events-none fixed inset-0" aria-hidden="true">
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_85%_0%,rgba(164,107,255,0.16),transparent_45%),radial-gradient(ellipse_at_0%_100%,rgba(45,226,196,0.10),transparent_50%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(rgba(255,255,255,0.55)_1px,transparent_1.5px)] [background-size:120px_120px] opacity-40 [animation:twinkle_5s_ease-in-out_infinite] motion-reduce:animate-none" />
+      <div className="absolute inset-0 bg-[radial-gradient(rgba(255,215,106,0.6)_1px,transparent_1.5px)] [background-position:60px_40px] [background-size:180px_180px] opacity-30 [animation:twinkle_7s_ease-in-out_infinite_1s] motion-reduce:animate-none" />
+    </div>
+  )
+}
+
+function TopBar() {
   const pathname = usePathname()
   const { state, derived, setKitOpen, setProfileOpen } = useStride()
   const kitReady = state.sensors.camera && state.sensors.trackpad
-  const kitLabel = kitReady
-    ? "All sensors connected"
-    : !state.sensors.camera && !state.sensors.trackpad
-      ? "Sensors need a check"
-      : !state.sensors.camera
-        ? "Camera needs a check"
-        : "Trackpad needs a check"
-
   return (
-    <aside className="sticky top-0 hidden h-dvh w-[248px] shrink-0 flex-col px-4 py-5 lg:flex">
-      <Logo />
-      <p className="mt-8 px-3 text-[11px] font-semibold tracking-[0.16em] text-muted-foreground">WORKSPACE</p>
-      <nav className="mt-2 grid gap-1" aria-label="Workspace">
+    <header className="flex items-center justify-between gap-3 py-4">
+      <Link href="/" aria-label="Zombie Walk Home, overview">
+        <Logo />
+      </Link>
+      <nav className="hidden gap-1 rounded-full border-[2.5px] border-[#2c4639] bg-[#0d171c] p-1 lg:flex" aria-label="Workspace">
         {NAV.map((item) => {
           const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)
           const Icon = item.icon
@@ -131,66 +116,46 @@ function Sidebar() {
               key={item.href}
               href={item.href}
               aria-current={active ? "page" : undefined}
-              className={cn(
-                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-[#41564a] transition hover:bg-white dark:text-[#c9ddd0] dark:hover:bg-white/8",
-                active && "bg-[#e5f3e8] text-forest hover:bg-[#e5f3e8] dark:bg-[#234233] dark:text-[#d8f3e4] dark:hover:bg-[#234233]",
-              )}
+              className="relative flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold"
             >
-              <Icon className="size-4" />
-              {item.label}
+              {active ? (
+                <motion.span
+                  layoutId="nav-pill"
+                  className="absolute inset-0 rounded-full bg-[#9cff5a]"
+                  transition={{ type: "spring", stiffness: 420, damping: 34 }}
+                />
+              ) : null}
+              <Icon className={cn("relative size-4", active ? "text-[#070b10]" : "text-white/60")} />
+              <span className={cn("relative", active ? "text-[#070b10]" : "text-white/75 hover:text-white")}>{item.label}</span>
             </Link>
           )
         })}
       </nav>
-      <div className="mt-auto grid gap-3">
+      <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={() => setKitOpen(true)}
-          className="rounded-2xl border border-border/80 bg-card p-3 text-left shadow-sm transition hover:border-forest/20"
+          className="hidden items-center gap-2 rounded-full border-[2.5px] border-[#2c4639] bg-[#0d171c] px-3 py-1.5 text-xs font-semibold text-white/80 transition hover:border-[#2de2c4] xl:flex"
         >
-          <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <span className={cn("size-2 rounded-full", kitReady ? "bg-[#3c9d62]" : "bg-orange")} />
-            Movement kit
+          <span className="relative flex size-2">
+            <span className={cn("absolute inline-flex size-full animate-ping rounded-full opacity-60", kitReady ? "bg-[#9cff5a]" : "bg-orange")} />
+            <span className={cn("relative inline-flex size-2 rounded-full", kitReady ? "bg-[#9cff5a]" : "bg-orange")} />
           </span>
-          <span className="mt-1 block text-xs text-muted-foreground">{kitLabel}</span>
-          <span className="mt-3 flex gap-1.5">
-            <KitPill label="Camera" on={state.sensors.camera} />
-            <KitPill label="Trackpad" on={state.sensors.trackpad} />
-          </span>
+          {kitReady ? "Kit ready" : "Check kit"}
         </button>
+        <div className="hidden sm:block">
+          <PageActions />
+        </div>
         <button
           type="button"
           onClick={() => setProfileOpen(true)}
-          className="flex items-center gap-3 rounded-2xl px-1 py-1 text-left transition hover:bg-white dark:hover:bg-white/8"
+          className="grid size-10 place-items-center rounded-full border-[2.5px] border-[#ffb21e] bg-[#2a1f0e] text-xs font-bold text-[#ffd76a] transition hover:-rotate-6"
+          aria-label={`${PATIENT.name}, level ${derived.playerLevel}`}
         >
-          <span className="grid size-9 place-items-center rounded-full bg-orange text-xs font-bold text-white">
-            {PATIENT.initials}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold text-foreground">{PATIENT.name}</span>
-            <span className="block text-xs text-muted-foreground">
-              Level {derived.playerLevel} · {state.xp.toLocaleString("en-US")} XP
-            </span>
-          </span>
-          <span className="px-1 text-lg tracking-widest text-muted-foreground" aria-hidden="true">
-            ···
-          </span>
+          {PATIENT.initials}
         </button>
       </div>
-    </aside>
-  )
-}
-
-function KitPill({ label, on }: { label: string; on: boolean }) {
-  return (
-    <span
-      className={cn(
-        "rounded-full px-2 py-0.5 text-[11px] font-medium",
-        on ? "bg-[#f3f6f2] text-[#41564a] dark:bg-white/10 dark:text-[#d5e6da]" : "bg-peach text-orange dark:bg-[#3a2c22] dark:text-[#f0a15a]",
-      )}
-    >
-      {label}
-    </span>
+    </header>
   )
 }
 
@@ -198,7 +163,7 @@ function MobileNav() {
   const pathname = usePathname()
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card/95 px-2 py-2 backdrop-blur lg:hidden"
+      className="fixed inset-x-3 bottom-3 z-30 rounded-[22px] border-[2.5px] border-[#2c4639] bg-[#0d171c]/95 px-2 py-2 shadow-[0_6px_0_#050809] backdrop-blur lg:hidden"
       aria-label="Workspace"
     >
       <ul className="grid grid-cols-4">
@@ -212,11 +177,11 @@ function MobileNav() {
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   "flex flex-col items-center gap-1 rounded-xl px-1 py-1.5 text-[11px] font-medium text-muted-foreground",
-                  active && "text-forest dark:text-[#8ed4b0]",
+                  active && "bg-[#9cff5a] text-[#070b10]",
                 )}
               >
                 <Icon className="size-4" />
-                {item.label === "Play & practice" ? "Practice" : item.label === "AI therapist" ? "Therapist" : item.label === "My progress" ? "Progress" : item.label}
+                {item.label === "Walk home" ? "Practice" : item.label === "AI therapist" ? "Therapist" : item.label === "My progress" ? "Progress" : item.label}
               </Link>
             </li>
           )

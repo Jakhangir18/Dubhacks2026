@@ -1,7 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react"
-import { PageActions } from "@/components/app-shell"
+import { BlurFade } from "@/components/ui/blur-fade"
 
 export function PageHeader({
   eyebrow,
@@ -15,18 +15,11 @@ export function PageHeader({
   extra?: ReactNode
 }) {
   return (
-    <div className="mb-6 flex items-start justify-between gap-4">
-      <div className="min-w-0">
-        {eyebrow ? (
-          <p className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground">{eyebrow}</p>
-        ) : null}
-        <h1 className="mt-1 text-[1.85rem] font-semibold tracking-tight text-foreground sm:text-4xl">{title}</h1>
-        {subtitle ? <p className="mt-1.5 max-w-xl text-sm leading-6 text-muted-foreground">{subtitle}</p> : null}
-        {extra}
-      </div>
-      <div className="hidden shrink-0 lg:block">
-        <PageActions />
-      </div>
-    </div>
+    <BlurFade delay={0.05} className="mb-6">
+      {eyebrow ? <p className="text-[11px] font-bold tracking-[0.2em] text-[#2de2c4]">{eyebrow}</p> : null}
+      <h1 className="font-display mt-1 text-4xl tracking-wide text-foreground sm:text-5xl">{title}</h1>
+      {subtitle ? <p className="mt-1.5 max-w-2xl text-base leading-7 text-white/70">{subtitle}</p> : null}
+      {extra}
+    </BlurFade>
   )
 }

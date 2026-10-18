@@ -64,7 +64,7 @@ export function TherapistView() {
         <div className="flex items-center gap-4">
           <Image
             src="/images/maya.jpg"
-            alt="Maya, the StrideBloom AI therapist"
+            alt="Maya, the Zombie Walk Home AI therapist"
             width={76}
             height={76}
             className="size-[72px] rounded-full object-cover"

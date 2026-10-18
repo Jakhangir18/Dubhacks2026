@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { ActivityView } from "@/components/activity-view";
 
 export const metadata: Metadata = {
-  title: "Sessions · StrideBloom",
+  title: "Sessions · Zombie Walk Home",
 };
 
 export default function ActivityPage() {

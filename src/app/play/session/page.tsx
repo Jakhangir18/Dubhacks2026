@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { SessionView } from "@/components/session-view";
 
 export const metadata: Metadata = {
-  title: "Session · StrideBloom",
+  title: "Session · Zombie Walk Home",
 };
 
 export default function SessionPage() {

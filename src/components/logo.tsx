@@ -1,15 +1,16 @@
+import { ZOMBIE } from "@/lib/sticker"
 import { cn } from "cn"
 
 export function Logo({ className }: { className?: string }) {
   return (
     <span className={cn("flex items-center gap-2.5", className)}>
-      <span className="grid size-8 place-items-center rounded-[10px] bg-forest text-white shadow-sm">
-        <svg viewBox="0 0 24 24" className="size-4" aria-hidden="true">
-          <path d="M5.5 19.5c6.2-.6 10.2-5.4 12.2-12.8-5.6.7-10.2 4.2-12.2 12.8Z" fill="currentColor" />
-          <path d="M8.2 16.8c2-2.6 4-4.6 6.8-6" fill="none" stroke="#14684a" strokeWidth="1.6" strokeLinecap="round" />
-        </svg>
+      <span className="grid size-11 place-items-center overflow-hidden rounded-2xl border-[2.5px] border-[#9cff5a] bg-[#12261a] shadow-[3px_3px_0_#4f8f22] transition hover:-rotate-6">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={ZOMBIE.portrait} alt="" className="size-9 object-contain" />
       </span>
-      <span className="text-[17px] font-extrabold tracking-tight text-orange">StrideBloom</span>
+      <span className="font-display text-outline text-[22px] leading-none tracking-wide text-[#ffd76a] sm:text-[24px]">
+        ZOMBIE WALK <span className="text-[#9cff5a]">HOME</span>
+      </span>
     </span>
   )
 }

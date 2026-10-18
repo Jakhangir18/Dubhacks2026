@@ -174,6 +174,6 @@ export const PATIENT = {
   firstName: "Jordan",
   initials: "JD",
   memberSince: "March 2026",
-  goal: "Even stride and a steady cadence after knee recovery.",
-  clinician: "StrideBloom care team",
+  goal: "Even stride and a steady cadence, one night at a time.",
+  clinician: "Zombie Walk Home care team",
 }

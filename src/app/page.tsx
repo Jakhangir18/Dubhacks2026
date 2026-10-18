@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { OverviewView } from "@/components/overview-view";
 
 export const metadata: Metadata = {
-  title: "Overview · StrideBloom",
+  title: "Overview · Zombie Walk Home",
 };
 
 export default function HomePage() {
