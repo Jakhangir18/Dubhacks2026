@@ -501,8 +501,8 @@ function Results({
           src={great ? ZOMBIE.cheer : ZOMBIE.idle}
           alt=""
           className="absolute -top-28 right-4 w-32 drop-shadow-[0_8px_14px_rgba(0,0,0,0.6)] sm:-top-36 sm:w-40"
-          initial={reduce ? false : { y: 60, opacity: 0, rotate: -10 }}
-          animate={reduce ? { opacity: 1 } : { y: [60, -18, 0, -10, 0], opacity: 1, rotate: [-10, 6, 0] }}
+          initial={{ y: 60, opacity: 0, rotate: -10 }}
+          animate={{ y: [60, -18, 0, -10, 0], opacity: 1, rotate: [-10, 6, 0] }}
           transition={{ duration: 1.1, delay: 0.25 }}
         />
         <p className="text-[11px] font-bold tracking-[0.16em] text-[#2de2c4]">

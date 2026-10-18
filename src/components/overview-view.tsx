@@ -31,9 +31,10 @@ export function HomeTrack({ progress }: { progress: number }) {
     <div className="relative mt-5 h-12" role="img" aria-label={`${progress}% of the way home`}>
       <div className="absolute inset-x-0 top-1/2 h-4 -translate-y-1/2 overflow-hidden rounded-full border-[2.5px] border-[#0b1a14] bg-[#14242a]">
         <motion.div
-          className="h-full rounded-full bg-[linear-gradient(90deg,#4f8f22,#9cff5a_80%,#ffb21e)]"
-          initial={reduce ? false : { width: "0%" }}
-          animate={{ width: `${progress}%` }}
+          className="h-full origin-left rounded-full bg-[linear-gradient(90deg,#4f8f22,#9cff5a_80%,#ffb21e)]"
+          style={{ width: `${progress}%` }}
+          initial={{ scaleX: 0 }}
+          animate={{ scaleX: 1 }}
           transition={{ duration: 1.6, ease: [0.22, 1, 0.36, 1], delay: 0.6 }}
         />
       </div>
@@ -42,9 +43,9 @@ export function HomeTrack({ progress }: { progress: number }) {
         src={ZOMBIE.walk}
         alt=""
         className="absolute top-1/2 h-14 -translate-x-1/2 -translate-y-[72%]"
-        initial={reduce ? false : { left: "0%" }}
-        animate={{ left: `${progress}%`, rotate: reduce ? 0 : [0, -5, 5, 0] }}
-        transition={{ left: { duration: 1.6, ease: [0.22, 1, 0.36, 1], delay: 0.6 }, rotate: { duration: 0.6, repeat: Infinity } }}
+        initial={{ left: "0%" }}
+        animate={{ left: `${progress}%`, rotate: [0, -5, 5, 0] }}
+        transition={{ left: { duration: reduce ? 0 : 1.6, ease: [0.22, 1, 0.36, 1], delay: reduce ? 0 : 0.6 }, rotate: { duration: 0.6, repeat: Infinity } }}
       />
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/art/house.png" alt="" className="absolute -top-3 right-0 h-14" />

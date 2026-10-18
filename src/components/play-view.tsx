@@ -97,9 +97,9 @@ function JourneyMap({ levels, onOpen }: { levels: OpenLevel[]; onOpen: (level: O
             strokeWidth={10}
             strokeLinecap="round"
             style={{ filter: "drop-shadow(0 0 8px rgba(156,255,90,0.6))" }}
-            initial={reduce ? false : { pathLength: 0 }}
+            initial={{ pathLength: 0 }}
             animate={{ pathLength: 1 }}
-            transition={{ duration: 1.8, ease: [0.22, 1, 0.36, 1], delay: 0.3 }}
+            transition={{ duration: reduce ? 0 : 1.8, ease: [0.22, 1, 0.36, 1], delay: reduce ? 0 : 0.3 }}
           />
         </svg>
 
@@ -123,7 +123,7 @@ function JourneyMap({ levels, onOpen }: { levels: OpenLevel[]; onOpen: (level: O
               onClick={() => onOpen(level)}
               className="group absolute -translate-x-1/2 -translate-y-1/2 outline-none"
               style={{ left: pct(node.x, MAP_W), top: pct(node.y, MAP_H) }}
-              initial={reduce ? false : { scale: 0, opacity: 0 }}
+              initial={{ scale: 0, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ type: "spring", stiffness: 420, damping: 16, delay: 0.25 + index * 0.07 }}
               whileHover={{ scale: 1.12 }}
@@ -133,8 +133,8 @@ function JourneyMap({ levels, onOpen }: { levels: OpenLevel[]; onOpen: (level: O
               {current ? (
                 <motion.span
                   className="absolute inset-[-14px] rounded-full border-[3px] border-[#ffb21e]"
-                  animate={reduce ? undefined : { scale: [1, 1.18, 1], opacity: [0.9, 0.2, 0.9] }}
-                  transition={{ duration: 1.8, repeat: Infinity }}
+                  animate={{ scale: [1, 1.18, 1], opacity: [0.9, 0.2, 0.9] }}
+                  transition={{ duration: 1.8, repeat: reduce ? 0 : Infinity }}
                 />
               ) : null}
               <span
@@ -177,13 +177,13 @@ function JourneyMap({ levels, onOpen }: { levels: OpenLevel[]; onOpen: (level: O
           src={ZOMBIE.walk}
           alt=""
           className="pointer-events-none absolute w-[17%] -translate-x-1/2 -translate-y-[88%] drop-shadow-[0_6px_10px_rgba(0,0,0,0.6)]"
-          initial={reduce ? false : { left: pct(from.x, MAP_W), top: pct(from.y, MAP_H) }}
+          initial={{ left: pct(from.x, MAP_W), top: pct(from.y, MAP_H) }}
           animate={{
             left: pct(here.x + (here.x < MAP_W / 2 ? -46 : 46), MAP_W),
             top: pct(here.y, MAP_H),
-            rotate: reduce ? 0 : [0, -6, 6, 0],
+            rotate: [0, -6, 6, 0],
           }}
-          transition={{ left: { duration: 1.6, delay: 0.9 }, top: { duration: 1.6, delay: 0.9 }, rotate: { duration: 0.6, repeat: Infinity } }}
+          transition={{ left: { duration: reduce ? 0 : 1.6, delay: reduce ? 0 : 0.9 }, top: { duration: reduce ? 0 : 1.6, delay: reduce ? 0 : 0.9 }, rotate: { duration: 0.6, repeat: Infinity } }}
         />
       </div>
     </div>

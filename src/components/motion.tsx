@@ -34,7 +34,6 @@ export function Parallax({ children, className, strength = 14 }: { children: Rea
 
 /** Letters drop in one by one with a springy overshoot; words never break mid-word. */
 export function PopTitle({ text, className, delay = 0 }: { text: string; className?: string; delay?: number }) {
-  const reduce = useReducedMotion()
   let order = 0
   return (
     <span className={className} aria-label={text}>
@@ -47,7 +46,7 @@ export function PopTitle({ text, className, delay = 0 }: { text: string; classNa
               <motion.span
                 key={`${char}-${charIndex}`}
                 className="inline-block"
-                initial={reduce ? false : { y: 28, opacity: 0, scale: 0.6, rotate: -8 }}
+                initial={{ y: 28, opacity: 0, scale: 0.6, rotate: -8 }}
                 animate={{ y: 0, opacity: 1, scale: 1, rotate: 0 }}
                 transition={{ type: "spring", stiffness: 520, damping: 18, delay: delay + index * 0.035 }}
               >
@@ -129,7 +128,6 @@ export function SpringBars({
   hotClass: string
   labelClass?: string
 }) {
-  const reduce = useReducedMotion()
   const peak = Math.max(...days.map((day) => day.minutes), 1)
   return (
     <div className="flex h-24 items-end gap-2">
@@ -145,9 +143,9 @@ export function SpringBars({
               <motion.div
                 className={cn("mx-auto w-full max-w-7 origin-bottom rounded-md", hot ? hotClass : barClass)}
                 style={{ height: `${height}%` }}
-                initial={reduce ? false : { scaleY: 0 }}
+                initial={{ scaleY: 0 }}
                 animate={{ scaleY: 1 }}
-                whileHover={reduce ? undefined : { scaleY: 1.08 }}
+                whileHover={{ scaleY: 1.08 }}
                 transition={{ type: "spring", stiffness: 260, damping: 16, delay: 0.25 + index * 0.06 }}
               />
             </div>
@@ -161,14 +159,13 @@ export function SpringBars({
 
 /** Sprite that bobs gently, like a game idle. */
 export function Bob({ src, className, delay = 0, alt = "" }: { src: string; className?: string; delay?: number; alt?: string }) {
-  const reduce = useReducedMotion()
   return (
     <motion.img
       src={src}
       alt={alt}
       draggable={false}
       className={cn("select-none", className)}
-      animate={reduce ? undefined : { y: [0, -6, 0], rotate: [0, -2, 0] }}
+      animate={{ y: [0, -6, 0], rotate: [0, -2, 0] }}
       transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut", delay }}
     />
   )
