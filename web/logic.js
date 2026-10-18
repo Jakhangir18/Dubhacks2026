@@ -14,7 +14,8 @@ export const LIMITS = {          // set by the therapist (Therapist panel); the 
   liftRange: [6, 18],            // the coach may move liftCm only inside this range
   spacingCm: 140,                // distance between plants
   spacingRange: [90, 220],
-  speedScale: 1,                 // how fast plants come, times the walking speed (0.3 to 2)
+  speedScale: 0.7,               // how fast plants come, times the walking speed (0.3 to 2); 1 felt too fast on the pad
+  rounds: 2,                     // flowers then seeds, this many times, before home
 };
 
 export const RULES = {
@@ -29,8 +30,26 @@ export const RULES = {
   beforeS: 0.6,                  // the lift may peak up to this long before arrival
   afterS: 0.35,                  // or this long after
   paceHorizonS: 5,               // cadence is measured over this window
+  // The world never freezes while the player walks: below the minimum pace it runs at this share of the minimum
+  // and act 1 fills at this rate; only standing still stops it. The pace shows in the form score and the cues.
+  slowFloor: 0.7,
+  slowFill: 0.5,
   stopAfterS: 1.5,               // no step for this long means the player stopped
   points: { stomp: 10, dodge: 15 },
+  // Shoe mode (feet.py boxes on the camera): a flower is smashed when a shoe covers it, a seed splats; a thing
+  // that passes the toes resolves the other way. Distances are world cm on the field.
+  shoeReachCm: 20,               // margin around the shoe's span when matching a thing
+  shoeFreshS: 0.3,               // a shoe sighting older than this is gone
+  shoeSwingCm: 40,               // a shoe must travel this far forward, then back, to count as one step (box jitter is under 20)
+  shoeStepMinS: 0.3,             // one landing per foot at most this often
+  swingCmPerLiftCm: 7.5,         // world cm of forward swing on the belt per cm of 'lift': a long or high step swings far
+  toeCm: 300,                    // how far past the hit line the toes are; the game sets it from its layout
+  shoeHoldS: 3,                  // shoes drive the game this long after the last sighting, then the lift rules return
+  shoeGapS: 1,                   // a lane unseen this long starts its swing tracking afresh
+  stanceS: 6,                    // the toe line follows where the shoes have stood over this window
+  stanceMarginCm: 30,            // a thing is gone only this far behind the standing feet
+  markReachCm: 90,               // a camera-seen foot-on-mark touches the nearest thing of that kind within this (the sock's centre is not the flower's)
+  markShowCm: 90,                // the coloured mark shows under a thing from this far before the hit line
 };
 
 export function rng(seed = 1) {
@@ -44,6 +63,7 @@ export function newGame(limits = {}, seed = 1) {
     rand: rng(seed),
     t: 0,
     act: 'walk',
+    round: 1,                    // which flowers-and-seeds round (1 to limits.rounds)
     actT: 0,                     // seconds spent in the current act
     walkGoodS: 0,                // act 1 seconds at a good pace
     travelledCm: 0,
@@ -59,6 +79,14 @@ export function newGame(limits = {}, seed = 1) {
     stats: { stomp: [0, 0], dodge: [0, 0], lifts: { L: [], R: [] }, steps: 0 },
     walkLifts: { L: [], R: [] },   // act 1 lifts: the player's normal step height
     base: null,                    // {L, R} normal step height, set when act 1 ends
+    shoeMode: false,               // shoes were seen in this game (for the report); shoesLive() says whether they drive it now
+    lastShoeT: null,
+    shoeMidX: null,                // the midpoint between the two shoes when both were last seen: the lane divider for one shoe
+    shoes: [],                     // latest sightings {lane, xFrac, nearCm, farCm, t}
+    stance: [],                    // recent {t, nearCm} of every sighting: where the feet really stand
+    shoeTrack: { L: { phase: 'back', max: -Infinity, min: Infinity, lastStrikeT: -Infinity }, R: { phase: 'back', max: -Infinity, min: Infinity, lastStrikeT: -Infinity } },
+    toeCm: RULES.toeCm,
+    toeBaseCm: null,               // the game's own toe line from its layout; the stance can only push it further
     log: [],                     // resolved things for the report and the UI
     actResolved: 0,              // things resolved in the current act (progress bar)
   };
@@ -80,9 +108,87 @@ export function addEvent(g, ev) {
     const arr = g.stats.lifts[e.foot];
     arr.push(e.liftCm);
     if (arr.length > 200) arr.shift();
-    if (g.act === 'walk') g.walkLifts[e.foot].push(e.liftCm);
+    if (g.act === 'walk') { g.walkLifts[e.foot].push(e.liftCm); if (g.walkLifts[e.foot].length > 200) g.walkLifts[e.foot].shift(); }
   }
   return e;
+}
+
+// ---------- shoes ----------
+// Sightings from the camera, already mapped onto the field: {xFrac: 0..1 across the field, nearCm, farCm} per shoe,
+// nearCm and farCm being the span of the shoe measured from the hit line (negative on the belt). Two shoes take the
+// lanes by order (left-most is the left foot); one shoe takes the side it is on. Each lane's forward-then-back
+// swing on the belt counts as a step, so the pace gate and the cadence work as with any other sensor.
+export function addShoes(g, shoes, t = g.t) {
+  const seen = shoes.filter((s) => [s.xFrac, s.nearCm, s.farCm].every(Number.isFinite)).slice(0, 2)
+    .sort((a, b) => a.xFrac - b.xFrac);
+  if (!seen.length) return [];   // a missed frame changes nothing; a sighting stays valid for shoeFreshS anyway
+  if (g.lastShoeT !== null && t - g.lastShoeT > RULES.shoeGapS) resetShoes(g);   // the feet were out of view
+  g.shoeMode = true;
+  g.lastShoeT = t;
+  // The toe line follows the feet: a calibration a little off must not make things vanish before they reach them.
+  for (const s of seen) g.stance.push({ t, nearCm: Math.max(s.nearCm, s.farCm) });
+  while (g.stance.length && t - g.stance[0].t > RULES.stanceS) g.stance.shift();
+  if (g.stance.length >= 10) {
+    const sorted = g.stance.map((s) => s.nearCm).sort((a, b) => a - b);
+    const rest = sorted[Math.floor(sorted.length * 0.25)];   // the feet at rest, not mid-swing
+    g.toeCm = Math.max(g.toeBaseCm ?? RULES.toeCm, -rest + RULES.stanceMarginCm);   // follows the feet both ways
+  }
+  if (seen.length === 2) g.shoeMidX = (seen[0].xFrac + seen[1].xFrac) / 2;
+  g.shoes = seen.map((s, i) => ({
+    lane: seen.length === 2 ? (i === 0 ? 'L' : 'R') : (s.xFrac < (g.shoeMidX ?? 0.5) ? 'L' : 'R'),
+    xFrac: s.xFrac, nearCm: Math.max(s.nearCm, s.farCm), farCm: Math.min(s.nearCm, s.farCm), t,
+  }));
+  for (const s of g.shoes) {
+    const tr = g.shoeTrack[s.lane];
+    const d = s.nearCm;
+    if (tr.phase === 'back') {
+      tr.min = Math.min(tr.min, d);
+      if (d > tr.min + RULES.shoeSwingCm) { tr.phase = 'forward'; tr.max = d; }
+    } else {
+      tr.max = Math.max(tr.max, d);
+      if (d < tr.max - RULES.shoeSwingCm) {   // the foot stopped going forward: it landed and the belt takes it back
+        tr.phase = 'back';
+        const swing = tr.max - tr.min;   // how far the foot travelled forward: a long or high step swings further
+        tr.min = d;
+        if (t - tr.lastStrikeT >= RULES.shoeStepMinS) {
+          tr.lastStrikeT = t;
+          // The swing stands in for the lift height, so act 1 learns a normal step and a seed asks for a bigger one.
+          addEvent(g, { foot: s.lane, kind: 'lift', liftCm: Math.round((swing / RULES.swingCmPerLiftCm) * 10) / 10, t });
+          addEvent(g, { foot: s.lane, kind: 'strike', t });
+        }
+      }
+    }
+  }
+  return g.shoes;
+}
+
+// Shoes drive the game while sightings keep coming; a gap hands the game back to the lift rules.
+export function shoesLive(g) {
+  return g.lastShoeT !== null && g.t - g.lastShoeT <= RULES.shoeHoldS;
+}
+
+// After a pause or a gap: forget the sightings and the half-finished swings, so nothing lands on stale geometry.
+export function resetShoes(g) {
+  g.shoes = [];
+  g.stance = [];
+  g.toeCm = g.toeBaseCm ?? RULES.toeCm;
+  g.lastShoeT = null;   // shoes drive the game again only from the next sighting
+  for (const lane of ['L', 'R']) g.shoeTrack[lane] = { phase: 'back', max: -Infinity, min: Infinity, lastStrikeT: -Infinity };
+}
+
+// The camera saw a foot on a coloured mark the game draws under a thing near the hit line: cyan under flowers, magenta
+// under seeds. The nearest unresolved thing of that kind in the lane is marked as touched; the line decides the result.
+export function markHit(g, lane, kind, distCm) {
+  const near = g.things.filter((th) => !th.result && th.kind === kind && th.lane === lane && th.distCm < RULES.markShowCm &&
+    Math.abs(th.distCm - distCm) <= RULES.markReachCm).sort((a, b) => Math.abs(a.distCm - distCm) - Math.abs(b.distCm - distCm))[0];
+  if (!near) return null;
+  near.touchedT = g.t;
+  return near;
+}
+
+function shoeOn(g, th) {
+  return g.shoes.some((s) => s.lane === th.lane && g.t - s.t <= RULES.shoeFreshS &&
+    th.distCm <= s.nearCm + RULES.shoeReachCm && th.distCm >= s.farCm - RULES.shoeReachCm);
 }
 
 // ---------- pace and form ----------
@@ -140,11 +246,11 @@ function median(a) {
 }
 
 // Height a lift must reach on this foot for this kind of thing.
-// Plant speed as step() applies it: the limit, clamped to 0.3-2, 1 when missing.
+// Plant speed as step() applies it: the limit, clamped to 0.3-2, the default when missing.
 export const SPEED_RANGE = [0.3, 2];
 export function speedScale(g) {
   const v = Number(g.limits.speedScale);
-  return Number.isFinite(v) ? Math.min(SPEED_RANGE[1], Math.max(SPEED_RANGE[0], v)) : 1;
+  return Number.isFinite(v) ? Math.min(SPEED_RANGE[1], Math.max(SPEED_RANGE[0], v)) : LIMITS.speedScale;
 }
 
 export function needCm(g, kind, foot) {
@@ -168,13 +274,16 @@ export function step(g, dt) {
   const f = form(p);
   if (g.act !== 'home') { g.formSum += f * dt; g.formN += dt; }   // time-weighted, independent of frame rate
   const scale = speedScale(g);
-  const speed = p.ok ? (p.cadence / 60) * RULES.strideCm * scale : 0;   // the world waits when the pace drops
+  const walking = p.cadence > 0;
+  const cadence = p.ok ? p.cadence : walking ? Math.max(p.cadence, g.limits.minCadence * RULES.slowFloor) : 0;
+  const speed = (cadence / 60) * RULES.strideCm * scale;   // slow walking slows the world a little; standing still stops it
   const moved = speed * dt;
   g.travelledCm += moved;
   const out = { resolved: [], actChanged: false, pace: p, form: f, speed };
 
   if (g.act === 'walk') {
     if (p.ok) g.walkGoodS += dt;
+    else if (walking) g.walkGoodS += dt * RULES.slowFill;   // slow walking still gets there, at half speed
     if (g.walkGoodS >= g.limits.walkSeconds) nextAct(g, out);
     return out;
   }
@@ -188,27 +297,39 @@ export function step(g, dt) {
     if (th.result) continue;
     th.distCm -= moved;
     if (th.arriveT === null && th.distCm <= 0) th.arriveT = g.t;
-    if (th.arriveT !== null && g.t - th.arriveT > RULES.afterS) {
-      const hit = judge(g, th);
-      th.result = hit ? 'hit' : 'miss';
-      const key = th.kind === 'flower' ? 'stomp' : 'dodge';
-      g.stats[key][1] += 1;
-      if (hit) {
-        g.stats[key][0] += 1;
-        g.streak += 1;
-        g.score += Math.round(RULES.points[key] * (0.5 + 0.5 * f) * (g.streak >= 5 ? 2 : 1));
-      } else {
-        g.streak = 0;
+    if (shoesLive(g)) {
+      // Everything is decided at the hit line: a shoe on the thing while it crosses (the timing window around arrival)
+      // smashes a flower and splats on a seed; nothing on it means the flower got away and the seed was dodged.
+      if (shoeOn(g, th)) th.touchedT = g.t;
+      if (th.arriveT !== null && g.t - th.arriveT > RULES.afterS) {
+        const touched = th.touchedT !== undefined && th.touchedT >= th.arriveT - RULES.beforeS;
+        resolve(g, th, (th.kind === 'flower') === touched ? 'hit' : 'miss', f, out);
       }
-      g.log.push({ id: th.id, kind: th.kind, lane: th.lane, result: th.result, t: g.t });
-      g.actResolved += 1;
-      out.resolved.push(th);
+    } else if (th.arriveT !== null && g.t - th.arriveT > RULES.afterS) {
+      resolve(g, th, judge(g, th) ? 'hit' : 'miss', f, out);
     }
   }
-  g.things = g.things.filter((th) => !th.result || g.t - th.arriveT < 1.5);
+  g.things = g.things.filter((th) => !th.result || g.t - th.resolvedT < 1.5);
   const done = g.spawned >= quota(g) && g.things.every((th) => th.result);
   if (done) nextAct(g, out);
   return out;
+}
+
+function resolve(g, th, result, f, out) {
+  th.result = result;
+  th.resolvedT = g.t;
+  const key = th.kind === 'flower' ? 'stomp' : 'dodge';
+  g.stats[key][1] += 1;
+  if (result === 'hit') {
+    g.stats[key][0] += 1;
+    g.streak += 1;
+    g.score += Math.round(RULES.points[key] * (0.5 + 0.5 * f) * (g.streak >= 5 ? 2 : 1));
+  } else {
+    g.streak = 0;
+  }
+  g.log.push({ id: th.id, kind: th.kind, lane: th.lane, result, t: g.t });
+  g.actResolved += 1;
+  out.resolved.push(th);
 }
 
 function nextAct(g, out) {
@@ -218,7 +339,9 @@ function nextAct(g, out) {
       R: median(g.walkLifts.R) ?? RULES.defaultBaseCm,
     };
   }
-  g.act = { walk: 'garden', garden: 'storm', storm: 'home' }[g.act];
+  const rounds = Math.max(1, Math.round(Number(g.limits.rounds) || 1));
+  if (g.act === 'storm' && g.round < rounds) { g.round += 1; g.act = 'garden'; }   // another round of flowers and seeds
+  else g.act = { walk: 'garden', garden: 'storm', storm: 'home' }[g.act];
   g.actT = 0;
   g.actResolved = 0;
   g.spawned = 0;
@@ -266,5 +389,7 @@ export function summary(g) {
     liftTargetCm: g.limits.liftCm,
     spacingCm: g.limits.spacingCm,
     normalStepCm: g.base,
+    shoeMode: g.shoeMode,
+    rounds: g.round,
   };
 }

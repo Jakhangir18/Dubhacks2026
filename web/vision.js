@@ -28,6 +28,7 @@ export class FootTracker {
     this.hist = { L: [], R: [] };  // {t, y} per foot for its own ground level
     this.state = { L: blank(), R: blank() };
     this.lastTs = -1;
+    this.emit = true;              // false: still track and draw, but send no steps (shoe mode uses feet.py instead)
   }
 
   static async cameras() {
@@ -122,12 +123,12 @@ export class FootTracker {
       if (!st.lifted) continue;
       if (liftCm > st.peak) st.peak = liftCm;
       if (!st.peakSent && st.peak - liftCm > TUNING.peakDropCm) {
-        emitFoot({ foot: f, kind: 'lift', liftCm: Math.round(st.peak * 10) / 10, source: 'camera' });
+        if (this.emit) emitFoot({ foot: f, kind: 'lift', liftCm: Math.round(st.peak * 10) / 10, source: 'camera' });
         st.peakSent = true;
       }
       if (liftCm < TUNING.landCm) {
-        if (!st.peakSent) emitFoot({ foot: f, kind: 'lift', liftCm: Math.round(st.peak * 10) / 10, source: 'camera' });
-        emitFoot({ foot: f, kind: 'strike', source: 'camera' });
+        if (!st.peakSent && this.emit) emitFoot({ foot: f, kind: 'lift', liftCm: Math.round(st.peak * 10) / 10, source: 'camera' });
+        if (this.emit) emitFoot({ foot: f, kind: 'strike', source: 'camera' });
         st.lifted = false;
       }
     }

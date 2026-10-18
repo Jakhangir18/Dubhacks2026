@@ -24,7 +24,8 @@ DEFAULT_LIMITS: dict[str, Any] = {
     "spacingCm": 140,
     "spacingRange": [90, 220],
     "sessionMinutes": 17,
-    "speedScale": 1.0,   # how fast plants come, times the walking speed
+    "speedScale": 0.7,   # how fast plants come, times the walking speed; 1 felt too fast on the pad
+    "rounds": 2,         # flowers then seeds, this many times, before home
 }
 
 
@@ -50,7 +51,7 @@ def clean_limits(raw: dict[str, Any]) -> dict[str, Any]:
     out["liftCm"] = min(max(out["liftCm"], out["liftRange"][0]), out["liftRange"][1])
     out["spacingCm"] = min(max(out["spacingCm"], out["spacingRange"][0]), out["spacingRange"][1])
     out["speedScale"] = min(max(out["speedScale"], 0.3), 2.0)
-    for key in ("walkSeconds", "gardenPlants", "stormSeeds", "minCadence"):
+    for key in ("walkSeconds", "gardenPlants", "stormSeeds", "minCadence", "rounds"):
         out[key] = max(1, round(out[key]))
     return out
 
@@ -87,6 +88,23 @@ class Store:
     def _save(self, db: dict[str, Any]) -> None:
         DATA.mkdir(exist_ok=True)
         self.file.write_text(json.dumps(db, indent=1))
+
+    # ---------- settings (one document per key, for the shoe calibration and the like) ----------
+    def setting(self, key: str) -> dict[str, Any] | None:
+        if self.mongo is not None:
+            doc = self.mongo.settings.find_one({"key": key}, {"_id": 0, "key": 0})
+            return doc or None
+        with self.lock:
+            return self._load().get("settings", {}).get(key)
+
+    def set_setting(self, key: str, value: dict[str, Any]) -> None:
+        if self.mongo is not None:
+            self.mongo.settings.update_one({"key": key}, {"$set": {"key": key, **value}}, upsert=True)
+            return
+        with self.lock:
+            db = self._load()
+            db.setdefault("settings", {})[key] = value
+            self._save(db)
 
     # ---------- players ----------
     def player(self, name: str) -> dict[str, Any]:

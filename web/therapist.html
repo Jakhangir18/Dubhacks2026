@@ -62,6 +62,7 @@
       <label>Act 1 walking, seconds <input type="number" id="walkSeconds" min="10" max="300"></label>
       <label>Act 2 flowers <input type="number" id="gardenPlants" min="1" max="60"></label>
       <label>Act 3 seeds <input type="number" id="stormSeeds" min="1" max="60"></label>
+      <label>Rounds of flowers and seeds <input type="number" id="rounds" min="1" max="10"></label>
       <label>Lift target, cm <input type="number" id="liftCm" min="2" max="40" step="0.5"></label>
       <label>Lift range, cm <span><input type="number" id="liftMin" step="0.5"> – <input type="number" id="liftMax" step="0.5"></span></label>
       <label>Flower spacing, cm <input type="number" id="spacingCm" min="40" max="400"></label>
@@ -148,7 +149,7 @@
 
     function fill(p) {
       const L = p.limits;
-      for (const k of ['minCadence', 'walkSeconds', 'gardenPlants', 'stormSeeds', 'liftCm', 'spacingCm', 'sessionMinutes', 'speedScale']) $(k).value = L[k];
+      for (const k of ['minCadence', 'walkSeconds', 'gardenPlants', 'stormSeeds', 'liftCm', 'spacingCm', 'sessionMinutes', 'speedScale', 'rounds']) $(k).value = L[k];
       $('liftMin').value = L.liftRange[0]; $('liftMax').value = L.liftRange[1];
       $('spacingMin').value = L.spacingRange[0]; $('spacingMax').value = L.spacingRange[1];
       rewards = p.rewards || [];
@@ -263,8 +264,8 @@
       const n = (id) => Number($(id).value);
       const limits = { minCadence: n('minCadence'), walkSeconds: n('walkSeconds'), gardenPlants: n('gardenPlants'),
         stormSeeds: n('stormSeeds'), liftCm: n('liftCm'), liftRange: [n('liftMin'), n('liftMax')], spacingCm: n('spacingCm'),
-        spacingRange: [n('spacingMin'), n('spacingMax')], sessionMinutes: n('sessionMinutes'),
-        speedScale: $('speedScale').value === '' ? 1 : n('speedScale') };
+        spacingRange: [n('spacingMin'), n('spacingMax')], sessionMinutes: n('sessionMinutes'), rounds: n('rounds') || 1,
+        speedScale: $('speedScale').value === '' ? undefined : n('speedScale') };   // empty: the server's default
       try { localStorage.removeItem('zombiewalk.speedScale'); } catch { /* blocked */ }   // the therapist's speed wins over the operator's [ ] keys
       player = await api(`/api/player/${encodeURIComponent(player.name)}`, { method: 'PUT', body: JSON.stringify({ limits, rewards, notes: $('notes').value,
         perceptronConsent: $('perceptronConsent').checked }) });

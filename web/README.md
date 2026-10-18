@@ -106,3 +106,15 @@ Implementation: `clip.js` handles bounded recording/upload, `sound.js` handles s
 Phone as the camera: on a Mac, an iPhone shows up as a camera on its own (Continuity Camera; same Apple ID, Wi-Fi and Bluetooth on). On Windows, install a webcam app such as Camo on the phone and the laptop.
 
 Please send back: a photo of the projected grid on the mat with the hall lights on, the colours that stay readable, the smallest readable text size, and the camera fps.
+
+## Two screens: projector and laptop
+
+- Laptop first: open `/camera.html` on the laptop screen (O in a game window that is not fullscreen opens it too).
+- Projector: open the game (`/`, add `?demo=1` for the short version, `&floor=1` for a white board) in a second window, drag it to the projector screen, then F for fullscreen.
+- Keep the camera window visible: Chrome stops the camera in a hidden or fully covered window.
+- The camera window owns the camera: pick the camera, set the player's height, press Start. It shows the camera picture with the leg skeleton, live lift values and a graph, every step and plant, a copy of the projected game, and every Perceptron verdict. Leave the game's own camera (V) off.
+- Both windows must be in the same browser on the same laptop; they talk over a BroadcastChannel.
+
+## Shoe mode (feet.py on the stand camera)
+
+Run `python feet.py --server https://<server> --camera-name <stand camera>` on the Mac (add `--rotate 90` for a camera on its side and `--gamma 0.5` in a dark room), then in `/camera.html` press **Calibrate shoes** and click the four projected zone corners in the picture (FRONT-LEFT, FRONT-RIGHT, BACK-RIGHT, BACK-LEFT) and untick **pose steps**. A shoe on a flower smashes it, a shoe on a seed splats, a thing that passes the toes resolves the other way; steps come from the shoes' swing on the belt. Cyan rings under the shoes on the field show the calibration is right. Details: `docs/DETECTION_HANDOFF.md`.
