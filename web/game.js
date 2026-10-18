@@ -259,7 +259,7 @@ function makeTextures(scene) {
     const ctx = canvas.getContext();
     ctx.scale(180 / 80, 240 / 124);
     if (lane === 'l') { ctx.translate(80, 0); ctx.scale(-1, 1); }
-    ctx.strokeStyle = amber ? '#ffb21e' : '#ffffff'; ctx.lineWidth = 5; ctx.lineJoin = 'round';
+    ctx.strokeStyle = amber ? '#ffb21e' : '#ffffff'; ctx.lineWidth = 6; ctx.lineJoin = 'round';   // at least 12 px after scaling
     ctx.stroke(new Path2D('M29 50 Q7 59 17 84 Q25 101 23 106 Q24 117 41 116 Q60 116 60 102 L67 75 Q73 53 55 48Z'));
     for (const [x, y, rx, ry] of [[21, 33, 11, 14], [43, 24, 10, 13], [62, 31, 8, 11]]) {
       ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
@@ -531,7 +531,7 @@ class Play extends Phaser.Scene {
     this.input.keyboard.on('keydown-SPACE', () => {
       if (zone.active) return;
       this.paused = !this.paused;
-      publishGarden({ paused: this.paused, coach: this.paused ? 'Paused · Space to keep walking' : this.coachLine });
+      publishGarden({ paused: this.paused, coachColor: '', coach: this.paused ? 'Paused · Space to keep walking' : this.coachLine });
       sound.setMusic(!this.paused);
       clip.setPaused(this.paused);
     });
@@ -586,7 +586,7 @@ class Play extends Phaser.Scene {
     sound.play(th.result !== 'hit' ? 'miss' : th.kind === 'flower' ? 'stomp' : 'dodge');
     if (th.result === 'hit') reaction(th.kind === 'flower' ? 'stomp' : 'dodge');
     const x = L.lanes[th.lane];
-    const y = L.zoneY;
+    const y = this.yFor(th.distCm, L);   // where the thing is now: it resolves a little past the line
     this.laneFlash(th.lane, th.result === 'hit' ? C.lime : C.amber, th.result === 'hit' ? 200 : 400, L);
     if (th.kind === 'flower' && th.result === 'hit') {
       this.fx.petals.explode(26, x, y);
@@ -728,7 +728,8 @@ class Play extends Phaser.Scene {
       s.setPosition(L.lanes[th.lane], y).setScale(scale, scale * 1.25);
       s.setVisible(!th.result);
       const pad = s.list[0];
-      const windowOpen = th.arriveT !== null || th.distCm <= out.speed * RULES.beforeS;
+      // Once open, the window stays open: a pace dip must not flip the cue back or flash the lane again.
+      const windowOpen = s.windowOpen || th.arriveT !== null || th.distCm <= out.speed * RULES.beforeS;
       pad.setVisible(near > 0.72 && !th.result);
       pad.setStrokeStyle(12, windowOpen ? C.white : C.lime, windowOpen ? 1 : 0.6);
       pad.setScale(windowOpen ? 1 : 1 + 0.06 * Math.sin(g.t * Math.PI * 6));
@@ -770,7 +771,8 @@ class Play extends Phaser.Scene {
       const urgent = th && 1 - th.distCm / RULES.aheadCm > 0.72;
       const active = Math.floor(beat) % 2 === (lane === 'L' ? 0 : 1);
       this.feet[lane].setTexture(`foot-ghost-${lane.toLowerCase()}${gated && active ? '-amber' : ''}`);
-      this.feet[lane].setAlpha(gated && active ? 0.3 + 0.7 * (1 - beat % 1) : 0.3);
+      // Each step lights its footprint briefly, so a working sensor is visible at a glance.
+      this.feet[lane].setAlpha(Math.max(gated && active ? 0.3 + 0.7 * (1 - beat % 1) : 0.3, this.footFlash[lane]));
       drawMeter(h, L, lane, this.lift[lane], need, th?.kind === 'flower' ? C.amber : C.pink,
         this.meterFlash[lane], urgent);
       this.lift[lane] = Math.max(0, this.lift[lane] - dt * 25);
@@ -797,7 +799,7 @@ class Home extends Phaser.Scene {
     if (!data.replay) sound.play('home');
     const s = data.summary;
     publishGarden({ act: 'home', cadence: 0, paceOk: true, paused: false, title: 'HOME BEFORE SUNRISE!',
-      score: `${s.score} pts`, progress: 1, pace: `${s.steps} steps · form ${s.formPct}%`, coach: 'Welcome home, Gus! · R to walk again' });
+      score: `${s.score} pts`, progress: 1, pace: `${s.steps} steps · form ${s.formPct}%`, coachColor: '', coach: 'Welcome home, Gus! · R to walk again' });
     const { width: W, height: H } = this.scale;
     gardenBackdrop(this, W, H);
     this.house = this.add.image(W * 0.62, H * 0.18, 'house');

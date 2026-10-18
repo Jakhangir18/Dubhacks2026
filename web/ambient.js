@@ -109,9 +109,7 @@ export class AmbientGarden {
     this.progress.value = state.progress || 0;
     this.progress.parentElement.hidden = state.act === 'title' || state.act === 'setup';
     this.prompt.hidden = state.paceOk || state.paused || state.act === 'home' || this.zone.active;
-    this.coach.hidden = !this.prompt.hidden;
     this.coach.style.color = state.coachColor || '';
-    this.prompt.style.color = '#ffb21e';
   }
 
   drawImage(index, x, y, w, h = w) {
