@@ -62,6 +62,21 @@ export class WalkClip {
     return blob;
   }
 
+  // Pause with the game, so the kept window holds play, not a frozen pause screen.
+  setPaused(paused) {
+    if (!this.windows) return;
+    if (paused) {
+      clearInterval(this.timer);
+      this.timer = null;
+      for (const e of this.windows) if (e.recorder.state === 'recording') e.recorder.pause();
+    } else {
+      for (const e of this.windows) if (e.recorder.state === 'paused') e.recorder.resume();
+      if (!this.timer && this.windows.length) {
+        this.timer = setInterval(() => { try { this.rotate(); } catch { this.cancel(); } }, WINDOW_MS);
+      }
+    }
+  }
+
   release() {
     this.stream?.getTracks().forEach((track) => track.stop());
     this.stream = null;

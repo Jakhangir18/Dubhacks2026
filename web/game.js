@@ -54,16 +54,23 @@ let playerReady = loadPlayer();
 if (params.get('demo') === '1') Object.assign(settings.limits, DEMO);   // ?demo=1: a short game for judges
 
 let speechId = 0;
+let currentUtterance = null;   // held so Chrome cannot garbage-collect it before onend fires
+let unduckTimer = null;
 function say(text) {
   if (!settings.voice || !window.speechSynthesis) return;
   const id = ++speechId;
   try {
     speechSynthesis.cancel();
     sound.duck(false);
+    clearTimeout(unduckTimer);
     const u = new SpeechSynthesisUtterance(text);
+    currentUtterance = u;
     u.rate = 1.05;
+    const unduck = () => { if (id === speechId) { sound.duck(false); currentUtterance = null; clearTimeout(unduckTimer); } };
     u.onstart = () => { if (id === speechId) sound.duck(true); };
-    u.onend = u.onerror = () => { if (id === speechId) sound.duck(false); };
+    u.onend = u.onerror = unduck;
+    // Safety net if onend never arrives: about 2.5 words a second plus a second.
+    unduckTimer = setTimeout(unduck, (String(text).split(/\s+/).length / 2.5 + 1) * 1000);
     speechSynthesis.speak(u);
   } catch { sound.duck(false); }
 }
@@ -336,14 +343,19 @@ class Play extends Phaser.Scene {
       }
       if (e.kind === 'lift') {
         this.lift[e.foot] = Math.max(this.lift[e.foot], e.liftCm);
-        if (!this.highSound[e.foot] && e.liftCm >= needCm(this.g, this.g.act === 'garden' ? 'flower' : 'seed', e.foot)) {
+        const asked = this.g.act === 'garden' ? 'flower' : this.g.act === 'storm' ? 'seed' : null;   // nothing asked in act 1
+        if (asked && !this.highSound[e.foot] && e.liftCm >= needCm(this.g, asked, e.foot)) {
           this.highSound[e.foot] = true;
           sound.play('high');
         }
       }
     });
     this.events.once('shutdown', () => this.off());
-    this.input.keyboard.on('keydown-SPACE', () => { this.paused = !this.paused; sound.setMusic(!this.paused); });
+    this.input.keyboard.on('keydown-SPACE', () => {
+      this.paused = !this.paused;
+      sound.setMusic(!this.paused);
+      clip.setPaused(this.paused);
+    });
     if (settings.greeting) { this.coachText.setText(settings.greeting); setTimeout(() => say(settings.greeting), 2600); }
     const jump = params.get('act');
     if (jump) { startAt(this.g, jump); params.delete('act'); }   // development shortcut, first game only
@@ -447,7 +459,8 @@ class Play extends Phaser.Scene {
 
     if (out.actChanged) {
       if (this.g.act === 'home') {
-        for (const th of out.resolved) this.resolveFx(th, L);
+        // The scene is about to close: play the sounds, skip visuals that would be torn down at once.
+        for (const th of out.resolved) sound.play(th.result !== 'hit' ? 'miss' : th.kind === 'flower' ? 'stomp' : 'dodge');
         this.scene.start('home', { summary: summary(this.g) }); return;
       }
       this.sprites.forEach((s) => s.destroy());
@@ -734,7 +747,7 @@ class Home extends Phaser.Scene {
       item.setScale(fit).setPosition(textX, cursor);
       cursor += reservedHeight(item) * fit + gap;
     }
-    const cardH = Math.max(cursor - gap + 14, qrWidth + 110);
+    const cardH = Math.max(cursor - gap + 14, qrWidth + 12 + 64 + 48);   // QR, gap, two caption lines, margins
     const top = Math.max(12, Math.min(H * 0.30, H - cardH - 60));
     for (const item of items) item.y += top;
     this.shareText.setWordWrapWidth(qrWidth).setPosition(qrX, top + cardH / 2 + (this.qrImage ? qrWidth / 2 + 12 : -30));

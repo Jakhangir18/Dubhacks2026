@@ -44,7 +44,7 @@ def test_rejects_other_types_and_mismatched_containers(clips, media_type, body):
     client, directory = clips
     response = client.post("/api/clip", content=body, headers={"content-type": media_type})
     assert response.status_code == 415
-    assert not directory.exists()
+    assert not list(directory.glob("*")) if directory.exists() else True
 
 
 def test_rejects_oversize_declared_and_streamed_bodies(clips, monkeypatch):
@@ -56,7 +56,7 @@ def test_rejects_oversize_declared_and_streamed_bodies(clips, monkeypatch):
     for content in (body, iter([body[:4], body[4:]])):
         response = client.post("/api/clip", content=content, headers={"content-type": "video/webm"})
         assert response.status_code == 413
-        assert not directory.exists()
+        assert not list(directory.glob("*")) if directory.exists() else True
 
 
 def test_qr_is_local_svg_and_missing_clips_are_404(clips):
@@ -78,4 +78,23 @@ def test_clip_url_uses_the_host_the_page_was_opened_with(clips):
                     headers={"content-type": "video/webm", "host": "vps-worker.example.ts.net:8443",
                              "x-forwarded-proto": "https"})
     assert r.status_code == 201
-    assert r.json()["url"].startswith("https://vps-worker.example.ts.net:8443/clips/")
+    assert r.json()["url"].startswith("http://vps-worker.example.ts.net:8443/clips/")   # forwarded proto ignored: not from a local proxy
+
+
+def test_forwarded_host_is_ignored_from_untrusted_clients_and_ipv6_hosts_parse(clips):
+    from server.app import host_name
+    assert host_name("[::1]:8000") == "::1"
+    assert host_name("a.ts.net:8443") == "a.ts.net"
+    assert host_name("0.0.0.0:8000") == "0.0.0.0"
+    client, _ = clips
+    r = client.post("/api/clip", content=b"\x1a\x45\xdf\xa3webm",
+                    headers={"content-type": "video/webm", "x-forwarded-host": "evil.example"})
+    assert "evil.example" not in r.json()["url"]
+
+
+def test_old_clips_are_pruned(clips, monkeypatch):
+    client, directory = clips
+    monkeypatch.setattr(server, "MAX_CLIPS", 2)
+    for _ in range(4):
+        assert client.post("/api/clip", content=b"\x1a\x45\xdf\xa3webm", headers={"content-type": "video/webm"}).status_code == 201
+    assert len(list(directory.glob("*.webm"))) == 2

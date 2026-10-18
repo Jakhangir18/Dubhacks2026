@@ -6,7 +6,7 @@ With the server (needed for the Raspberry Pi bridge; the AI coach and saving com
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r server/requirements.txt     # once, from the repo root
-.venv/bin/uvicorn server.app:app --host 127.0.0.1 --port 8000
+.venv/bin/uvicorn server.app:app --host 0.0.0.0 --port 8000   # on the laptop: phones and the Pi reach it on the LAN
 # open http://localhost:8000 in Chrome on the projector window, press F
 ```
 
@@ -64,7 +64,7 @@ The recorder uses 15 fps, approximately 1 Mbps VP8 (VP9/WebM fallback), and at m
 
 To try a clip from a phone:
 
-1. Run the server above and open `http://localhost:8000/?demo=1` on the laptop. Have the operator expose its local port on the laptop's LAN address, using the same port. Binding only to loopback does not itself make the server reachable from phones.
+1. Run the server above (on the laptop, `--host 0.0.0.0`) and open `http://localhost:8000/?demo=1`.
 2. Put the phone on the same Wi-Fi/hotspot, with client isolation disabled. Confirm it can open `http://<laptop-LAN-IP>:8000/`. No internet connection is required for sharing.
 3. Press Enter and walk, or press W for auto-walk. Press Q/E for high steps. Finish act 3 and wait for **Scan to get your walk clip** on Home, then scan the QR. Tap the video to play and use the phone browser's save/share controls. Clicking the QR also opens the clip on the laptop.
 4. The server selects its LAN IP from the routing table without sending packets. On a laptop with multiple network adapters, set `CLIP_HOST=<reachable-LAN-IP>` before starting the server if it selects the wrong interface. Keep the server running while people retrieve clips.

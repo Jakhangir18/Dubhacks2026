@@ -151,9 +151,35 @@ def lan_ip() -> str:
         return "127.0.0.1"
 
 
-def save_clip(clip_id: str, suffix: str, body: bytearray) -> None:
-    CLIPS.mkdir(parents=True, exist_ok=True)
-    (CLIPS / f"{clip_id}{suffix}").write_bytes(body)
+MAX_CLIPS = 50                       # keep the newest clips only, so uploads can never fill the disk
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", ""}
+
+
+def prune_clips() -> None:
+    files = sorted((p for p in CLIPS.glob("*") if p.suffix in {".webm", ".mp4"}), key=lambda p: p.stat().st_mtime)
+    for old in files[:-MAX_CLIPS]:
+        old.unlink(missing_ok=True)
+
+
+def host_name(host: str) -> str:
+    """Hostname part of a Host header, IPv6 aware: '[::1]:8000' -> '::1', 'a.ts.net:8443' -> 'a.ts.net'."""
+    host = host.strip()
+    if host.startswith("["):
+        return host[1:host.find("]")] if "]" in host else host
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
+def clip_url(request: Request, clip_id: str) -> str:
+    # Forwarded headers count only from a proxy on this machine (Tailscale serve); anyone else could spoof them.
+    via_local_proxy = request.client is not None and request.client.host in {"127.0.0.1", "::1"}
+    fwd_host = request.headers.get("x-forwarded-host", "").split(",")[0].strip() if via_local_proxy else ""
+    host = fwd_host or request.headers.get("host", "")
+    if host_name(host) not in LOCAL_HOSTS:
+        # Opened by a real name (Tailscale serve, a LAN IP): phones reach the same address.
+        proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip() if via_local_proxy else ""
+        return f"{proto or request.url.scheme}://{host}/clips/{clip_id}"
+    port = request.url.port or (443 if request.url.scheme == "https" else 80)
+    return f"{request.url.scheme}://{lan_ip()}:{port}/clips/{clip_id}"
 
 
 @app.post("/api/clip", status_code=201)
@@ -169,25 +195,30 @@ async def post_clip(request: Request) -> dict[str, str]:
             raise HTTPException(400, "Invalid content-length") from None
         if size > MAX_CLIP_BYTES:
             raise HTTPException(413, "Clip exceeds 30 MB")
-    body = bytearray()
-    async for chunk in request.stream():
-        if len(body) + len(chunk) > MAX_CLIP_BYTES:
-            raise HTTPException(413, "Clip exceeds 30 MB")
-        body.extend(chunk)
-    valid = (body[:4] == b"\x1a\x45\xdf\xa3" if media_type == "video/webm"
-             else len(body) >= 12 and body[4:8] == b"ftyp")
-    if not valid:
-        raise HTTPException(415, "Body does not match the video container")
+    CLIPS.mkdir(parents=True, exist_ok=True)
     clip_id = uuid.uuid4().hex
-    await run_in_threadpool(save_clip, clip_id, CLIP_TYPES[media_type], body)
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
-    hostname = host.split(":")[0]
-    if hostname and hostname not in {"localhost", "127.0.0.1", "::1"}:
-        # Opened by a real name (Tailscale serve, a LAN IP): phones reach the same address.
-        scheme = request.headers.get("x-forwarded-proto") or request.url.scheme
-        return {"id": clip_id, "url": f"{scheme}://{host}/clips/{clip_id}"}
-    port = request.url.port or (443 if request.url.scheme == "https" else 80)
-    return {"id": clip_id, "url": f"{request.url.scheme}://{lan_ip()}:{port}/clips/{clip_id}"}
+    part = CLIPS / f"{clip_id}.part"
+    size = 0
+    head = b""
+    try:
+        # Stream to disk instead of holding up to 30 MB per upload in memory.
+        with part.open("wb") as out:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > MAX_CLIP_BYTES:
+                    raise HTTPException(413, "Clip exceeds 30 MB")
+                if len(head) < 12:
+                    head = (head + chunk)[:12]
+                out.write(chunk)
+        valid = (head[:4] == b"\x1a\x45\xdf\xa3" if media_type == "video/webm"
+                 else len(head) >= 12 and head[4:8] == b"ftyp")
+        if not valid:
+            raise HTTPException(415, "Body does not match the video container")
+        part.rename(CLIPS / f"{clip_id}{CLIP_TYPES[media_type]}")
+    finally:
+        part.unlink(missing_ok=True)
+    await run_in_threadpool(prune_clips)
+    return {"id": clip_id, "url": clip_url(request, clip_id)}
 
 
 @app.get("/clips/{clip_id}")
