@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import time
 import uuid
 from typing import Any
@@ -12,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
-from server import perceive, therapist
+from server import gait_review, gemini, perceive, therapist
 from server.store import Store
 
 router = APIRouter(prefix="/api")
@@ -29,6 +30,21 @@ def status() -> dict[str, Any]:
         "visa": os.environ.get("VISA_MODE", "mock"),
         "perceptron": bool(os.environ.get("PERCEPTRON_API_KEY")),
     }
+
+
+@router.get("/health")
+async def health() -> dict[str, Any]:
+    """Real calls, for the panel's Check button only (the game reads /status, which must stay instant).
+    Each entry: {"ok": bool, "detail": str}. Perceptron is not called: every call is paid."""
+    _, gemini_err = await gemini.generate_json("Reply with JSON only.", 'Return {"ok": true}.', timeout=10, temperature=0)
+    checks = {
+        "gemini": gemini_err,
+        "mongodb": await run_in_threadpool(store.ping),
+        "backboard": await therapist.backboard_ping(),
+        "perceptron": None if os.environ.get("PERCEPTRON_API_KEY") else "no PERCEPTRON_API_KEY",
+    }
+    return {k: {"ok": err is None, "detail": err or ("key set, not called" if k == "perceptron" else "answered")}
+            for k, err in checks.items()}
 
 
 # ---------------------------------------------------------------- players and therapist limits
@@ -50,6 +66,7 @@ class PlayerIn(BaseModel):
     rewards: list[dict[str, Any]] | None = None
     notes: str | None = None
     perceptronConsent: bool | None = None   # the parent or therapist allows leg-only frames to go to Perceptron
+    aiReviewConsent: bool | None = None     # ... and the side camera's gait numbers (no video) to go to Gemini
 
 
 def clean_rewards(rewards: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -73,6 +90,7 @@ def put_player(name: str, inp: PlayerIn) -> dict[str, Any]:
         rewards=clean_rewards(inp.rewards) if inp.rewards is not None else None,
         notes=inp.notes[:500] if inp.notes is not None else None,
         perceptronConsent=inp.perceptronConsent,
+        aiReviewConsent=inp.aiReviewConsent,
     )
 
 
@@ -86,7 +104,9 @@ class CoachIn(BaseModel):
 async def coach(inp: CoachIn) -> dict[str, Any]:
     # Store calls run in the threadpool so a slow database never stalls the foot-event relay.
     player = await run_in_threadpool(store.player, inp.player)
-    return await therapist.coach(inp.summary, player["limits"])
+    gait = player.get("gait") or {}
+    live = gait_review.live_view(gait.get("summary")) if time.time() - float(gait.get("ts") or 0) < LIVE_GAIT_S else None
+    return await therapist.coach(inp.summary, player["limits"], live, share_side=player.get("aiReviewConsent", False))
 
 
 @router.get("/plan/{name}")
@@ -101,6 +121,7 @@ class SessionIn(BaseModel):
     player: str = "Player"
     summary: dict[str, Any]
     verified: bool = True
+    id: str | None = None   # from /api/session/start; the side camera's review attaches to it
 
 
 def visa_checkout(item: dict[str, Any], player: str) -> dict[str, Any]:
@@ -138,7 +159,8 @@ async def session(inp: SessionIn, background: BackgroundTasks) -> dict[str, Any]
     player = await run_in_threadpool(store.player, name)
     earlier = await run_in_threadpool(store.sessions, name, 200)   # enough history for the per-day reward cap
     inp.summary.pop("sideCamera", None)   # only the server attaches side-camera data, cleaned
-    side = fresh_gait(player)
+    # The note and the memory are written by outside models: gait numbers go to them only with the AI review consent.
+    side = fresh_gait(player) if player.get("aiReviewConsent") else None
     if side:
         inp.summary["sideCamera"] = side   # the therapist note and the stored session both see it
         await run_in_threadpool(store.update_player, name, gait={"used": True})   # one walk, one summary
@@ -151,7 +173,14 @@ async def session(inp: SessionIn, background: BackgroundTasks) -> dict[str, Any]
         if reward:
             out["reward"] = reward
     # Save first, so a finished walk is never lost if the checkout fails.
-    await run_in_threadpool(store.add_session, name, inp.summary, inp.verified, note["note"], out["reward"] is not None)
+    sid = inp.id if inp.id and SESSION_ID.fullmatch(inp.id) and not await run_in_threadpool(store.session, inp.id) else None
+    extra = {"gaitReview": {"status": "waiting", "ts": time.time()}} if sid and side_camera_on(sid) else {}
+    doc = await run_in_threadpool(store.add_session, name, inp.summary, inp.verified, note["note"], out["reward"] is not None,
+                                  sid, **extra)
+    out["id"] = doc["id"]
+    out["gaitReview"] = extra.get("gaitReview")
+    if sid and (active_session() or {}).get("id") == sid:
+        await run_in_threadpool(store.set_setting, ACTIVE_KEY, NO_SESSION)   # only now, so the side camera finds it saved
     if out["reward"]:
         try:
             out["receipt"] = visa_checkout(out["reward"], name)
@@ -186,12 +215,17 @@ class GaitIn(BaseModel):
     player: str = "Player"
     source: str = "side-camera"
     summary: dict[str, Any] | None   # gait.py GaitTracker.summary(); None when it saw too little
+    sessionId: str | None = None     # the game session the side camera is recording
 
 
 @router.post("/gait")
 def post_gait(inp: GaitIn) -> dict[str, Any]:
     name = inp.player.strip()[:40] or "Player"
-    if name not in store.players():
+    active = active_session()
+    if inp.sessionId and active and active["id"] == inp.sessionId:
+        name = active["player"]   # the game named the player when it started the session
+        store.set_setting(CHECKIN_KEY, {"sessionId": inp.sessionId, "ts": time.time()})
+    elif name not in store.players():
         raise HTTPException(404, f"no player {name!r}: use the name from the therapist panel")
     if not inp.summary:
         return {"ok": False, "reason": "empty summary"}
@@ -209,7 +243,141 @@ def fresh_gait(player: dict[str, Any]) -> dict[str, Any] | None:
 
 @router.get("/sessions/{name}")
 def sessions(name: str) -> list[dict[str, Any]]:
-    return store.sessions(name, limit=30)
+    rows = [settle_review(r) for r in store.sessions(name, limit=30)]
+    for r in rows:   # the full gait summary is heavy; the list keeps where it came from, /api/session/{id} has it all
+        if isinstance(r.get("gait"), dict):
+            r["gait"] = {k: r["gait"].get(k) for k in ("source", "quality", "ts")}
+    return rows
+
+
+# ---------------------------------------------------------------- one session id for the game, the side camera and the review
+ACTIVE_KEY, CHECKIN_KEY = "activeSession", "gaitCheckin"
+NO_SESSION = {"id": None, "player": None, "startedAt": 0}   # settings merge in MongoDB, so clearing writes empty values
+ACTIVE_TTL_S = 90 * 60     # a session still active after this was left in a closed tab
+CHECKIN_FRESH_S = 60       # the side camera posts every 15 s while it records a session
+LIVE_GAIT_S = 45           # live side-camera numbers older than this are not this moment's walk
+WAIT_TIMEOUT_S = 5 * 60    # a review still waiting this long after the save will not come (the side camera stopped)
+REVIEW_TIMEOUT_S = 3 * 60  # a review still running this long died with a server restart
+SESSION_ID = re.compile(r"[0-9a-f]{8,40}")
+
+
+class StartIn(BaseModel):
+    player: str = "Player"
+
+
+@router.post("/session/start")
+def session_start(inp: StartIn) -> dict[str, Any]:
+    active = {"id": uuid.uuid4().hex, "player": inp.player.strip()[:40] or "Player", "startedAt": time.time()}
+    store.set_setting(ACTIVE_KEY, active)
+    return active
+
+
+def active_session() -> dict[str, Any] | None:
+    s = store.setting(ACTIVE_KEY) or {}
+    return s if s.get("id") and time.time() - float(s.get("startedAt") or 0) < ACTIVE_TTL_S else None
+
+
+def side_camera_on(session_id: str) -> bool:
+    c = store.setting(CHECKIN_KEY) or {}
+    return c.get("sessionId") == session_id and time.time() - float(c.get("ts") or 0) < CHECKIN_FRESH_S
+
+
+@router.get("/session/active")
+def session_active() -> dict[str, Any]:
+    active = active_session()
+    return {**({k: active[k] for k in ("id", "player", "startedAt")} if active else {}), "serverTime": time.time()}
+
+
+def settle_review(doc: dict[str, Any]) -> dict[str, Any]:
+    """A review that can no longer finish reads as failed, with the reason, instead of waiting for ever."""
+    review = doc.get("gaitReview")
+    if isinstance(review, dict):
+        age = time.time() - float(review.get("ts") or 0)
+        if review.get("status") == "waiting" and age > WAIT_TIMEOUT_S:
+            doc["gaitReview"] = {**review, "status": "failed", "reason": "the side camera did not send the walk"}
+        elif review.get("status") == "reviewing" and age > REVIEW_TIMEOUT_S:
+            doc["gaitReview"] = {**review, "status": "failed", "reason": "the review stopped (server restart)"}
+    return doc
+
+
+@router.get("/session/{session_id}")
+def get_session(session_id: str) -> dict[str, Any]:
+    doc = store.session(session_id) if SESSION_ID.fullmatch(session_id) else None
+    if not doc:
+        raise HTTPException(404, "no such session")
+    return settle_review(doc)
+
+
+def clean_json(value: Any, depth: int = 0) -> Any:
+    """Like clean_gait, deep enough for a whole gait.py summary (per-side curves, per-window trends)."""
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, int):
+        return value if abs(value) < 2**53 else None
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, str):
+        return value[:200]
+    if depth < 6 and isinstance(value, dict):
+        return {str(k)[:40]: clean_json(v, depth + 1) for k, v in list(value.items())[:80]}
+    if depth < 6 and isinstance(value, list):
+        return [clean_json(v, depth + 1) for v in value[:300]]
+    return None
+
+
+def clean_summary(summary: Any) -> dict[str, Any] | None:
+    """A gait.py summary for storage: strike times become counts (thousands in a long walk, never read again)."""
+    if not isinstance(summary, dict):
+        return None
+    s = dict(summary)
+    strikes = s.pop("strikes", None)
+    s.pop("toe_offs", None)
+    if isinstance(strikes, dict):
+        s["strike_counts"] = {k: len(v) for k, v in strikes.items() if k in ("L", "R") and isinstance(v, list)}
+    return clean_json(s)
+
+
+class GaitFinalIn(BaseModel):
+    sessionId: str
+    source: str = "side-camera"
+    quality: dict[str, Any] = Field(default_factory=dict)
+    summary: dict[str, Any] | None = None   # None when the side camera saw too little; the game is still reviewed
+    perAct: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/gait/final", status_code=202)
+async def gait_final(inp: GaitFinalIn, background: BackgroundTasks) -> dict[str, Any]:
+    doc = await run_in_threadpool(store.session, inp.sessionId) if SESSION_ID.fullmatch(inp.sessionId) else None
+    if not doc:
+        raise HTTPException(404, "no such session: the game saves it at Home")
+    gait = {"source": inp.source[:40], "quality": clean_json(inp.quality), "summary": clean_summary(inp.summary),
+            "perAct": {a: clean_summary(v) for a, v in inp.perAct.items() if a in gait_review.ACTS and isinstance(v, dict)},
+            "ts": time.time()}
+    await run_in_threadpool(store.update_session, inp.sessionId, gait=gait,
+                            gaitReview={"status": "reviewing", "ts": time.time()})
+    background.add_task(review_later, inp.sessionId)
+    return {"status": "reviewing"}
+
+
+async def review_later(session_id: str) -> None:
+    """The AI therapist's review, off the request path: it can take a model call of up to a minute."""
+    doc = await run_in_threadpool(store.session, session_id)
+    if not doc:
+        return
+    name = doc["player"]
+    player = await run_in_threadpool(store.player, name)
+    earlier = await run_in_threadpool(store.sessions, name, 20)
+    history = [r for r in earlier if r.get("id") != session_id and (r.get("gaitReview") or {}).get("status") == "done"][:5]
+    try:
+        result = await gait_review.review(doc.get("summary") or {}, doc.get("gait") or {}, history, player)
+    except Exception as e:  # noqa: BLE001 - a broken review must say so, never stay "reviewing"
+        result = {"status": "failed", "reason": f"review error ({type(e).__name__})", "ts": time.time()}
+    await run_in_threadpool(store.update_session, session_id, gaitReview=result)
+    focus = ((result.get("review") or {}).get("focus") or {}).get("text")
+    if focus and player.get("assistantId") and player.get("aiReviewConsent"):   # memory for the next greeting
+        await therapist.backboard(f"Gait review of the latest walk: next focus '{focus}'. "
+                                  f"{(result.get('review') or {}).get('therapistNote', '')[:400]}",
+                                  player["assistantId"], "Auto")
 
 
 # ---------------------------------------------------------------- shoe calibration (camera -> field homography)

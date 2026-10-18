@@ -14,6 +14,7 @@
     h1 { margin: 0; font-size: 20px; } h1 b { color: var(--green); }
     .chip { font-size: 12px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); color: var(--dim); }
     .chip.on { color: #000; background: var(--green); border-color: var(--green); }
+    .chip.bad { color: #000; background: #ff4d4d; border-color: #ff4d4d; }
     main { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; padding: 16px 24px; max-width: 1200px; }
     section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
     h2 { margin: 0 0 12px; font-size: 16px; color: var(--yellow); }
@@ -29,11 +30,17 @@
     .hint { color: var(--dim); font-size: 13px; }
     #msg { color: var(--cyan); min-height: 1.4em; }
     .wide { grid-column: 1 / -1; }
+    .live-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .stat b { display: block; font-size: 28px; line-height: 1.1; color: var(--green); } .stat small { color: var(--dim); font-size: 12px; }
+    .stat.off b { color: var(--dim); }
     .lab-grid { display: flex; flex-wrap: wrap; gap: 24px; }
     .lab-copy { flex: 1; min-width: 260px; }
     #lab-frame { width: 320px; max-width: 100%; background: #0b0d0b; border-radius: 8px; }
     #lab-timeline { position: relative; height: 24px; background: #2a302a; border-radius: 6px; overflow: hidden; }
     .lab-moment { position: absolute; top: 3px; height: 18px; min-width: 3px; background: var(--yellow); }
+    tr.detail > td { background: #101410; padding: 10px 14px; }
+    .detail p { margin: 4px 0; } .detail ul { margin: 4px 0; padding-left: 18px; }
+    a { color: var(--cyan); }
   </style>
 </head>
 <body>
@@ -44,6 +51,7 @@
     <span id="st-storage" class="chip">storage</span>
     <span id="st-visa" class="chip">Visa</span>
     <span id="st-perceptron" class="chip">Perceptron</span>
+    <button id="check" title="Makes a real call to each service (not Perceptron: its calls are paid)">Check integrations</button>
   </header>
   <main>
     <section>
@@ -52,7 +60,8 @@
       <div class="row"><button class="primary" id="play">Play as this player</button><span class="hint" id="current"></span></div>
       <p class="hint">The game uses the current player's limits, their memory and their reward list.</p>
       <label>Perceptron double-check: send leg-only frames (knees down, no face) <input type="checkbox" id="perceptronConsent"></label>
-      <p class="hint">Off by default. Saved with the button under Rewards.</p>
+      <label>AI gait review: send the side camera's numbers (no video) to Gemini <input type="checkbox" id="aiReviewConsent"></label>
+      <p class="hint">Off by default. Saved with the button under Rewards. Without consent the gait review uses fixed rules on this computer.</p>
       <div id="msg"></div>
     </section>
 
@@ -61,7 +70,7 @@
       <label>Minimum pace, steps per minute <input type="number" id="minCadence" min="40" max="160"></label>
       <label>Act 1 walking, seconds <input type="number" id="walkSeconds" min="10" max="300"></label>
       <label>Act 2 flowers <input type="number" id="gardenPlants" min="1" max="60"></label>
-      <label>Act 3 seeds <input type="number" id="stormSeeds" min="1" max="60"></label>
+      <label>Act 3 seeds (0: none) <input type="number" id="stormSeeds" min="0" max="60"></label>
       <label>Rounds of flowers and seeds <input type="number" id="rounds" min="1" max="10"></label>
       <label>Lift target, cm <input type="number" id="liftCm" min="2" max="40" step="0.5"></label>
       <label>Lift range, cm <span><input type="number" id="liftMin" step="0.5"> – <input type="number" id="liftMax" step="0.5"></span></label>
@@ -82,6 +91,20 @@
       <div class="row"><button class="primary" id="save">Save limits, rewards and notes</button></div>
     </section>
 
+    <section class="wide" id="live">
+      <h2>Live walk</h2>
+      <div class="live-grid">
+        <div class="stat off"><b id="lv-state">no game running</b><small id="lv-sub">the game opens a session when the walk starts</small></div>
+        <div class="stat"><b id="lv-pace">–</b><small>steps per minute · game</small></div>
+        <div class="stat"><b id="lv-steps">–</b><small>steps</small></div>
+        <div class="stat"><b id="lv-flowers">–</b><small>flowers hit / judged</small></div>
+        <div class="stat"><b id="lv-form">–</b><small>form (pace, both feet, evenness)</small></div>
+        <div class="stat"><b id="lv-knee">–</b><small>knee bend in swing, near leg · side camera</small></div>
+        <div class="stat"><b id="lv-stride">–</b><small>stride time · variation · side camera</small></div>
+        <div class="stat off"><b id="lv-cam">–</b><small>side camera (the phone)</small></div>
+      </div>
+      <p class="hint" id="lv-last"></p>
+    </section>
     <section class="wide" id="perceptron-lab">
       <h2>Perceptron lab</h2>
       <p id="lab-empty" class="hint">Turn on Perceptron consent above, save, then finish a camera walk to see a report.</p>
@@ -108,8 +131,8 @@
 
     <section class="wide">
       <h2>Sessions</h2>
-      <table><thead><tr><th>When</th><th>Steps</th><th>Pace</th><th>Flowers</th><th>Seeds</th><th>Form</th><th>High-step lift L / R</th><th>Verified</th><th>Perceptron</th><th>Coach note</th></tr></thead>
-        <tbody id="sessions"><tr><td colspan="10" class="hint">no sessions yet</td></tr></tbody></table>
+      <table><thead><tr><th>When</th><th>Steps</th><th>Pace</th><th>Flowers</th><th>Seeds</th><th>Form</th><th>High-step lift L / R</th><th>Verified</th><th>Perceptron</th><th>Coach note</th><th>Gait review</th></tr></thead>
+        <tbody id="sessions"><tr><td colspan="11" class="hint">no sessions yet</td></tr></tbody></table>
     </section>
   </main>
   <script>
@@ -141,6 +164,21 @@
       } catch { say('server not reachable: run the game server (see web/README.md)'); }
     }
 
+    // The chips above only say a key is set; this makes a real call to each service.
+    async function checkIntegrations() {
+      say('checking integrations…');
+      try {
+        const h = await api('/api/health');
+        const chips = { gemini: 'st-gemini', backboard: 'st-backboard', mongodb: 'st-storage', perceptron: 'st-perceptron' };
+        for (const [k, id] of Object.entries(chips)) {
+          $(id).classList.toggle('on', h[k].ok);
+          $(id).classList.toggle('bad', !h[k].ok);
+          $(id).title = h[k].detail;
+        }
+        say(Object.entries(h).map(([k, v]) => `${k}: ${v.ok ? 'ok' : v.detail}`).join(' · '));
+      } catch { say('integration check failed: is the game server running?'); }
+    }
+
     async function listPlayers(select) {
       const names = await api('/api/players');
       $('players').replaceChildren(...names.map((n) => new Option(n, n)));
@@ -155,6 +193,7 @@
       rewards = p.rewards || [];
       $('notes').value = p.notes || '';
       $('perceptronConsent').checked = !!p.perceptronConsent;
+      $('aiReviewConsent').checked = !!p.aiReviewConsent;
       drawLab(p.perceptronReports?.[0]);
       drawRewards();
       $('current').textContent = `current: ${store.get('zombiewalk.player', 'none')}`;
@@ -229,18 +268,85 @@
       }));
     }
 
+    // ---------- sessions and the side camera's gait review ----------
+    const opened = new Set();   // session ids whose review details are open; kept across refreshes
+    let sessionsTimer = null;
+    const el = (tag, text, cls) => { const e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; };
+    function reviewState(r) {
+      const g = r.gaitReview;
+      if (!g) return '-';
+      if (g.status === 'failed') return `failed${g.reason ? `: ${g.reason}` : ''}`;
+      return { waiting: 'waiting for the side camera', reviewing: 'reviewing…' }[g.status]
+        || (g.status === 'done' ? `done · ${g.source === 'gemini' ? 'Gemini' : 'rules'}` : g.status);
+    }
+
+    // The short version of a review under its session row; the full one is report.html.
+    function reviewDetail(r) {
+      const g = r.gaitReview, v = g.review || {};
+      const cell = el('td'); cell.colSpan = 11;
+      const box = el('div', null, 'detail');
+      const source = g.source === 'gemini' ? `Gemini${g.model ? ` (${g.model})` : ''}` : `rules${g.reason ? `: ${g.reason}` : ''}`;
+      const quality = g.dataQuality ? `data ${g.dataQuality.level}${g.dataQuality.issues?.length ? `: ${g.dataQuality.issues.join('; ')}` : ''}` : '';
+      const rules = g.source === 'gemini' && g.filledByRules?.length ? `some parts written by the rules: ${g.filledByRules.join(', ')}` : '';
+      box.append(el('p', [source, quality, rules].filter(Boolean).join(' · '), 'hint'));
+      if (v.overview) box.append(el('p', v.overview));
+      if (v.focus?.text) {
+        const p = el('p'); p.append(el('b', 'Focus: '), document.createTextNode(`${v.focus.text}${v.focus.why ? ` (${v.focus.why})` : ''}`)); box.append(p);
+      }
+      if (v.findings?.length) {
+        const ul = el('ul');
+        for (const f of v.findings) ul.append(el('li', `${f.area}${f.side && f.side !== 'none' ? `, ${f.side}` : ''} (${f.confidence}): ${f.text}`));
+        box.append(ul);
+      }
+      const next = v.nextSession || {};
+      const keys = [['liftCm', 'lift target', 'cm'], ['spacingCm', 'flower spacing', 'cm'], ['minCadence', 'minimum pace', 'steps/min']]
+        .filter(([k]) => Number.isFinite(next[k]));
+      if (keys.length) {
+        const row = el('div', null, 'row');
+        row.append(el('span', `Suggested next time: ${keys.map(([k, label, unit]) => `${label} ${next[k]} ${unit}`).join(', ')}${next.why ? ` (${next.why})` : ''}`));
+        const b = el('button', 'Apply suggested settings');
+        b.onclick = () => applySuggestion(next);
+        row.append(b); box.append(row);
+      }
+      if (r.id) { const a = el('a', 'Full report'); a.href = `/report.html?id=${encodeURIComponent(r.id)}`; a.target = '_blank'; box.append(a); }
+      cell.append(box);
+      const tr = el('tr', null, 'detail'); tr.append(cell);
+      return tr;
+    }
+
     async function sessions(name) {
+      clearTimeout(sessionsTimer);
       const rows = await api(`/api/sessions/${encodeURIComponent(name)}`);
-      if (!rows.length) { $('sessions').innerHTML = '<tr><td colspan="10" class="hint">no sessions yet</td></tr>'; return; }
-      $('sessions').replaceChildren(...rows.map((r) => {
+      if (player?.name !== name) return;   // another player was loaded meanwhile
+      if (!rows.length) { $('sessions').innerHTML = '<tr><td colspan="11" class="hint">no sessions yet</td></tr>'; return; }
+      $('sessions').replaceChildren(...rows.flatMap((r) => {
         const s = r.summary || {};
         const tr = document.createElement('tr');
         tr.append(td(new Date(r.ts * 1000).toLocaleString()), td(s.steps), td(s.cadence), td(s.stompPct == null ? '-' : `${s.stompPct}%`),
           td(s.dodgePct == null ? '-' : `${s.dodgePct}%`), td(s.formPct == null ? '-' : `${s.formPct}%`),
           td(`${s.highLiftAvgCm?.L ?? '-'} / ${s.highLiftAvgCm?.R ?? '-'} cm`), td(r.verified ? 'yes' : 'no'),
           td(s.perceptron?.checked ? `${s.perceptron.agree}/${s.perceptron.checked} agree` : '-'), td(r.note || ''));
-        return tr;
+        const cell = td(reviewState(r));
+        const key = r.id || String(r.ts);
+        if (r.gaitReview?.status === 'done') {
+          const b = el('button', opened.has(key) ? 'hide' : 'details');
+          b.style.marginLeft = '6px';
+          b.onclick = () => { if (opened.has(key)) opened.delete(key); else opened.add(key); sessions(name); };
+          cell.append(b);
+        }
+        tr.append(cell);
+        return r.gaitReview?.status === 'done' && opened.has(key) ? [tr, reviewDetail(r)] : [tr];
       }));
+      // A review on its way: look again in a few seconds.
+      if (rows.some((r) => ['waiting', 'reviewing'].includes(r.gaitReview?.status))) sessionsTimer = setTimeout(() => sessions(name).catch(() => {}), 5000);
+    }
+
+    // The review's suggestion goes through the normal save, so the server clamps it to the ranges above.
+    async function applySuggestion(next) {
+      if (!player) return say('load a player first');
+      for (const k of ['liftCm', 'spacingCm', 'minCadence']) if (Number.isFinite(next[k])) $(k).value = next[k];
+      await save();
+      say(`applied the suggested settings to ${player.name}`);
     }
 
     async function load(name) {
@@ -251,6 +357,37 @@
       say(`loaded ${player.name}`);
     }
 
+    // ---------- live walk: the game's own numbers and the side camera's, refreshed every 3 s ----------
+    async function live() {
+      try {
+        const active = await api('/api/session/active');
+        const running = !!active.id;
+        $('lv-state').textContent = running ? `${active.player} is walking` : 'no game running';
+        $('lv-state').parentElement.classList.toggle('off', !running);
+        $('lv-sub').textContent = running ? `${Math.round(active.serverTime - active.startedAt)} s since the start` : 'the game opens a session when the walk starts';
+        const log = await api('/api/log?n=120');
+        const pace = [...log].reverse().find((r) => r.what === 'pace');
+        const things = log.filter((r) => r.what === 'flower' || r.what === 'seed');
+        const hits = things.filter((r) => r.result === 'hit').length;
+        $('lv-pace').textContent = pace ? pace.cadence : '–';
+        $('lv-steps').textContent = pace ? pace.steps : '–';
+        $('lv-form').textContent = pace ? `${pace.form}%` : '–';
+        $('lv-flowers').textContent = things.length ? `${hits} / ${things.length}` : '–';
+        $('lv-last').textContent = things.length ? `last: ${things.slice(-6).map((r) => `${r.what} ${r.lane} ${r.result}`).join(' · ')}` : '';
+        const name = active.player || $('players').value;
+        const p = name ? await api(`/api/player/${encodeURIComponent(name)}`) : null;
+        const g = p?.gait, s = g?.summary;
+        const age = g ? Math.round(Date.now() / 1000 - g.ts) : null;
+        const near = s ? ((s.seen_frames?.L ?? 0) >= (s.seen_frames?.R ?? 0) ? 'L' : 'R') : null;   // the leg nearer the phone
+        const knee = s?.flexion?.[near], stride = s?.stride?.[near], cvv = s?.stride_cv?.[near];
+        $('lv-knee').textContent = knee != null ? `${Math.round(180 - knee)}°` : '–';   // the camera reports the knee angle, 180 = straight
+        $('lv-stride').textContent = stride != null ? `${stride.toFixed(2)} s${cvv != null ? ` · ±${Math.round(cvv * 100)}%` : ''}` : '–';
+        $('lv-cam').textContent = !g ? 'not seen yet' : age < 40 ? `live · ${age} s ago` : `last seen ${Math.round(age / 60)} min ago`;
+        $('lv-cam').parentElement.classList.toggle('off', !g || age >= 40);
+      } catch { $('lv-state').textContent = 'live view: server not reachable'; }
+    }
+    setInterval(() => live().catch(() => {}), 3000); live().catch(() => {});
+
     $('load').onclick = () => load($('newname').value.trim() || $('players').value);
     $('players').onchange = () => load($('players').value);
     $('radd').onclick = () => {
@@ -259,7 +396,7 @@
       if (!name) return;
       rewards.push({ name, usd }); $('rname').value = ''; $('rusd').value = ''; drawRewards();
     };
-    $('save').onclick = async () => {
+    async function save() {
       if (!player) return say('load a player first');
       const n = (id) => Number($(id).value);
       const limits = { minCadence: n('minCadence'), walkSeconds: n('walkSeconds'), gardenPlants: n('gardenPlants'),
@@ -268,11 +405,13 @@
         speedScale: $('speedScale').value === '' ? undefined : n('speedScale') };   // empty: the server's default
       try { localStorage.removeItem('zombiewalk.speedScale'); } catch { /* blocked */ }   // the therapist's speed wins over the operator's [ ] keys
       player = await api(`/api/player/${encodeURIComponent(player.name)}`, { method: 'PUT', body: JSON.stringify({ limits, rewards, notes: $('notes').value,
-        perceptronConsent: $('perceptronConsent').checked }) });
+        perceptronConsent: $('perceptronConsent').checked, aiReviewConsent: $('aiReviewConsent').checked }) });
       fill(player);
       await listPlayers(player.name);
       say(`saved ${player.name}`);
-    };
+    }
+    $('save').onclick = save;
+    $('check').onclick = checkIntegrations;
     $('play').onclick = () => {
       if (!player) return say('load a player first');
       store.set('zombiewalk.player', player.name);

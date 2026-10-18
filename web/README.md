@@ -28,7 +28,8 @@ Open http://localhost:8000/therapist.html (with the server running).
 - Pick or create a player, set the limits the coach must stay inside (minimum pace, act lengths, lift target and range, flower spacing, session length), add the parent's reward list, write notes for the coach.
 - **Play as this player** makes that player current for the game (limits, greeting, memory, rewards).
 - The session table shows every finished game with the coach's note.
-- Chips at the top show which sponsor integrations are live.
+- **AI gait review** (off by default): with a side camera running `gait.py --server`, each game's walk is reviewed after Home. The session row shows the review's state; **details** opens a short version with **Apply suggested settings** (the server keeps them inside the ranges), and **Full report** opens `report.html?id=<session>` (printable). Without the consent tick the review uses fixed rules and no numbers leave the laptop. Shapes: `vision/CONTRACT.md`.
+- Chips at the top show which keys are set. **Check integrations** makes a real call to Gemini, MongoDB and Backboard and turns each chip green or red (hover for the reason); Perceptron is not called, its calls are paid.
 
 ## Keys and sponsor features
 
@@ -39,7 +40,10 @@ GEMINI_API_KEY=...        # MLH Best Use of Gemini API: live coach cues, session
 BACKBOARD_API_KEY=...     # MLH Best Use of Backboard: the coach remembers each player across sessions
 MONGODB_URI=mongodb+srv://...   # MLH Best Use of MongoDB Atlas: players and sessions
 PERCEPTRON_API_KEY=...    # Perceptron track: Mk1.5 double-checks stomps, dodges and form from leg-only frames
+PUBLIC_URL=https://...    # optional: public address for the clip QR (e.g. Tailscale Funnel), so any phone can open it
 ```
+
+Switching to MongoDB with games already played offline: `python -m server.store` copies `data/store.json` into Atlas (players and settings already there are kept, sessions are added once).
 
 Perceptron also needs consent: tick "Perceptron double-check" for the player in the therapist panel and save. Without it no frame leaves the laptop.
 
@@ -62,7 +66,7 @@ Keyboard play (no camera needed): **A / D** normal step, **Q / E** high step (st
 
 Useful URLs: `?demo=1` short game for judges, `?scene=play&act=garden&auto=1` jump to act 2 with auto-walk, `?scene=home` preview the end screen.
 
-How it plays: act 1 walk home (keep at least 80 steps per minute; your normal step height is measured here), act 2 high-step onto the flowers in your foot's lane, act 3 lift the foot the seed is aiming at. Heights are relative to your own normal step, and the lift bars beside the footprints show your lift against the line you need.
+How it plays: act 1 walk home (keep at least 80 steps per minute; your normal step height is measured here), act 2 step onto the flowers at the white line. Flowers come on a beat: the lanes alternate and each flower is an odd number of steps after the last (three at the default plant speed), so a steady walker meets every flower with the other foot; the rounds repeat the garden. The seed act (lift the foot a seed is aiming at) is off until the therapist sets a seed count above 0. Heights are relative to your own normal step, and the lift bars beside the footprints show your lift against the line you need.
 
 Files: `logic.js` rules (tested), `game.js` Phaser scenes and art, `bus.js` foot events, `vision.js` camera step detector (tested), `camera-panel.js` the V panel, `bridge.js` events from the server, `warp.js` projector corners, `zone.js` guided zone setup, `ambient.js` garden and outside HUD, `projection.css` projector layout.
 
@@ -117,4 +121,4 @@ Please send back: a photo of the projected grid on the mat with the hall lights 
 
 ## Shoe mode (feet.py on the stand camera)
 
-Run `python feet.py --server https://<server> --camera-name <stand camera>` on the Mac (add `--rotate 90` for a camera on its side and `--gamma 0.5` in a dark room), then in `/camera.html` press **Calibrate shoes** and click the four projected zone corners in the picture (FRONT-LEFT, FRONT-RIGHT, BACK-RIGHT, BACK-LEFT) and untick **pose steps**. A shoe on a flower smashes it, a shoe on a seed splats, a thing that passes the toes resolves the other way; steps come from the shoes' swing on the belt. Cyan rings under the shoes on the field show the calibration is right. Details: `docs/DETECTION_HANDOFF.md`.
+Run `python feet.py --server https://<server> --camera-name <stand camera>` on the Mac (add `--rotate 90` for a camera on its side and `--gamma 0.5` in a dark room), then in `/camera.html` press **Calibrate shoes** and click the four projected zone corners in the picture (FRONT-LEFT, FRONT-RIGHT, BACK-RIGHT, BACK-LEFT) and untick **pose steps**. A shoe on a flower smashes it, a shoe on a seed splats, a thing that passes the toes resolves the other way; steps come from the shoes' swing on the belt. Cyan rings under the shoes on the field show the calibration is right. If the feet stand below the white line (the camera window shows where the rings sit), open the game with `?line=0.68` (share of the field height, 0.4 to 0.85) so the line is where the front foot lands. Details: `docs/DETECTION_HANDOFF.md`.

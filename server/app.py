@@ -7,6 +7,7 @@ Run from the repo root:
 Environment (.env next to this repo root, never committed):
     GEMINI_API_KEY      coach cues and reports (MLH Best Use of Gemini API); rule-based without it
     GEMINI_MODEL        default gemini-flash-latest
+    GEMINI_REVIEW_MODEL the gait review's model (pin one; "-latest" aliases can change); default GEMINI_MODEL
     BACKBOARD_API_KEY   long-term therapist memory per player (MLH Best Use of Backboard)
     MONGODB_URI         players and sessions in MongoDB Atlas; a local JSON file without it
     VISA_MODE           mock (default) until Visa sandbox credentials exist
@@ -59,12 +60,14 @@ from server.perceive import MAX_FRAME_CHARS, MAX_FRAMES, MAX_SESSION_FRAMES
 app = FastAPI(title="Zombie Walk Home")
 MAX_PERCEIVE_BYTES = MAX_FRAMES * MAX_FRAME_CHARS + 100_000
 MAX_SESSION_BYTES = MAX_SESSION_FRAMES * MAX_FRAME_CHARS + 100_000
+MAX_GAIT_BYTES = 2_000_000   # a whole-session gait summary with per-act parts is well under this
 
 
 @app.middleware("http")
 async def cap_perceive_body(request: Request, call_next):
     """Perception routes relay to a paid API: refuse a huge body before it is read."""
-    limits = {"/api/perceive": MAX_PERCEIVE_BYTES, "/api/perceive/session": MAX_SESSION_BYTES, "/api/events": MAX_EVENTS_BYTES}
+    limits = {"/api/perceive": MAX_PERCEIVE_BYTES, "/api/perceive/session": MAX_SESSION_BYTES, "/api/events": MAX_EVENTS_BYTES,
+              "/api/gait/final": MAX_GAIT_BYTES}
     if request.method == "POST" and request.url.path in limits:
         size = request.headers.get("content-length")
         if size is None or not size.isdigit() or int(size) > limits[request.url.path]:   # every sender declares a length
@@ -274,6 +277,9 @@ def host_name(host: str) -> str:
 
 
 def clip_url(request: Request, clip_id: str) -> str:
+    # PUBLIC_URL (for example a Tailscale Funnel or tunnel address) wins: a judge's phone is not on the tailnet.
+    if public := os.environ.get("PUBLIC_URL", "").strip().rstrip("/"):
+        return f"{public}/clips/{clip_id}"
     # Forwarded headers count only from a proxy on this machine (Tailscale serve); anyone else could spoof them.
     via_local_proxy = request.client is not None and request.client.host in {"127.0.0.1", "::1"}
     fwd_host = request.headers.get("x-forwarded-host", "").split(",")[0].strip() if via_local_proxy else ""
@@ -352,4 +358,7 @@ def index() -> FileResponse:
     return FileResponse(WEB / "index.html")
 
 
+DASHBOARD = ROOT / "dashboard" / "dist"   # built with `npm run build` in dashboard/; absent until then
+if DASHBOARD.is_dir():
+    app.mount("/dashboard", StaticFiles(directory=DASHBOARD, html=True), name="dashboard")
 app.mount("/", StaticFiles(directory=WEB), name="web")
