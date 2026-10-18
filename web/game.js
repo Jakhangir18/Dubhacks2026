@@ -325,7 +325,7 @@ window.addEventListener('keydown', (e) => {
 let lastReportId = null;
 function openReport(id) {
   lastReportId = id;
-  return window.open(`/report.html?id=${encodeURIComponent(id)}`, 'zombiewalk-report') !== null;
+  return window.open(`/therapist.html?session=${encodeURIComponent(id)}`, 'zombiewalk-report') !== null;
 }
 
 // The belt keeps moving after the game, so walking would start the next game before the walk review arrives: a

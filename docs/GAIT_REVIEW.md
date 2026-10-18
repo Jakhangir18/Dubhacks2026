@@ -15,7 +15,7 @@ open http://localhost:8000/ http://localhost:8000/therapist.html                
 
 - In the therapist panel, pick the player and tick **AI gait review** (consent: only numbers, never video, names or the therapist's notes, go to Gemini). Without it the rule-based review still runs on the laptop, and no side-camera number reaches Gemini or Backboard.
 - `gait.py` waits for a game to start, records it, posts a live summary every 15 s (the coach may use the near leg's knee bend and toe height for its cues), and posts the whole walk, cut by act, when the game saves the session. It keeps running for the next game; `--once` stops after one, `--player NAME` follows one player only.
-- The home card shows "The coach is reviewing your walk…", then the player's feedback, spoken. The panel's session row and `/report.html?id=<id>` show the full review; **Apply suggested settings** puts the suggestion into the player's limits.
+- The home card shows "The coach is reviewing your walk…", then the player's feedback, spoken. The dashboard (`/therapist.html?session=<id>`) shows the full review; **Apply suggested settings** puts the suggestion into the player's limits.
 
 Both detectors on one Mac compete for it. The review's data quality says when the side camera lost frames ("skipped by a busy computer"); then run `gait.py --model lite`, close the camera window's pose steps, and keep only the windows you need open.
 

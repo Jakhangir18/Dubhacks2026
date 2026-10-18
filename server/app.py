@@ -358,7 +358,4 @@ def index() -> FileResponse:
     return FileResponse(WEB / "index.html")
 
 
-DASHBOARD = ROOT / "dashboard" / "dist"   # built with `npm run build` in dashboard/; absent until then
-if DASHBOARD.is_dir():
-    app.mount("/dashboard", StaticFiles(directory=DASHBOARD, html=True), name="dashboard")
 app.mount("/", StaticFiles(directory=WEB), name="web")
