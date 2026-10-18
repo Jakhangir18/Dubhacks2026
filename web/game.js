@@ -67,10 +67,16 @@ function say(text) {
     currentUtterance = u;
     u.rate = 1.05;
     const unduck = () => { if (id === speechId) { sound.duck(false); currentUtterance = null; clearTimeout(unduckTimer); } };
+    // Safety net if onend never arrives: check after an estimated speaking time, and keep checking
+    // while the voice is still talking, so the music never comes back mid-sentence.
+    const check = () => {
+      if (id !== speechId) return;
+      if (window.speechSynthesis.speaking) unduckTimer = setTimeout(check, 1000);
+      else unduck();
+    };
     u.onstart = () => { if (id === speechId) sound.duck(true); };
     u.onend = u.onerror = unduck;
-    // Safety net if onend never arrives: about 2.5 words a second plus a second.
-    unduckTimer = setTimeout(unduck, (String(text).split(/\s+/).length / 2.5 + 1) * 1000);
+    unduckTimer = setTimeout(check, (String(text).split(/\s+/).length / 2.5 + 1) * 1000);
     speechSynthesis.speak(u);
   } catch { sound.duck(false); }
 }
