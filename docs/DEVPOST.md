@@ -21,10 +21,12 @@ Children and teens who are given movement exercises do most of them at home, and
 
 A projector paints a garden on the floor. You are a zombie walking home.
 
-1. **Walk home:** keep a steady pace; the game measures your normal step height.
-2. **Stomp the flowers:** high-step onto the glowing flower in your foot's lane.
-3. **Seed storm:** lift the foot a seed is aiming at.
-4. **Home:** a report card, a note from the coach, and a reward from your family.
+1. **Intro:** the therapist presses Start (on the dashboard or Enter); Gus the zombie walks through a night garden toward the house where Maya, the AI therapist, waits. Then: "stand on the white strips".
+2. **Warm-up:** walk at a steady pace; the game learns your normal step.
+3. **Three rounds on the beat:** round 1 angry flowers, round 2 pea spitters, round 3 spikes. Every target arrives on an odd number of steps, alternating feet, so the game trains an even, rhythmic gait; every fourth one is golden, four hits make a bouquet. Each round is a little faster.
+4. **Between rounds:** the world stops, Maya speaks a short analysis of the round you just played (Gemini, using the side camera's numbers when the family consented), then 3-2-1 and the next round starts by itself.
+5. **Two endings:** stomp 60% or more and Gus gets home before sunrise and Maya opens the door; less, and he is almost home at dawn with Maya waving from the window. Never a "you failed".
+6. **Dashboard:** one page for the therapist and the family: links and a QR code for the phone camera, live checks that both cameras work, Start, Pause, Next round, End and speed controls, both camera feeds with the live skeleton, "moments" (annotated photos of a knee that stayed low, and of a good step, with a plain explanation), every walk with its review, and a chat with Maya about your own photos.
 
 A camera above the belt finds your shoes (YOLO-World), and a phone at the side measures your knees and steps (MediaPipe Pose). Stomps and dodges count only for a timed lift above your own normal step, and only while you are really walking. The AI coach (Gemini) speaks one short cue at a time and adapts the game, but only inside limits your therapist sets in a panel. With the family's Perceptron consent, Perceptron Mk1.5 double-checks the camera: it looks at a few frames of the feet around each stomp and dodge, answers in a fixed JSON shape, and the agreement count shows on the Home screen and in the therapist panel. The coach remembers each player across sessions (Backboard) and, after the walk, writes a gait review with notes for the player, the parent and the therapist (Gemini). Maya, the AI therapist on the dashboard, answers questions about the walk and, with consent, looks at the side camera's annotated leg photos. With sharing switched on (`?share=1`), the walk ends with a short game clip and a QR code; a completed session picks a reward the parents chose, through a Visa checkout that is a labelled mock (no payment).
 
@@ -46,6 +48,8 @@ A camera above the belt finds your shoes (YOLO-World), and a phone at the side m
 - Walking in place lands every step in its own lane, so plain walking scored everything. We switched to timed high steps measured against each player's own normal step.
 - A single camera cannot measure millimetre toe clearance, so we measure what it can (centimetre lifts, step timing) and say so.
 - A 150-lumen projector in a lit hall: high-contrast art on a white mat.
+- **The physical setup is the hard part, and it is fragile.** Every time we rebuild the rig, five things must line up: the projector's four corners on the belt (the field is warped to them, and the real projection is rotated 90°, so the garden layout had to adapt to any corner geometry), the overhead camera's calibration to the same field, the shoe detector's sensitivity to the room's light (a brighter hall turns the detector's view of two feet into one bright spot), the phone at knee height with the whole body in frame, and the browser's audio permissions. We hit each of these on the pad today: a Continuity iPhone silently renumbered the Mac's cameras so the shoe detector opened the laptop webcam; Chrome blocked the coach's voice until someone clicked the game window; the free Gemini text-to-speech tier rate-limited the voice mid-game. Our answers: the dashboard's pre-flight shows game screen, top camera and phone as green or amber with a one-line fix each; the therapist can start the walk from the dashboard even when the floor camera misses the first steps; the camera page picks the stand camera by name; one script starts or restarts every service on the server.
+- Speech timing: the voice needs about 4 s to arrive and the rest countdown waits for it, so a safety timer that was too short cut lines mid-sentence until we sized it to the line.
 
 ## Accomplishments
 
