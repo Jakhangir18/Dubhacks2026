@@ -109,6 +109,8 @@ Please send back: a photo of the projected grid on the mat with the hall lights 
 
 ## Two screens: projector and laptop
 
-- Projector: open the game (`/`, add `?demo=1` for the short version, `&floor=1` for a white board) and drag the window to the projector screen; F for fullscreen.
-- Laptop: press O in the game (or open `/camera.html`). This window owns the camera: pick the camera, set the player's height, press Start. It shows the camera picture with the leg skeleton, live lift values and a graph, every step and plant, a copy of the projected game, and every Perceptron verdict. Leave the game's own camera (V) off.
+- Laptop first: open `/camera.html` on the laptop screen (O in a game window that is not fullscreen opens it too).
+- Projector: open the game (`/`, add `?demo=1` for the short version, `&floor=1` for a white board) in a second window, drag it to the projector screen, then F for fullscreen.
+- Keep the camera window visible: Chrome stops the camera in a hidden or fully covered window.
+- The camera window owns the camera: pick the camera, set the player's height, press Start. It shows the camera picture with the leg skeleton, live lift values and a graph, every step and plant, a copy of the projected game, and every Perceptron verdict. Leave the game's own camera (V) off.
 - Both windows must be in the same browser on the same laptop; they talk over a BroadcastChannel.

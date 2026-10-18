@@ -92,7 +92,10 @@ onFoot((ev) => {
 });
 
 // Camera start and stop, as in the game's camera panel.
+let starting = false;
 async function start() {
+  if (starting) return;   // one pose model, one camera stream at a time
+  starting = true;
   try {
     $('st-cam').textContent = 'loading the pose model…';
     const id = $('dev').value || store.get('zombiewalk.camera', null);
@@ -104,7 +107,7 @@ async function start() {
     store.set('zombiewalk.camera', current);
   } catch (e) {
     $('st-cam').textContent = `camera error: ${e?.name || ''} ${e?.message || e}`;
-  }
+  } finally { starting = false; }
 }
 $('start').onclick = start;
 $('stop').onclick = () => { tracker.stop(); $('st-cam').textContent = 'camera off'; $('st-cam').classList.remove('on'); };
@@ -112,6 +115,7 @@ $('dev').onchange = () => { store.set('zombiewalk.camera', $('dev').value); star
 $('height').onchange = () => {
   const v = Number($('height').value);
   if (v >= 90 && v <= 210) { tracker.heightCm = v; tracker.cmPerPx = null; store.set('zombiewalk.heightCm', v); }
+  else $('height').value = tracker.heightCm;
 };
 
 // Perceptron runs here, on this window's camera, on behalf of the game window.
@@ -167,6 +171,8 @@ listen((m) => {
 setInterval(() => {
   send('camera-alive');
   const live = performance.now() - gameSeen < 3000;
+  // The game window closed or reloaded mid-walk: stop sending leg frames to Perceptron.
+  if (perceiver.enabled && performance.now() - gameSeen > 5000) perceiver.stop();
   $('st-game').textContent = live ? 'game window linked' : 'game window not open';
   $('st-game').classList.toggle('on', live);
 }, 1000);

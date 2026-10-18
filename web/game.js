@@ -125,6 +125,18 @@ let perceiver = localPerceiver;
 if (params.has('scene')) window.zombiewalk = { perceiver: localPerceiver, tracker: cameraPanel.tracker };   // development and end-to-end tests
 
 // Foot events from the camera window on the laptop screen; the game stamps them on arrival like any source.
+// While the camera window runs, this window's own camera (V) would count every step twice: ignore it.
+const doubleCamera = (ev) => ev.source === 'camera' && cameraWindowAlive();
+
+// When the camera window appears, give it the current banner at once instead of at the next update.
+let cameraWasAlive = false;
+listen((m) => {
+  if (m.type !== 'camera-alive') return;
+  if (!cameraWasAlive) send('game', { state: { ...gardenState } });
+  cameraWasAlive = true;
+});
+setInterval(() => { cameraWasAlive = cameraWindowAlive(); }, 1000);
+
 listen((m) => {
   if (m.type !== 'foot' || !['L', 'R'].includes(m.foot) || !['lift', 'strike'].includes(m.kind)) return;
   emitFoot({ foot: m.foot, kind: m.kind, liftCm: Number.isFinite(m.liftCm) ? m.liftCm : undefined, source: 'camera-window' });
@@ -485,6 +497,7 @@ class Title extends Phaser.Scene {
     this.tweens.add({ targets: z, y: z.y - 10, angle: 3, duration: 650, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
     const steps = [];
     this.off = onFoot((ev) => {
+      if (doubleCamera(ev)) return;
       if (ev.kind !== 'strike') return;
       steps.push(performance.now());
       while (steps.length && performance.now() - steps[0] > 3000) steps.shift();
@@ -544,6 +557,7 @@ class Play extends Phaser.Scene {
     };
 
     this.off = onFoot((ev) => {
+      if (doubleCamera(ev)) return;
       if (this.paused || zone.active) return;                          // the world is frozen; steps do not count
       // Stamp with the game clock, interpolated to the moment the event arrived between two frames,
       // so a slow frame rate does not bunch steps together.
@@ -1017,7 +1031,7 @@ mirror.width = 180; mirror.height = 320;
 let lastMirror = 0;
 window.zombieGame.events.on('postrender', () => {
   const now = performance.now();
-  if (now - lastMirror < 300 || !cameraWindowAlive()) return;
+  if (now - lastMirror < 500 || !cameraWindowAlive()) return;
   lastMirror = now;
   mirror.getContext('2d').drawImage(window.zombieGame.canvas, 0, 0, mirror.width, mirror.height);
   send('mirror', { url: mirror.toDataURL('image/jpeg', 0.6) });

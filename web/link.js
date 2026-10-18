@@ -16,7 +16,7 @@ export function listen(fn) {
 }
 
 // The camera window says hello every second; the game treats it as present for 3 s after the last one.
-let cameraSeen = 0;
+let cameraSeen = -Infinity;   // no camera window until it says hello
 listen((m) => { if (m.type === 'camera-alive') cameraSeen = performance.now(); });
 export const cameraWindowAlive = () => performance.now() - cameraSeen < 3000;
 
@@ -64,6 +64,7 @@ export class RemotePerceiver {
   }
 
   sessionReport() {
+    if (!cameraWindowAlive()) return Promise.resolve(null);   // closed mid-walk: nobody would answer
     const id = this.nextId++;
     send('perceiver-report-request', { id });
     return new Promise((resolve) => {
