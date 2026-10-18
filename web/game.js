@@ -1,6 +1,6 @@
 // Zombie Walk Home: Phaser scenes, art, HUD and input. Rules live in logic.js.
 // Floor projection: things arrive at the pad's front edge; ghost feet mark the toes below.
-import { ease, plan, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
+import { ease, plan, endRest, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
 import { connectBridge, SHOES_EVENT, FRAME_EVENT, MARKS_EVENT } from './bridge.js';
@@ -91,19 +91,24 @@ let speechId = 0;
 let currentUtterance = null;   // held so Chrome cannot garbage-collect it before onend fires
 let currentAudio = null;
 let unduckTimer = null;
+let finishSpeech = null;
 
 function say(text, { personal = false } = {}) {
-  if (!settings.voice || !text) return;
-  const id = ++speechId;
   stopVoice();
-  if (settings.geminiVoice && (!personal || settings.aiConsent)) {
-    speakGemini(text, personal, id).catch(() => { if (id === speechId) speakBrowser(text, id); });
-  } else {
-    speakBrowser(text, id);
-  }
+  if (!settings.voice || !text) return Promise.resolve();
+  const id = ++speechId;
+  return new Promise(resolve => {
+    const timer = setTimeout(() => { if (id === speechId) { ++speechId; stopVoice(); } },
+      Math.max(4000, Math.min(14000, String(text).trim().split(/\s+/).length * 400)));
+    finishSpeech = () => { clearTimeout(timer); finishSpeech = null; resolve(); };
+    if (settings.geminiVoice && (!personal || settings.aiConsent)) {
+      speakGemini(text, personal, id).catch(() => { if (id === speechId) speakBrowser(text, id); });
+    } else speakBrowser(text, id);
+  });
 }
 
 function stopVoice() {
+  finishSpeech?.();
   try { window.speechSynthesis?.cancel(); } catch { /* none */ }
   if (currentAudio) { currentAudio.pause(); URL.revokeObjectURL(currentAudio.src); currentAudio = null; }
   sound.duck(false);
@@ -117,7 +122,7 @@ async function speakGemini(text, personal, id) {
   const blob = await r.blob();
   if (id !== speechId) return;   // a newer line took over while this one was on its way
   const audio = new Audio(URL.createObjectURL(blob));
-  const done = () => { if (currentAudio === audio) { URL.revokeObjectURL(audio.src); currentAudio = null; sound.duck(false); } };
+  const done = () => { if (currentAudio === audio) { URL.revokeObjectURL(audio.src); currentAudio = null; sound.duck(false); if (id === speechId) finishSpeech?.(); } };
   audio.onended = audio.onerror = done;
   currentAudio = audio;
   sound.duck(true);
@@ -144,7 +149,7 @@ function speakBrowser(text, id) {
     browserVoice = browserVoice ?? pickVoice();
     if (browserVoice) u.voice = browserVoice;
     u.rate = 1.05;
-    const unduck = () => { if (id === speechId) { sound.duck(false); currentUtterance = null; clearTimeout(unduckTimer); } };
+    const unduck = () => { if (id === speechId) { sound.duck(false); currentUtterance = null; clearTimeout(unduckTimer); finishSpeech?.(); } };
     // Safety net if onend never arrives: check after an estimated speaking time, and keep checking
     // while the voice is still talking, so the music never comes back mid-sentence.
     const check = () => {
@@ -529,13 +534,18 @@ function floorLayout(W, H) {
 // pad and burst (depth -19), and never over a lane or the hit line, which start where the strips end.
 function makeFence(scene, L) {
   const inner = { L: L.lanes.L - L.laneW / 2, R: L.lanes.R + L.laneW / 2 };
-  if (scene.textures.exists('fence-left')) scene.add.image(0, 0, 'fence-left').setOrigin(0, 0).setDisplaySize(inner.L, L.H).setDepth(-19);
-  if (scene.textures.exists('fence-right')) scene.add.image(L.W, 0, 'fence-right').setOrigin(1, 0).setDisplaySize(L.W - inner.R, L.H).setDepth(-19);
+  const fence = scene.add.graphics().setDepth(-19);
+  fence.fillStyle(0xb6d990); fence.fillRect(0, 0, inner.L, L.H); fence.fillRect(inner.R, 0, L.W - inner.R, L.H);
+  fence.lineStyle(7, 0xf1efd0);
+  for (const x of [inner.L / 2, (inner.R + L.W) / 2]) {
+    fence.lineBetween(x, 0, x, L.H);
+    for (let y = 20; y < L.H; y += 65) fence.lineBetween(x - 16, y, x + 16, y);
+  }
 }
 
 function makeFloor(scene, L) {
   scene.bg = scene.add.graphics().setDepth(-20);
-  scene.bg.fillStyle(0x10241c); scene.bg.fillRect(0, 0, L.W, L.H);
+  scene.bg.fillStyle(0x72aa50); scene.bg.fillRect(0, 0, L.W, L.H);
   makeFence(scene, L);
   const rows = Math.ceil((L.H - L.top) / L.rowH) + 3;
   scene.board = Array.from({ length: rows * 2 }, () => scene.add.image(0, 0, 'tile-grass-light').setDepth(-18));
@@ -562,7 +572,7 @@ function drawFloor(scene, L, travelledCm, t, gated = false) {
         .setDisplaySize(L.laneW - L.gap / 2, L.rowH + 1);
     }
     const y = L.top + (row - 1) * L.rowH + offset;
-    tile.setPosition(L.lanes[col ? 'R' : 'L'], y).setAlpha((y > L.zoneY && !BOARD ? 0.4 : 1) * (gated ? 0.4 : 1));
+    tile.setPosition(L.lanes[col ? 'R' : 'L'], y).setAlpha((y > L.zoneY && !BOARD ? 0.4 : 1) * (gated ? 0.85 : 1));
   }
   scene.rowIndex = rowIndex;
   const h = scene.hitLine;
@@ -714,16 +724,8 @@ class Title extends Phaser.Scene {
   create() {
     this.started = false;
     publishGarden({ act: 'title', cadence: 0, paceOk: true, paused: false,
-      title: 'ZOMBIE WALK HOME', score: '', coach: 'Walk in place or press Enter · Z to mark your zone', pace: '', progress: 0 });
-    // The full-window intro is drawn by AmbientGarden; input stays in this scene.
-    const steps = [];
-    this.off = onFoot((ev) => {
-      if (doubleCamera(ev)) return;
-      if (ev.kind !== 'strike') return;
-      steps.push(performance.now());
-      while (steps.length && performance.now() - steps[0] > 3000) steps.shift();
-      if (steps.length >= 4) this.go();
-    });
+      title: 'ZOMBIE WALK HOME', score: '', coach: 'Press Enter to begin · Z to mark your zone', pace: '', progress: 0 });
+    this.off = () => {};
     this.input.keyboard.on('keydown-ENTER', () => this.go());
     this.scale.on('resize', this.restartOnResize, this);
     this.events.once('shutdown', () => { this.off(); this.scale.off('resize', this.restartOnResize, this); });
@@ -733,7 +735,8 @@ class Title extends Phaser.Scene {
     if (this.started || zone.active) return;
     sound.unlock();
     this.started = true;
-    playerReady.then(() => this.scene.start('play'));
+    publishGarden({ act: 'intro' });
+    this.time.delayedCall(6500, () => playerReady.then(() => this.scene.start('play', { awaiting: true })));
   }
 }
 
@@ -741,12 +744,14 @@ class Title extends Phaser.Scene {
 class Play extends Phaser.Scene {
   constructor() { super('play'); }
 
-  create() {
+  create(data = {}) {
     clip.cancel();
     sound.setMusic(true);
     this.paused = false;
     this.highSound = { L: false, R: false };
     this.g = newGame(settings.limits);
+    this.awaiting = !!data.awaiting; this.readyGame = newGame(); this.readySteps = []; this.countdownAt = null;
+    this.countdownText = this.add.text(360, 540, '', { ...txt(130, C.white), align: 'center', wordWrap: { width: 620 } }).setOrigin(.5).setDepth(100);
     this.g.toeBaseCm = this.g.toeCm = -fieldDist(this.layout().toeY, this.layout());   // world cm from the hit line to the toes
     this.shoeRings = ['L', 'R'].map(() => this.add.ellipse(0, 0, 150, 80).setStrokeStyle(10, C.cyan, 0.8).setVisible(false).setDepth(11));
     // One cue word per lane above the nearest thing: READY while it approaches, NOW! while its window is open.
@@ -798,6 +803,10 @@ class Play extends Phaser.Scene {
       if (doubleCamera(ev)) return;
       if (shoesLive(this.g) && POSE_SOURCES.has(ev.source)) return;
       if (this.paused || zone.active) return;                          // the world is frozen; steps do not count
+      if (this.awaiting) {
+        if (ev.kind === 'strike') this.readyStrike();
+        return;
+      }
       // Stamp with the game clock, interpolated to the moment the event arrived between two frames,
       // so a slow frame rate does not bunch steps together.
       const e = addEvent(this.g, { ...ev, t: this.g.t + (performance.now() - this.frameWall) / 1000 });
@@ -835,7 +844,7 @@ class Play extends Phaser.Scene {
     const jump = params.get('act');
     if (jump) { startAt(this.g, jump); params.delete('act'); }   // development shortcut, first game only
     this.nextSegment();
-    this.showAct();
+    if (!this.awaiting) this.showAct();
   }
 
   // Wall-clock seconds since the game asked for its session, pauses included: the side camera cuts its recording by them.
@@ -873,6 +882,13 @@ class Play extends Phaser.Scene {
 
   // Shoe boxes from feet.py while this game runs: onto the field, into the rules, with the usual step feedback.
   feedShoes(boxes) {
+    if (this.awaiting) {
+      const before = this.readyGame.stats.steps;
+      this.readyGame.t = performance.now() / 1000;
+      addShoes(this.readyGame, mapShoes(boxes, this.layout()), this.readyGame.t);
+      if (this.readyGame.stats.steps > before) this.readyStrike();
+      return;
+    }
     const before = this.g.stats.steps;
     addShoes(this.g, mapShoes(boxes, this.layout()), this.g.t + (performance.now() - this.frameWall) / 1000);
     this.lastShoes = performance.now();
@@ -1033,7 +1049,7 @@ class Play extends Phaser.Scene {
       const out = await withTimeout(api('/api/coach', { player: settings.player, summary: sum }), 7000);
       if (!this.sys.isActive() || this.g !== g) return;   // a new game started meanwhile
       if (out.params) applyParams(g, out.params);
-      cue = out.say;
+      cue = out.say || this.localCue(sum);
     } catch {
       cue = this.localCue(sum);
     }
@@ -1041,13 +1057,14 @@ class Play extends Phaser.Scene {
     // A late reply may still adjust the therapist's parameters as before, but must not overwrite a new story beat.
     if (g.act !== sum.act || g.round !== sum.rounds) return;
     if (g.round > 1) cue = cue.replace(/flowers/gi, 'plants').replace(/flower/gi, 'plant');
+    if (speak && g.act === 'rest' && !/Next round in three/i.test(cue)) cue += ' Next round in three!';
     if (speak && g.act === 'rest' && !new RegExp(`round ${g.round - 1} done`, 'i').test(cue)) {
       cue = `Round ${g.round - 1} done. ${cue}`;
     }
     this.coachLine = cue;
     this.nextGardenUpdate = 0;
     logRemote({ what: 'cue', say: cue, act: g.act, round: g.round, t: Math.round(g.t) });
-    if (speak) say(cue, { personal: true });
+    if (speak) await say(cue, { personal: true });
   }
 
   localCue(sum) {
@@ -1063,11 +1080,30 @@ class Play extends Phaser.Scene {
     return 'Great walking, keep it up';
   }
 
+  readyStrike() {
+    const now = performance.now();
+    this.readySteps = this.readySteps.filter(t => now - t <= 3000);
+    this.readySteps.push(now);
+    if (this.readySteps.length >= 4) { this.awaiting = false; this.countdownText.setText(''); for (const foot of Object.values(this.feet)) foot.setAlpha(.3); this.showAct(); }
+  }
+
   update(_time, deltaMs) {
     if (this.paused || zone.active) return;
     const dt = deltaMs / 1000;   // Phaser already bounds a stalled frame (minFps 5, smoothed over frames)
     this.frameWall = performance.now();
+    if (this.awaiting) {
+      drawFloor(this, this.layout(), 0, _time / 1000);
+      for (const foot of Object.values(this.feet)) foot.setAlpha(.65 + .2 * Math.sin(_time / 600));
+      this.countdownText.setFontSize(64).setText('Stand on the white strips');
+      publishGarden({ act: 'ready', title: 'READY TO WALK', coach: 'Stand on the white strips', paceOk: true });
+      return;
+    }
     const out = step(this.g, dt);
+    if (this.g.act === 'rest' && this.countdownAt !== null) {
+      const elapsed = this.g.t - this.countdownAt;
+      this.countdownText.setFontSize(180).setText(['3', '2', '1', 'GO!'][Math.min(3, Math.floor(elapsed))]);
+      if (elapsed >= 4) { endRest(this.g); out.actChanged = true; this.countdownAt = null; this.countdownText.setText(''); }
+    }
     const L = this.layout();
 
     if (out.actChanged) {
@@ -1095,7 +1131,12 @@ class Play extends Phaser.Scene {
         touch: th.touchedT === undefined ? null : Math.round((th.touchedT - th.arriveT) * 100) / 100 });
     }
     if (out.actChanged) logRemote({ what: 'act', act: g.act, round: g.round, t: Math.round(g.t) });
-    if (out.actChanged && g.act === 'rest') this.askCoach(true);   // between rounds the coach speaks about the round just played
+    if (out.actChanged && g.act === 'rest') {
+      const round = g.round;
+      this.askCoach(true).finally(() => {
+        if (this.sys.isActive() && this.g === g && g.act === 'rest' && g.round === round) this.countdownAt = g.t;
+      });
+    }   // between rounds the coach speaks about the round just played
     if (out.bouquet) {   // four petals banked: both lanes light up gold
       this.showFeedback('BOUQUET!', C.yellow);
       for (const lane of ['L', 'R']) this.laneFlash(lane, C.yellow, 500, L, 0.8);
@@ -1104,7 +1145,7 @@ class Play extends Phaser.Scene {
     if (Math.floor(g.t / 5) !== Math.floor((g.t - dt) / 5)) logRemote({ what: 'pace', cadence: out.pace.cadence, steps: g.stats.steps, form: Math.round(out.form * 100), shoes: shoesLive(g), base: g.base, t: Math.round(g.t) });
 
     // coach cue every 20 s: the server therapist (Gemini inside the therapist's limits), local rules offline
-    if (this.g.t - this.lastCue > 20) {
+    if (this.g.act !== 'rest' && this.g.t - this.lastCue > 20) {
       this.lastCue = this.g.t;
       this.askCoach();
     }
@@ -1285,9 +1326,9 @@ class Home extends Phaser.Scene {
     publishGarden({ act: 'home', ending: this.endingKind, cadence: 0, paceOk: true, paused: false, title: ending.title,
       score: `${s.score} pts`, progress: 1, pace: `${s.steps} steps · form ${s.formPct}%`, coachColor: '', coach: `${ending.storyDetail} · Walk to play again` });
     const { width: W, height: H } = this.scale;
-    gardenBackdrop(this, W, H);
-    this.house = this.add.image(W * 0.62, H * 0.18, 'house');
-    this.gus = this.add.image(W * 0.4, H * 0.2, 'gus-celebrate');
+    // The shared ambient garden remains visible behind the summary card.
+    this.house = this.add.image(W * 0.62, H * 0.18, 'house').setVisible(false);
+    this.gus = this.add.image(W * 0.4, H * 0.2, 'gus-celebrate').setVisible(false);
     this.confetti = this.add.particles(W / 2, H * 0.19, 'spark', { speed: { min: 80, max: 260 }, lifespan: 1400, quantity: 2,
       frequency: 120, maxParticles: 36, maxAliveParticles: 36,
       tint: [C.yellow, C.green, C.cyan, C.magenta], scale: { start: 1.2, end: 0 } });
@@ -1532,7 +1573,7 @@ window.zombieGame = new Phaser.Game({
   // WebGL renders particle tint palettes; Phaser falls back to Canvas when unavailable.
   type: Phaser.AUTO,
   parent: 'stage',
-  backgroundColor: '#000000',
+  transparent: true,
   // RESIZE measures the parent's transformed bounds and would shrink the board twice.
   // Size the source canvas explicitly; Warp alone maps it to the walking zone.
   scale: { mode: Phaser.Scale.NONE, ...FIELD },

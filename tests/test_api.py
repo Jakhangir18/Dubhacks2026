@@ -58,7 +58,7 @@ def test_coach_model_output_is_clamped(monkeypatch):
 def test_the_rest_line_is_not_cut_off():
     rest = {"act": "rest", "cadence": 100, "asymmetryPct": 5, "thisRound": {"round": 2, "hit": 3, "n": 6}}
     out = client.post("/api/coach", json={"player": "Mia", "summary": rest}).json()
-    assert out["say"].endswith("Walk when you are ready.")              # all of it, not the first 14 words
+    assert out["say"].endswith("Next round in three!")              # all of it, not the first 14 words
     walking = client.post("/api/coach", json={"player": "Mia", "summary": summary(act="garden", stompPct=40)}).json()
     assert len(walking["say"].split()) <= 14
 

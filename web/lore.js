@@ -14,9 +14,9 @@ export const ACTS = {
   },
   rest: {
     title: 'ROUND DONE · CATCH YOUR BREATH',
-    intro: ['Nice round!', 'Walk when you are ready.'],
-    hint: 'Walk in place to start the next round',
-    how: 'Walk in place to start the next round',
+    intro: ['Nice round!', 'Next round in three!'],
+    hint: 'Next round in three!',
+    how: 'Next round in three!',
   },
   storm: {
     title: 'ACT 3 · PIP’S HICCUPS',

@@ -48,6 +48,12 @@ export class WalkingZone {
       if (this.active) this.mountHandles();
       this.apply();
     });
+    window.addEventListener('storage', e => {
+      if (e.key !== Warp.CORNERS_KEY || this.active) return;
+      const saved = Warp.store.get(Warp.CORNERS_KEY, null);
+      if (!valid(saved)) return;
+      this.corners = saved; this.saved = true; this.apply();
+    });
     // Capture Enter before Phaser can start the title scene on the same key press.
     window.addEventListener('keydown', e => {
       if (!this.active || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;

@@ -10,22 +10,26 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
-SHOTS = Path('/tmp/rounds-look-shots')
+SHOTS = Path('/tmp/rounds-look-shots/fit')
 CHROME = '/home/ubuntu/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome'
 
 
-async def main():
-    SHOTS.mkdir(exist_ok=True)
+async def run(corners, label):
+    SHOTS.mkdir(parents=True, exist_ok=True)
     errors, failed_assets, sessions = [], [], []
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(executable_path=CHROME, headless=True,
             args=['--use-gl=swiftshader', '--enable-unsafe-swiftshader'])
         page = await browser.new_page(viewport={'width': 1920, 'height': 1080})
-        page.on('pageerror', lambda error: errors.append(str(error)))
+        def page_error(error):
+            errors.append(str(error))
+            print('PAGE ERROR:', error, flush=True)
+
+        page.on('pageerror', page_error)
         page.on('response', lambda response: failed_assets.append(response.url)
                 if '/art/' in response.url and response.status >= 400 else None)
+        await page.add_init_script("localStorage.setItem('zombiewalk.corners', " + json.dumps(json.dumps(corners)) + ");")
         await page.add_init_script("""
-          localStorage.setItem('zombiewalk.corners', JSON.stringify([[650,30],[1270,30],[1390,1050],[530,1050]]));
           window.storyStates = [];
           window.spoken = [];
           const speak = speechSynthesis.speak.bind(speechSynthesis);
@@ -48,31 +52,43 @@ async def main():
         await page.route('**/api/session/start', persistence)
         await page.goto('http://127.0.0.1:8790/?demo=1&auto=1')
         await page.wait_for_function("window.zombieGame?.scene.isActive('title')")
-        await page.keyboard.press('w')  # Watch a complete intro before restoring automatic steps.
-        await page.wait_for_timeout(1800)
-        await page.screenshot(path=str(SHOTS / 'intro-start.png'))
-        await page.wait_for_timeout(11000)
-        await page.screenshot(path=str(SHOTS / 'intro-end.png'))
-        await page.wait_for_function("document.getElementById('story-screen').classList.contains('intro-walking')", timeout=12000)
-        assert await page.evaluate("window.zombieGame.scene.isActive('title')"), 'Intro must loop until steps arrive'
+        await page.keyboard.press('w')  # Stop automatic walking to check Enter and readiness.
+        for key in ['q', 'e', 'q', 'e']:
+            await page.keyboard.press(key)
+        await page.wait_for_timeout(1000)
+        assert await page.evaluate("window.storyState.act === 'title'")
+        await page.screenshot(path=str(SHOTS / f'{label}-title.png'))
         warp = await page.locator('#stage').evaluate('(el) => el.style.transform')
+        await page.keyboard.press('Enter')
+        await page.wait_for_function("window.storyState.act === 'intro'")
+        await page.wait_for_function("window.storyState.act === 'ready'", timeout=15000)
+        await page.screenshot(path=str(SHOTS / f'{label}-ready.png'))
         await page.keyboard.press('w')
         seen = set()
+        resting = False
         deadline = time.monotonic() + 240
         while time.monotonic() < deadline:
             state = await page.evaluate("""() => {
               const play = window.zombieGame.scene.getScene('play');
               return {act: window.storyState?.act, round: play.g?.round,
-                things: play.g?.things.filter(t => !t.result).length,
+                countdown: play.countdownText?.text, things: play.g?.things.filter(t => !t.result).length,
                 textures: [...(play.sprites?.values() || [])].filter(s => s.visible).map(s => s.list[2].texture.key)};
             }""")
             act, round_number = state['act'], state.get('round')
+            if act == 'rest' and not resting:
+                await page.keyboard.press('w')
+                resting = True
+            elif act == 'garden' and resting:
+                assert await page.evaluate("window.zombieGame.scene.getScene('play').countdownText.text === ''")
+                await page.keyboard.press('w')
+                resting = False
+
             key = f'{act}-{round_number}'
-            if key not in seen and (act == 'rest' or act == 'garden' and state['textures']):
+            if key not in seen and (act == 'rest' and state['countdown'] or act == 'garden' and state['textures']):
                 seen.add(key)
                 name = f'rest-{round_number - 1}' if act == 'rest' else f'round-{round_number}'
                 await page.wait_for_timeout(400)
-                await page.screenshot(path=str(SHOTS / f'{name}.png'))
+                await page.screenshot(path=str(SHOTS / f'{label}-{name}.png'))
                 print(name, json.dumps(state), flush=True)
                 if act == 'garden':
                     expected = {1: {'flower', 'flower-bell', 'flower-rose'}, 2: {'spitter'}, 3: {'spikeweed'}}[round_number]
@@ -83,9 +99,9 @@ async def main():
                 judged = sum(pair[1] for lanes in result['byLane'].values() for pair in lanes.values())
                 assert judged == 18, judged
                 await page.wait_for_timeout(3400)
-                await page.screenshot(path=str(SHOTS / 'finish-animation.png'))
+                await page.screenshot(path=str(SHOTS / f'{label}-ending.png'))
                 await page.wait_for_function("!document.body.classList.contains('story-active')", timeout=20000)
-                await page.screenshot(path=str(SHOTS / 'finish.png'))
+                await page.screenshot(path=str(SHOTS / f'{label}-finish.png'))
                 assert len(seen) == 5, seen
                 assert sessions and sessions[-1]['byLane'] == result['byLane']
                 assert await page.locator('#stage').evaluate('(el) => el.style.transform') == warp
@@ -122,12 +138,17 @@ async def main():
         await page.goto('http://127.0.0.1:8790/')
         await page.wait_for_function("window.zombieGame?.scene.isActive('title')")
         await page.keyboard.press('Enter')
-        await page.wait_for_function("window.zombieGame.scene.isActive('play')")
-        print('PASS: unchanged warp, intro looping/Enter, scene/act/line shortcuts, M, Q/E, Space and PROJECTOR? pause.', flush=True)
+        await page.wait_for_function("window.zombieGame.scene.isActive('play')", timeout=15000)
+        print('PASS: unchanged warp, Enter intro/readiness/countdown, scene/act/line shortcuts, M, Q/E, Space and PROJECTOR? pause.', flush=True)
         assert not errors, errors
         assert not failed_assets, failed_assets
         print(f'PASS: page errors={errors}; failed assets={failed_assets}', flush=True)
         await browser.close()
+
+
+async def main():
+    await run([[650,30],[1270,30],[1390,1050],[530,1050]], 'portrait')
+    await run([[1524,79],[1507,1052],[221,913],[245,250]], 'rotated')
 
 
 if __name__ == '__main__':

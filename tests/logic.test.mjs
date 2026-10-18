@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RULES, beatCm, plan, warnGate, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, pace, form, applyParams, summary, needCm, startAt, speedScale } from '../web/logic.js';
+import { endRest, RULES, beatCm, plan, warnGate, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, pace, form, applyParams, summary, needCm, startAt, speedScale } from '../web/logic.js';
 
 const DT = 0.05;
 
@@ -183,7 +183,8 @@ test('with no seeds the rounds are flowers only, lanes alternate, and each flowe
   let gaps = 0;
   walkUntil(g, () => {
     const key = g.act === 'garden' ? `garden ${g.round}` : g.act;
-    if (key !== acts[acts.length - 1]) { acts.push(key); roundStarts.add(g.log.length); }   // a round's first flower follows the foot
+    if (key !== acts[acts.length - 1]) { acts.push(key); roundStarts.add(g.log.length); }
+    if (g.act === 'rest') endRest(g);   // a round's first flower follows the foot
     const live = g.things.filter((th) => !th.result), beatNow = beatCm(g);   // round 2 is faster: a longer beat in cm
     for (let i = 1; i < live.length; i++) {   // things on the floor sit exactly one beat apart, whatever the frame
       assert.ok(Math.abs(live[i].distCm - live[i - 1].distCm - beatNow) < 1e-6, `gap ${live[i].distCm - live[i - 1].distCm}`);
@@ -287,7 +288,7 @@ test('a high lift dodges the seed', () => {
 
 test('the game reaches home after all three acts', () => {
   const g = newGame({ walkSeconds: 1, gardenPlants: 2, stormSeeds: 2 });
-  walk(g, 60, 0.55, 4);                // steady pace with normal steps
+  for (let i = 0; i < 60; i++) { if (g.act === 'rest') endRest(g); walk(g, 1, 0.55, 4); }                // steady pace with normal steps
   assert.equal(g.act, 'home');
   const s = summary(g);
   assert.equal(s.act, 'home');
@@ -481,7 +482,7 @@ test('one shoe takes its lane from the last two-shoe midpoint', () => {
 test('rounds: flowers and seeds repeat before home, and the summary counts them', () => {
   const g = newGame({ walkSeconds: 2, gardenPlants: 2, stormSeeds: 2, rounds: 2 });
   const acts = [];
-  walkUntil(g, () => { if (acts[acts.length - 1] !== g.act) acts.push(g.act); return g.act === 'home'; }, 300);
+  walkUntil(g, () => { if (acts[acts.length - 1] !== g.act) acts.push(g.act); if (g.act === 'rest') endRest(g); return g.act === 'home'; }, 300);
   assert.deepEqual(acts, ['walk', 'garden', 'storm', 'rest', 'garden', 'storm', 'home']);   // a rest between rounds, walked through
   assert.equal(summary(g).rounds, 2);
 });
@@ -561,4 +562,21 @@ test('shoe mode: the report keeps how close the shoe came to each flower, and th
   shoeWalk(w, 6, 0.6);
   const sw = summary(w).swingCm;
   assert.ok(sw.L > 60 && sw.L < 140 && sw.R > 60 && sw.R < 140, `swings ${JSON.stringify(sw)}`);
+});
+
+
+test('rest ignores walking and ends explicitly without changing the completed score or summary', () => {
+  const g = toGarden({ gardenPlants: 1, rounds: 2 });
+  walkUntil(g, () => g.act === 'rest');
+  const score = g.score, results = [...g.stats.stomp], round = g.round;
+  walk(g, 10);
+  assert.equal(g.act, 'rest');
+  assert.equal(g.round, round);
+  assert.deepEqual(g.stats.stomp, results);
+  assert.equal(endRest(g), true);
+  assert.equal(g.act, 'garden');
+  assert.equal(g.round, round);
+  assert.equal(g.score, score);
+  assert.deepEqual(g.stats.stomp, results);
+  assert.equal(endRest(g), false);
 });

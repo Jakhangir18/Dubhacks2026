@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newGame, step, addEvent, summary } from '../web/logic.js';
+import { endRest, newGame, step, addEvent, summary } from '../web/logic.js';
 import { HOME_STOMP_THRESHOLD, actStory, targetTexture, coachNumbers, endingFor } from '../web/lore.js';
 
 test('ending selection sends 60 percent and above home, otherwise almost home', () => {
@@ -19,6 +19,7 @@ test('three demo rounds have distinct skins and name the completed round at rest
       addEvent(g, { foot: left ? 'L' : 'R', kind: 'lift', liftCm: 16 });
       left = !left; nextStep += .6;
     }
+    if (g.act === 'rest') endRest(g);
     const out = step(g, .05);
     if (out.actChanged && g.act === 'rest') rests.push(actStory(g.act, g.round).title);
     for (const th of g.things) {
@@ -50,4 +51,30 @@ test('rest measurements label units and withhold missing camera measurements', (
   assert.match(text, /Toe lift: L 5 \/ R — cm/);
   assert.match(text, /Speed 0.6 m\/s/);
   assert.doesNotMatch(text, /Timing|Placement|null|undefined/);
+});
+
+
+test('projector layouts keep scenery and HUD in separate free space', async () => {
+  const { gardenLayout } = await import('../web/fit-layout.js');
+  for (const corners of [
+    [[650, 30], [1270, 30], [1390, 1050], [530, 1050]],
+    [[1524, 79], [1507, 1052], [221, 913], [245, 250]],
+  ]) {
+    const fit = gardenLayout(corners, 1920, 1080);
+    const rectangles = [fit.house, fit.hud, ...fit.decorations];
+    for (const r of rectangles) {
+      assert.ok(r && r.x >= 0 && r.y >= 0 && r.x + r.w <= 1920 && r.y + r.h <= 1080);
+      // Independent separating-axis check: no rectangle intersects the field polygon.
+      const box = [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]];
+      const axes = [[1, 0], [0, 1], ...corners.map((p, i) => {
+        const q = corners[(i + 1) % 4]; return [p[1] - q[1], q[0] - p[0]];
+      })];
+      assert.ok(axes.some(([x, y]) => {
+        const a = box.map(p => p[0] * x + p[1] * y), b = corners.map(p => p[0] * x + p[1] * y);
+        return Math.max(...a) < Math.min(...b) || Math.max(...b) < Math.min(...a);
+      }));
+    }
+    assert.ok(fit.hud.x + fit.hud.w <= fit.house.x || fit.house.x + fit.house.w <= fit.hud.x ||
+      fit.hud.y + fit.hud.h <= fit.house.y || fit.house.y + fit.house.h <= fit.hud.y);
+  }
 });

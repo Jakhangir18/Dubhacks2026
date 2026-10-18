@@ -21,7 +21,7 @@ COACH_SYSTEM = (
     "The player walks in place. Act 1: keep a steady pace. Act 2: high-step onto flowers with the matching foot. "
     "Act 3 (only when the summary says seedAct is true): lift the foot a seed is aiming at. "
     "Act rest: the player stands between rounds; thisRound has the round just played (hit of n flowers): say what went "
-    "well and one thing to fix next round, two short sentences, then tell them to walk when ready. "
+    "well and one thing to fix next round, two short sentences, then end with Next round in three! "
     "You get a summary of the last stretch and the therapist's limits. Flowers come an odd number of steps apart "
     "(the summary's beatCm, in steps of stepCm): change spacingCm by two steps or leave it, a smaller change does nothing. "
     "Reply with JSON only: {\"say\": \"<one cue, at most 12 words, one instruction, about a target in the game, "
@@ -124,7 +124,7 @@ def rule_cue(summary: dict[str, Any], limits: dict[str, Any], side: dict[str, An
         done, hit, n = int(r.get("round") or 1) - 1, int(r.get("hit") or 0), int(r.get("n") or 0)
         good = n and hit / n >= 0.6
         return {"say": f"Round {done} done, {hit} of {n} flowers. "
-                       + ("Lovely rhythm. Walk when you are ready for the next round." if good else "Next round, land on the flower right at the line. Walk when you are ready."),
+                       + ("Lovely rhythm. Next round in three!" if good else "Next round, land on the flower right at the line. Next round in three!"),
                 "params": {}}
     if act == "garden":
         pct = summary.get("stompPct")

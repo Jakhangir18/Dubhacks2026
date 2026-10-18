@@ -1,4 +1,5 @@
 // Static garden canvases are painted on asset load / resize only; animation is capped at 30 fps.
+import { gardenLayout } from './fit-layout.js';
 import { coachNumbers, ENDING_SECONDS, ENDINGS } from './lore.js';
 const $ = id => document.getElementById(id);
 const setText = (node, value) => { if (node.textContent !== value) node.textContent = value; };
@@ -40,7 +41,7 @@ export class AmbientGarden {
   resize() {
     this.w = innerWidth; this.h = innerHeight;
     this.canvas.width = this.w; this.canvas.height = this.h;
-    this.paintCaches(); this.layout();
+    this.layout();
   }
 
   layout() {
@@ -56,36 +57,27 @@ export class AmbientGarden {
     const distance = Math.max(1, Math.hypot(dx, dy));
     this.dx = dx / distance; this.dy = dy / distance;
     this.centerX = this.frontX + dx / 2; this.centerY = this.frontY + dy / 2;
-    const left = Math.min(...p.map(v => v[0])), right = Math.max(...p.map(v => v[0]));
-    const top = Math.min(...p.map(v => v[1])), bottom = Math.max(...p.map(v => v[1]));
-    // Every candidate is wholly outside the quad; prefer the actual front edge.
-    const regions = [
-      { x: 20, y: 20, w: this.w - 40, h: top - 40, front: this.dy },
-      { x: 20, y: bottom + 20, w: this.w - 40, h: this.h - bottom - 40, front: -this.dy },
-      { x: 20, y: 20, w: left - 40, h: this.h - 40, front: this.dx },
-      { x: right + 20, y: 20, w: this.w - right - 40, h: this.h - 40, front: -this.dx },
-    ];
-    regions.sort((a, b) => {
-      const score = r => ((r.w >= 420 && r.h >= 220 || r.w >= 220 && r.h >= 540) ? 1e7 : 0)
-        + r.front * 1e6 + Math.max(0, r.w) * Math.max(0, r.h);
-      return score(b) - score(a);
-    });
-    const r = regions[0];
-    const width = Math.max(0, Math.min(860, r.w));
-    this.hud.style.left = `${r.x + (r.w - width) / 2}px`;
-    this.hud.style.top = `${r.y}px`;
-    this.hud.style.width = `${width}px`;
-    this.hud.style.maxHeight = `${Math.max(0, r.h)}px`;
-    this.hud.style.pointerEvents = r.h < 220 ? 'auto' : 'none';
-    this.hud.classList.toggle('narrow', width < 600);
-    if (this.zone.active && !(r.w >= 420 && r.h >= 220 || r.w >= 220 && r.h >= 540)) {
-      this.zone.help.textContent = 'Leave more space outside the zone for the game text (ideally in front).';
+    this.fit = gardenLayout(p, this.w, this.h);
+    const r = this.fit.hud;
+    this.hud.style.display = r ? '' : 'none';
+    if (r) {
+      this.hud.style.left = `${r.x}px`; this.hud.style.top = `${r.y}px`;
+      this.hud.style.width = `${Math.min(360, r.w)}px`;
+      this.hud.style.maxHeight = `${r.h}px`;
+      this.hud.classList.toggle('narrow', r.w < 300);
     }
+    this.paintCaches();
   }
 
   update(state) {
     if (state.act !== this.act) this.storyTime = 0;
     this.act = state.act; this.state = { ...state };
+    document.body.dataset.act = state.act;
+    const r = state.act === 'rest' ? this.fit.hud : null;
+    this.story.style.inset = r ? `${r.y}px auto auto ${r.x}px` : '';
+    this.story.style.width = r ? `${Math.min(360, r.w)}px` : '';
+    this.story.style.maxHeight = r ? `${r.h}px` : '';
+    this.story.style.overflow = r ? 'auto' : '';
     setText(this.title, state.title || ''); setText(this.score, state.score || '');
     setText(this.coach, state.coach || ''); setText(this.pace, state.pace || '');
     this.progress.value = state.progress || 0;
@@ -96,10 +88,12 @@ export class AmbientGarden {
       setText($('story-round'), `ROUND ${state.round - 1} DONE`);
       setText($('story-coach'), state.coach || 'Take a breath. Maya is looking at your walk.');
       setText($('story-numbers'), coachNumbers(state.restSummary));
-      setText($('story-prompt'), `Walk to start round ${state.round}`);
-      setText($('story-detail'), `${state.round - 1}/${state.rounds || 3} of the way home · 4 steps when you are ready`);
+      setText($('story-prompt'), state.countdown || 'Next round in three!');
+      setText($('story-detail'), `${state.round - 1}/${state.rounds || 3} of the way home`);
     } else if (state.act === 'title') {
-      setText($('story-prompt'), 'Walk to start'); setText($('story-detail'), '4 steps · or press Enter');
+      setText($('story-prompt'), 'Press Enter to begin'); setText($('story-detail'), 'Help Gus get home to Maya.');
+    } else if (state.act === 'intro') {
+      setText($('story-prompt'), 'Maya is waiting at home'); setText($('story-detail'), 'Get ready to walk');
     } else if (state.act === 'home') {
       const ending = ENDINGS[state.ending] || ENDINGS.home;
       setText($('story-ending-eyebrow'), state.ending === 'almost' ? 'ONE WARM DAWN AWAY…' : 'THREE PATCHES LATER…');
@@ -118,64 +112,33 @@ export class AmbientGarden {
   }
 
   paintCaches() {
-    this.garden = this.paintGarden(this.w, this.h);
-    this.panorama = this.paintGarden(Math.ceil(this.w * 1.6), this.h);
-  }
-
-  paintGarden(w, h) {
-    const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
-    const c = canvas.getContext('2d');
-    const scale = h / 1080;
+    if (!this.fit) return;
+    const canvas = document.createElement('canvas'); canvas.width = this.w; canvas.height = this.h;
+    const c = canvas.getContext('2d'), w = this.w, h = this.h;
     const sky = c.createLinearGradient(0, 0, 0, h);
-    sky.addColorStop(0, '#10283e'); sky.addColorStop(.42, '#285b65'); sky.addColorStop(1, '#34794c');
+    sky.addColorStop(0, '#10283e'); sky.addColorStop(1, '#28574f');
     c.fillStyle = sky; c.fillRect(0, 0, w, h);
-    for (let i = 0; i < 64; i++) {
-      c.fillStyle = i % 4 ? '#92bec4' : '#eafdc1';
-      c.beginPath(); c.arc(((i * .618034) % 1) * w, ((i * .41421) % 1) * h * .38, (i % 3 + 1) * scale, 0, Math.PI * 2); c.fill();
+    for (let i = 0; i < 36; i++) {
+      c.fillStyle = '#9cbab9'; c.beginPath();
+      c.arc(12 + ((i * .618034) % 1) * (w - 24), 12 + ((i * .41421) % 1) * (h - 24), 1.5, 0, Math.PI * 2); c.fill();
     }
-    this.art(c, 'moon', w * .72, h * .15, h * .19);
-    c.fillStyle = '#1c4a48';
-    c.beginPath(); c.ellipse(w * .22, h * .51, w * .7, h * .25, 0, 0, Math.PI * 2); c.fill();
-    c.fillStyle = '#2c694c';
-    c.beginPath(); c.ellipse(w * .85, h * .57, w * .65, h * .22, 0, 0, Math.PI * 2); c.fill();
-    c.fillStyle = '#357747'; c.fillRect(0, h * .51, w, h * .49);
-    // Tall overlapping trees and a continuous fence make a garden, rather than isolated tile decorations.
-    for (let i = 0; i < Math.ceil(w / (155 * scale)); i++) {
-      this.art(c, i % 2 ? 'teal' : 'lime', i * 155 * scale, h * (.35 + .025 * (i % 3)), 310 * scale, 390 * scale);
+    for (const [i, bed] of this.fit.decorations.entries()) {
+      const x = bed.x + bed.w / 2, y = bed.y + bed.h / 2;
+      this.art(c, 'fence', x, y - bed.h * .12, bed.w, bed.h * .65);
+      c.fillStyle = '#427458'; c.beginPath(); c.ellipse(x, y + bed.h * .25, bed.w * .46, bed.h * .18, 0, 0, Math.PI * 2); c.fill();
+      this.art(c, i % 2 ? 'flower' : 'bell', x, y + bed.h * .08, bed.w * .65, bed.h * .65);
     }
-    for (let x = -50 * scale; x < w + 150 * scale; x += 174 * scale) {
-      this.art(c, 'fence', x, h * .51, 240 * scale, 170 * scale);
-    }
-    // Warm garden path: a broad continuous ribbon from the gate to the doorstep.
-    c.lineCap = 'round'; c.beginPath(); c.moveTo(-60 * scale, h * .78);
-    c.bezierCurveTo(w * .25, h * .69, w * .5, h * .87, w * .83, h * .70);
-    c.strokeStyle = '#183e35'; c.lineWidth = 132 * scale; c.stroke();
-    c.strokeStyle = '#bea576'; c.lineWidth = 112 * scale; c.stroke();
-    c.strokeStyle = '#dec796'; c.lineWidth = 80 * scale; c.stroke();
-    // Planted beds, edging stones and grass tufts fill the foreground and both sides of the belt.
-    for (const [row, y] of [[0, .625], [1, .94]]) {
-      for (let i = 0; i < Math.ceil(w / (310 * scale)); i++) {
-        const x = (i + .5) * 310 * scale;
-        if (!row && x > w * .71) continue;
-        c.fillStyle = '#214837'; c.strokeStyle = '#8eac5a'; c.lineWidth = 8 * scale;
-        c.beginPath(); c.ellipse(x, h * y, 142 * scale, 54 * scale, -.06, 0, Math.PI * 2); c.fill(); c.stroke();
-        c.fillStyle = '#604e38'; c.beginPath(); c.ellipse(x, h * y - 4 * scale, 126 * scale, 37 * scale, -.06, 0, Math.PI * 2); c.fill();
-        for (let j = 0; j < 4; j++) {
-          const key = ['flower', 'bell', 'rose', 'spitter', 'spikes'][(i + j + row) % 5];
-          this.art(c, key, x + (j - 1.5) * 60 * scale, h * y - (j % 2 ? 35 : 52) * scale, 115 * scale);
-        }
-      }
-    }
-    for (let i = 0; i < 130; i++) {
-      const x = ((i * .618034) % 1) * w, y = h * (.54 + ((i * .41421) % 1) * .46);
-      if (y > h * .69 && y < h * .84) continue;
-      c.strokeStyle = i % 2 ? '#66a951' : '#82b85b'; c.lineWidth = 3 * scale;
-      c.beginPath(); c.moveTo(x - 6 * scale, y); c.lineTo(x - 12 * scale, y - 14 * scale);
-      c.moveTo(x, y); c.lineTo(x, y - 18 * scale); c.moveTo(x + 5 * scale, y); c.lineTo(x + 13 * scale, y - 11 * scale); c.stroke();
-    }
-    // The house stays large and warm, visible to the right of the calibrated belt.
-    this.art(c, 'house', w * .84, h * .47, h * .56, h * .61);
-    return canvas;
+    this.backdrop = document.createElement('canvas');
+    this.backdrop.width = w; this.backdrop.height = h;
+    this.backdrop.getContext('2d').drawImage(canvas, 0, 0);
+    const r = this.fit.house;
+    if (r) {
+      const size = Math.min(r.w, r.h * .6, 460);
+      this.home = { x: r.x + r.w / 2, y: r.y + r.h / 2, size };
+      this.art(c, 'house', this.home.x, this.home.y, size, size);
+      this.maya(c, this.home.x, this.home.y + size * .22, size * .16);
+    } else this.home = null;
+    this.garden = canvas;
   }
 
   maya(c, x, y, size, cheer = 0) {
@@ -192,7 +155,7 @@ export class AmbientGarden {
   gus(c, x, feetY, time, walking = true) {
     const img = this.images.gus;
     if (!img?.complete || !img.naturalWidth) return;
-    const size = this.h * .32, frame = walking ? Math.floor(time * 8) % 24 : 0;
+    const size = this.gusSize || this.h * .32, frame = walking ? Math.floor(time * 8) % 24 : 0;
     c.fillStyle = '#17372d66'; c.beginPath(); c.ellipse(x, feetY - size * .06, size * .28, size * .055, 0, 0, Math.PI * 2); c.fill();
     c.save(); c.translate(x, feetY); c.scale(-1, 1);   // the source walks left; home is to the right
     c.drawImage(img, frame % 6 * 256, Math.floor(frame / 6) * 256, 256, 256, -size / 2, -size, size, size);
@@ -213,50 +176,29 @@ export class AmbientGarden {
   }
 
   drawStory(c) {
-    const w = this.w, h = this.h, t = this.storyTime;
-    if (this.act === 'title') {
-      const loop = t % 18, pan = smooth((loop - 3) / 7) * (this.panorama.width - w);
-      c.drawImage(this.panorama, -pan, 0);
-      const x = w * (-.035 + .435 * smooth(loop / 5));
-      this.gus(c, x, h * .81, loop);
-      this.maya(c, this.panorama.width * .84 - pan, h * .56, h * .135);
-      this.story.classList.toggle('intro-walking', loop < 9);
-      setText($('story-caption'), loop < 3 ? 'Gus is a long way from bedtime…' : loop < 9 ? 'Flowers. Pea spitters. Spikes. Maya is waiting at home.' : 'Stomp through the garden. Get Gus home.');
-    } else {
-      c.drawImage(this.garden, 0, 0);
-      const finish = this.act === 'home';
-      const almost = finish && this.state.ending === 'almost';
-      const fraction = almost ? .48 + smooth(t / 1.7) * .18 : finish ? 2 / 3 + smooth(t / 3) / 3 : (this.state.round - 1) / (this.state.rounds || 3);
-      const x = w * (.08 + fraction * .70);
+    c.drawImage(this.act === 'intro' ? this.backdrop : this.garden, 0, 0);
+    if (['intro', 'home'].includes(this.act) && this.home) {
+      const r = this.fit.house, { x, y, size } = this.home;
+      const almost = this.act === 'home' && this.state.ending === 'almost';
+      const t = smooth(this.storyTime / (this.act === 'intro' ? 6 : 3));
+      this.gusSize = Math.min(r.w * .32, r.h * .22, 140);
+      if (this.act === 'intro') {
+        // A restrained push toward the doorstep, contained in the house's reserved area.
+        const zoom = .8 + .2 * t, cameraX = x + size * .06 * (1 - t);
+        this.art(c, 'house', cameraX, y, size * zoom, size * zoom);
+        this.maya(c, cameraX, y + size * .22 * zoom, size * .16 * zoom);
+      }
+      const startX = r.x + this.gusSize / 2;
+      this.gus(c, startX + (x - startX) * t * (almost ? .55 : 1),
+        y + size * .48, this.storyTime, t < 1);
       if (almost) {
-        const dawn = c.createRadialGradient(w * .84, h * .57, h * .02, w * .84, h * .57, h * .52);
-        dawn.addColorStop(0, `rgba(255, 213, 132, ${.62 * smooth(t / 2)})`);
-        dawn.addColorStop(.48, `rgba(249, 142, 112, ${.28 * smooth(t / 2)})`);
-        dawn.addColorStop(1, 'rgba(249, 142, 112, 0)');
-        c.fillStyle = dawn; c.fillRect(0, 0, w, h);
-        this.art(c, 'house', w * .84, h * .47, h * .56, h * .61);
-      } else if (finish) {
-        // Door swings inward as Gus arrives. Bright interior sits over the closed-door artwork.
-        const open = smooth((t - 1.8) / 1.1), doorX = w * .84 - h * .048, doorY = h * .51;
-        c.fillStyle = '#ffe9a0'; c.fillRect(doorX - h * .029, doorY, h * .058, h * .135);
-        c.fillStyle = '#75523b'; c.fillRect(doorX - h * .029, doorY, h * .058 * (1 - open), h * .135);
+        this.mayaWindow(c, x + size * .16, y, size * .10, this.storyTime);
+      } else if (this.act === 'home') {
+        const open = smooth((this.storyTime - 2) / 1.2);
+        c.fillStyle = '#ffe9a0'; c.fillRect(x - size * .20, y + size * .08, size * .10 * open, size * .22);
+        this.maya(c, x, y + size * .22, size * .16);
       }
-      this.gus(c, x, h * .80, t, finish && (!almost && t < 3 || almost && t < 1.7));
-      if (almost) this.mayaWindow(c, w * .84 + h * .22, h * .50, h * .075, t);
-      else this.maya(c, w * .86, h * .56, h * .135, finish && t > 2.5 ? t : 0);
-      if (!finish) {
-        c.textAlign = 'center'; c.font = `bold ${Math.max(28, h * .032)}px Trebuchet MS`;
-        c.strokeStyle = '#173b32'; c.lineWidth = 7; c.fillStyle = '#fff1a4';
-        const label = `${this.state.round - 1}/${this.state.rounds || 3} HOME`;
-        c.strokeText(label, x, h * .84); c.fillText(label, x, h * .84);
-      } else if (!almost && t > 2.6) {
-        const colors = ['#ffdb62', '#ed80bc', '#b3ff79', '#80e4e4'];
-        for (let i = 0; i < 36; i++) {
-          const age = ((t - 2.6) * .4 + i / 36) % 1;
-          c.fillStyle = colors[i % 4];
-          c.fillRect(w * (.57 + (i * .618034 % 1) * .4) + Math.sin(i + t * 2) * 18, h * (.22 + age * .55), 10, 18);
-        }
-      }
+      setText($('story-caption'), 'Gus is coming home. Maya is waiting.');
     }
   }
 
@@ -265,25 +207,12 @@ export class AmbientGarden {
     if (now - this.lastFrame < 1000 / 30) return;
     const dt = this.lastFrame ? Math.min(.1, (now - this.lastFrame) / 1000) : 0; this.lastFrame = now;
     if (!this.state.paused && !this.zone.active) { this.elapsed += dt; this.storyTime += dt; }
-    const full = !this.state.paused && !this.zone.active && (['title', 'rest'].includes(this.act) || this.act === 'home' && this.storyTime < ENDING_SECONDS);
+    const full = !this.state.paused && !this.zone.active && (['title', 'intro', 'rest'].includes(this.act) || this.act === 'home' && this.storyTime < ENDING_SECONDS);
     document.body.classList.toggle('story-active', full); this.story.hidden = !full;
-    $('story-intro').hidden = this.act !== 'title'; $('story-rest').hidden = this.act !== 'rest'; $('story-ending').hidden = this.act !== 'home';
+    $('story-intro').hidden = !['title', 'intro'].includes(this.act); $('story-rest').hidden = this.act !== 'rest'; $('story-ending').hidden = this.act !== 'home';
     const c = this.ctx;
     c.globalAlpha = 1;
-    if (full) this.drawStory(c);
-    else {
-      c.drawImage(this.garden, 0, 0);
-      this.maya(c, this.w * .86, this.h * .56, this.h * .11);
-      if (this.act === 'home') this.gus(c, this.w * .78, this.h * .80, 0, false);
-      // Few fireflies, no moving background tiles or per-frame scenery painting.
-      for (let i = 0; i < 12; i++) {
-        c.globalAlpha = .35 + .35 * Math.sin(this.elapsed * 1.4 + i);
-        c.fillStyle = '#e6ffab'; c.beginPath();
-        c.arc(((i * .618034) % 1) * this.w + Math.sin(this.elapsed + i) * 12,
-          this.h * (.35 + ((i * .41421) % 1) * .6), 3, 0, Math.PI * 2); c.fill();
-      }
-      c.globalAlpha = .8; c.strokeStyle = this.state.paceOk ? '#bbffc7' : '#ffb21e'; c.lineWidth = 6; c.stroke(this.path);
-    }
+    this.drawStory(c);
     c.globalAlpha = 1;
   }
 }

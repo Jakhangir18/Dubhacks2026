@@ -62,11 +62,7 @@ export const RULES = {
   goldenX: 3,
   bouquetPetals: 4,
   roundSpeedUp: 0.2,
-  // Between rounds the game rests: the world stops, the coach speaks, and restStepsN steps within restWindowS
-  // (after restGraceS, so the last steps of the round do not count) start the next round.
-  restStepsN: 4,
-  restWindowS: 3,
-  restGraceS: 1,
+  // Between rounds the world stops until the presentation calls endRest.
   // Shoe mode (feet.py boxes on the camera): a flower is smashed when a shoe covers it, a seed splats; a thing
   // that passes the toes resolves the other way. Distances are world cm on the field.
   shoeReachCm: 30,               // margin around the shoe's span when matching a thing
@@ -389,11 +385,7 @@ export function step(g, dt) {
     return out;
   }
   if (g.act === 'home') return out;
-  if (g.act === 'rest') {   // between rounds: walking again (after the grace) starts the next round
-    const recent = g.strikes.filter((s) => s.t > g.restT + RULES.restGraceS && s.t > g.t - RULES.restWindowS);
-    if (recent.length >= RULES.restStepsN) beginRound(g, out);
-    return out;
-  }
+  if (g.act === 'rest') return out;   // Only the coach/countdown completion can leave rest.
 
   for (const th of g.things) {
     if (th.result) continue;
@@ -473,10 +465,13 @@ function nextAct(g, out) {
   resetAct(g, out);
 }
 
-// The next round of flowers begins (after a rest): the coach has spoken, the player walks again.
-function beginRound(g, out) {
+// The coach has finished speaking and the countdown has completed.
+export function endRest(g) {
+  if (g.act !== 'rest') return false;
+  const out = {};
   g.act = 'garden';
   resetAct(g, out);
+  return true;
 }
 
 function resetAct(g, out) {

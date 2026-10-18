@@ -57,3 +57,25 @@ body.story-active #ambient { z-index: 2; }
 #story-prompt { display: block; color: #ffe58b; font-size: clamp(32px, 2.5vw, 48px); }
 #story-detail { display: block; font-size: 26px; margin-top: 4px; }
 body.setting-zone #story-screen { display: none; }
+
+/* Keep the calibrated field visible during coaching and its countdown. */
+body.story-active #ambient { z-index: 0; }
+#garden-hud { padding: 12px; border-radius: 12px; }
+.hud-heading, #walk-prompt { font-size: 23px; }
+#coach { font-size: 21px; }
+#pace, .home-progress { font-size: 17px; }
+body:has(#story-rest:not([hidden])) #story-screen { inset: 16px auto auto 16px; width:  min(360px, 20vw); }
+#story-rest { position: static; width: auto; padding: 16px; font-size: 20px; }
+#story-rest h2 { font-size: 25px; }
+#story-rest #story-coach, #story-numbers { font-size: 20px; }
+body:has(#story-rest:not([hidden])) #story-footer { position: static; padding: 12px; }
+
+body:has(#story-rest:not([hidden])) #story-footer { transform: none; width: auto; max-width: none; }
+#story-rest .story-eyebrow, #story-rest .story-next { font-size: 18px; letter-spacing: 0; }
+body:has(#story-rest:not([hidden])) #story-prompt { font-size: 22px; }
+body:has(#story-rest:not([hidden])) #story-detail { font-size: 17px; }
+
+body[data-act="title"] #stage, body[data-act="intro"] #stage { visibility: hidden; }
+body[data-act="home"].story-active #ambient { z-index: 2; }
+#story-intro { top: 25%; left: 50%; transform: translateX(-50%); width: min(800px, 58vw); max-width: 58vw; text-align: center; }
+#story-intro .story-eyebrow { font-size: 24px; }
