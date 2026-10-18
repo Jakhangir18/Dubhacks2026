@@ -17,6 +17,7 @@ The demo reads the camera on one thread and writes the raw video (no overlay) at
 model on a second thread, and only previews on the main thread, so a slow window never costs camera frames.
 With --server it stops by itself when the game saves the player's session and keeps only that session's time;
 otherwise press q, and the first and last seconds are dropped (stepping on, walking to the laptop).
+It saves out/gait_<time>.json (the summary, for the AI feedback), .csv (every frame) and .mp4 (raw video).
 Use one GaitTracker per video stream. Check:  python test_gait.py
 
 Events follow Zeni et al. 2008: heel strike = ankle furthest in front of the hip, toe-off = toe furthest behind it.
@@ -634,12 +635,20 @@ def main():
     cv2.destroyAllWindows()
     g.close()
 
-    print(f"Saved out/gait_{stamp}.csv and out/gait_{stamp}.mp4 (raw, {rec.fps:.1f} fps)\n"
-          f"{rec.frames} frames captured, {len(g.rows)} analysed, {rec.dropped} skipped by a busy model")
     start, end, source = session_window(g.rows, game.get("window"), rec.start_epoch, args.trim_start, args.trim_end)
+    res = g.summary(start, end)
+    base = f"out/gait_{stamp}"
+    with open(f"{base}.json", "w") as fh:  # what the AI feedback reads: the summary, not the per-frame CSV
+        json.dump({"player": args.player if args.server else None, "recorded_at": rec.start_epoch,
+                   "analysed": {"start_s": start, "end_s": end, "source": source},
+                   "files": {"video": f"{base}.mp4", "csv": f"{base}.csv"}, "video_fps": rec.fps,
+                   "frames": {"captured": rec.frames, "analysed": len(g.rows), "skipped": rec.dropped},
+                   "summary": res}, fh, indent=1)
+    print(f"Saved {base}.json (summary), {base}.csv (every frame) and {base}.mp4 (raw, {rec.fps:.1f} fps)\n"
+          f"{rec.frames} frames captured, {len(g.rows)} analysed, {rec.dropped} skipped by a busy model")
     if start is not None:
         print(f"Analysed ({source}): {start:.1f} s to {end:.1f} s of the recording")
-    report(g.summary(start, end))
+    report(res)
 
 
 if __name__ == "__main__":

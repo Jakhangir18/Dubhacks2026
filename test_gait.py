@@ -1,4 +1,5 @@
 """Check for the gait math (no camera or model needed). Run: python test_gait.py"""
+import json
 import math
 import time
 
@@ -67,6 +68,7 @@ took = time.time() - start
 assert len(res["windows"]) == 10 and took < 15, (len(res["windows"]), took)
 assert near(res["cadence"], 120, 6) and near(res["toe_lift_cm"]["L"], 5, 1)
 assert len(res["strikes"]["L"]) > 280 and res["windows"][0]["start"] == 0
+assert json.loads(json.dumps(res, allow_nan=False))["cadence"] == res["cadence"]  # the summary file must be plain JSON
 assert all(v is None or v < 5 for v in res["asymmetry"].values()), res["asymmetry"]
 
 # trimming keeps only the requested part
