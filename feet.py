@@ -75,6 +75,8 @@ class BlobDetector:
 
     def __call__(self, frame):
         import numpy as np
+        if self.zone is None:
+            return []   # without the calibrated zone the console and the walls would count as feet
         gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (7, 7), 0)
         if self.zone is not None:
             h, w = gray.shape
