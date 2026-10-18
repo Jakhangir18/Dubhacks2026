@@ -102,3 +102,10 @@ def test_oversized_frame_list_is_rejected():
     client.put("/api/player/Mia", json={"perceptronConsent": True})
     r = client.post("/api/perceive", json={"player": "Mia", "kind": "form", "frames": frames(perceive.MAX_FRAMES * 4 + 1)})
     assert r.status_code == 422
+
+
+def test_requests_that_never_reach_the_api_spend_no_budget():
+    client.put("/api/player/Mia", json={"perceptronConsent": True})
+    for _ in range(perceive.CALLS_PER_MINUTE + 5):
+        client.post("/api/perceive", json={"player": "Mia", "kind": "form", "frames": frames()})   # no key set
+    assert perceive.allow_call()

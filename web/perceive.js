@@ -6,7 +6,8 @@ const W = 320;
 const H = 240;                  // every frame the same size: the API needs that
 const EVERY_MS = 200;
 const KEEP_MS = 2400;
-const STEP_WINDOW_MS = 1600;    // 8 frames: the server's cap
+const STEP_WINDOW_MS = 1600;
+const MAX_FRAMES = 8;           // server/perceive.py MAX_FRAMES
 const FORM_EVERY_MS = 10000;
 const LEG = [25, 26, 27, 28, 29, 30, 31, 32];   // knees, ankles, heels, toes
 const KNEES = [25, 26];
@@ -28,6 +29,7 @@ export class Perceiver {
     this.gen++;
     this.enabled = enabled;
     this.used = enabled;
+    this.paused = false;
     this.player = player;
     this.frames = [];
     this.checked = 0;
@@ -47,7 +49,7 @@ export class Perceiver {
   capture() {
     const v = this.tracker.video;
     const lm = this.tracker.lastLm;
-    if (!this.enabled || !this.tracker.running || !lm || v.readyState < 2 || !v.videoWidth) return;
+    if (!this.enabled || this.paused || !this.tracker.running || !lm || v.readyState < 2 || !v.videoWidth) return;
     const seen = (i) => lm[i] && (lm[i].visibility ?? 1) > 0.5;
     const pts = LEG.filter(seen).map((i) => lm[i]);
     if (pts.length < 4 || !KNEES.some(seen)) return;
@@ -71,9 +73,9 @@ export class Perceiver {
     const now = Math.round(performance.now());
     this.frames.push({ url: this.canvas.toDataURL('image/jpeg', 0.7), tsMs: now });
     while (this.frames.length && now - this.frames[0].tsMs > KEEP_MS) this.frames.shift();
-    if (now - this.lastForm > FORM_EVERY_MS && this.frames.length >= 8) {
+    if (now - this.lastForm > FORM_EVERY_MS && this.frames.length >= MAX_FRAMES) {
       this.lastForm = now;
-      this.send({ kind: 'form', frames: this.frames.slice(-8) }, (out) => { this.form = out; });
+      this.send({ kind: 'form', frames: this.frames.slice(-MAX_FRAMES) }, (out) => { this.form = out; });
     }
   }
 
@@ -81,7 +83,7 @@ export class Perceiver {
   checkStep(th) {
     if (!this.enabled) return;
     const now = performance.now();
-    const frames = this.frames.filter((f) => now - f.tsMs <= STEP_WINDOW_MS).slice(-8);   // keep the newest: the step itself
+    const frames = this.frames.filter((f) => now - f.tsMs <= STEP_WINDOW_MS).slice(-MAX_FRAMES);   // keep the newest: the step itself
     if (frames.length < 2) return;
     this.send({ kind: 'step', foot: th.lane, thing: th.kind, frames }, (out) => {
       if (out.verdict !== 'yes' && out.verdict !== 'no') return;   // unclear: not counted either way

@@ -21,7 +21,7 @@ URL = "https://api.perceptron.inc/v1/chat/completions"
 MODEL = os.environ.get("PERCEPTRON_MODEL", "perceptron-mk1.5")
 MAX_FRAMES = 8
 MAX_FRAME_CHARS = 400_000   # a 320 px wide JPEG data URL is far below this
-CALLS_PER_MINUTE = 40       # one game sends about 30; the endpoint has no login, so cap the spend
+CALLS_PER_MINUTE = 40       # one game sends about 30; the endpoint has no login, so cap the spend (per process: run one worker)
 _calls: deque[float] = deque()
 
 STEP_SCHEMA = {
@@ -98,6 +98,8 @@ FORM_QUESTION = ("These timestamped frames show a person's lower legs on a walki
 async def ask(frames: list[dict[str, Any]], question: str, schema: dict[str, Any], timeout: float = 12) -> dict[str, Any] | None:
     key = os.environ.get("PERCEPTRON_API_KEY")
     if not key or len(frames) < 2:   # the API needs at least two frames of the same size
+        return None
+    if not allow_call():   # counted here, so only paid calls use the budget
         return None
     body = {
         "model": MODEL,

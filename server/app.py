@@ -48,7 +48,7 @@ def load_env(path: Path = ROOT / ".env") -> None:
         if value[:1] in {'"', "'"}:
             value = value[1:].split(value[0], 1)[0]
         else:
-            value = value.split(" #", 1)[0].strip()   # README examples carry inline comments
+            value = re.split(r"\s+#", value, maxsplit=1)[0].strip()   # README examples carry inline comments
         os.environ.setdefault(key.strip(), value)
 
 
