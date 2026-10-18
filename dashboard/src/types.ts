@@ -1,4 +1,4 @@
-// Data shapes the dashboard will consume. Nothing here is fetched yet.
+// Data shapes the dashboard consumes. Seeded for now (src/seed.ts); same shapes as the server returns.
 
 /** Game summary, as sent by the game to POST /api/session (see web/game.js, server/therapist.py). */
 export interface GameSummary {
@@ -11,17 +11,21 @@ export interface GameSummary {
   highLiftAvgCm: { L: number | null; R: number | null };
 }
 
-/** One finished game, as returned by GET /api/sessions/{player}. */
-export interface Session {
-  summary: GameSummary;
-  // TODO: confirm remaining row fields (timestamp, coach note) against server/store.py
-}
-
-/** Output of GaitTracker.summary() in gait.py. There is no server endpoint for this yet. */
+/** Output of GaitTracker.summary() in gait.py, as stored by POST /api/gait. */
 export interface GaitSummary {
-  direction: "left" | "right";
-  cadence: number | null; // steps per minute
+  cadence: number | null;
   stride: { L: number | null; R: number | null }; // seconds
   flexion: { L: number | null; R: number | null }; // degrees, lower = more knee bend
   asymmetry: { stride: number | null; flexion: number | null }; // percent
+}
+
+/** One walking game session: a GET /api/sessions/{player} row, plus its gait walk and recordings. */
+export interface Session {
+  player: string;
+  ts: number; // unix seconds
+  verified: boolean;
+  note: string; // coach note written after the session
+  summary: GameSummary;
+  gait: GaitSummary | null;
+  videos: { game: string | null; gait: string | null }; // URLs; null until recordings are linked to sessions
 }
