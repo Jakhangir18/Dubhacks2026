@@ -237,6 +237,11 @@ new AmbientGarden(zone);
 const gardenState = { cadence: 0, act: 'title', paceOk: true, paused: false,
   title: '', score: '', coach: '', pace: '', progress: 0 };
 const gardenEvent = new CustomEvent('zombiewalk:pace', { detail: gardenState });
+// A short line to the server per judged thing or act change, so a run on the pad can be followed from anywhere.
+function logRemote(entry) {
+  fetch('/api/log', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...entry, player: settings.player }) }).catch(() => {});
+}
+
 function publishGarden(values) {
   Object.assign(gardenState, values);
   window.dispatchEvent(gardenEvent);
@@ -744,12 +749,16 @@ class Play extends Phaser.Scene {
     const y = this.yFor(th.distCm, L);   // where the thing is now: it resolves a little past the line
     this.laneFlash(th.lane, th.result === 'hit' ? C.lime : C.amber, th.result === 'hit' ? 200 : 400, L);
     if (th.kind === 'flower' && th.result === 'hit') {
-      this.fx.petals.explode(26, x, y);
+      this.fx.petals.explode(70, x, y);
       this.showFeedback('SMASH!', C.yellow);
+      this.burst(x, y, C.yellow, 'SMASH!');
+      this.cameras.main.shake(120, 0.004);
       const size = PLANT_SCALE * Math.min(1.15, L.W / FIELD.width);
       const stamp = this.add.image(x, y, this.flowerKey(th.id)).setScale(size, size * 1.25);
       this.leaveStamp(stamp, y);
-      this.tweens.add({ targets: stamp, scaleX: size * 1.2, scaleY: size * 0.35, alpha: 0.5, duration: 110 });
+      // Squash flat with a bounce, then stay as a flattened, still bright, record under the feet.
+      this.tweens.add({ targets: stamp, scaleX: size * 1.45, scaleY: size * 0.22, duration: 90, ease: 'Quad.out',
+        onComplete: () => this.tweens.add({ targets: stamp, scaleX: size * 1.25, scaleY: size * 0.38, alpha: 0.75, duration: 160, ease: 'Back.out' }) });
     }
     else if (th.kind === 'flower') {
       this.showFeedback('HIGHER STEP', C.amber);
@@ -757,13 +766,13 @@ class Play extends Phaser.Scene {
       this.leaveStamp(stamp, y, true);
     }
     else if (th.result === 'hit') {
-      this.fx.sparks.explode(24, x, y); this.cameras.main.flash(140, 190, 255, 235);
+      this.fx.sparks.explode(40, x, y); this.cameras.main.flash(140, 190, 255, 235);
       this.showFeedback('DODGED!', C.dodge);
-      const ring = this.add.ellipse(x, y, 400, 240).setStrokeStyle(16, C.dodge).setScale(0.35).setDepth(19);
-      this.tweens.add({ targets: ring, scale: 1, alpha: 0, duration: 600, onComplete: () => ring.destroy() });
+      this.burst(x, y, C.dodge, 'DODGED!');
     }
     else {
-      this.fx.goo.explode(20, x, y); this.cameras.main.shake(160, 0.006); this.showFeedback('SPLAT', C.pink);
+      this.fx.goo.explode(40, x, y); this.cameras.main.shake(160, 0.006); this.showFeedback('SPLAT', C.pink);
+      this.burst(x, y, C.pink, 'SPLAT!');
       const blot = this.add.graphics({ x, y });
       blot.fillStyle(C.pink, 0.8); blot.fillEllipse(0, 0, 220, 130);
       for (let i = 0; i < 7; i++) {
@@ -773,6 +782,23 @@ class Play extends Phaser.Scene {
       blot.lineStyle(12, 0xffacd0, 0.8); blot.strokeEllipse(0, 0, 180, 100);
       this.leaveStamp(blot, y);
     }
+  }
+
+  // One big, short burst at the thing: an expanding ring, a spiky flash and the word, all readable from above.
+  burst(x, y, color, word) {
+    const ring = this.add.ellipse(x, y, 150, 90).setStrokeStyle(20, color, 1).setDepth(19);
+    this.tweens.add({ targets: ring, scaleX: 4.2, scaleY: 4.2, alpha: 0, duration: 420, ease: 'Quad.out', onComplete: () => ring.destroy() });
+    const star = this.add.graphics({ x, y }).setDepth(19);
+    star.fillStyle(C.white, 0.95);
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2, r = i % 2 ? 60 : 150;
+      const b = ((i + 1) / 10) * Math.PI * 2;
+      star.fillTriangle(0, 0, Math.cos(a) * r, Math.sin(a) * r * 0.6, Math.cos(b) * (i % 2 ? 150 : 60), Math.sin(b) * (i % 2 ? 150 : 60) * 0.6);
+    }
+    this.tweens.add({ targets: star, scaleX: 1.6, scaleY: 1.6, alpha: 0, angle: 25, duration: 380, onComplete: () => star.destroy() });
+    const text = this.add.text(x, y - 60, word, txt(120, color)).setOrigin(0.5).setDepth(21).setScale(0.4);
+    this.tweens.add({ targets: text, scaleX: 1, scaleY: 1, y: y - 200, duration: 220, ease: 'Back.out',
+      onComplete: () => this.tweens.add({ targets: text, alpha: 0, y: y - 260, duration: 500, delay: 250, onComplete: () => text.destroy() }) });
   }
 
   progress() {
@@ -833,7 +859,10 @@ class Play extends Phaser.Scene {
       this.sprites.clear();
       this.showAct();
     }
-    for (const th of out.resolved) this.resolveFx(th, L);
+    const g = this.g;
+    for (const th of out.resolved) { this.resolveFx(th, L); logRemote({ what: th.kind, lane: th.lane, result: th.result, at: Math.round(th.distCm), shoes: shoesLive(g), t: Math.round(g.t) }); }
+    if (out.actChanged) logRemote({ what: 'act', act: g.act, round: g.round, t: Math.round(g.t) });
+    if (Math.floor(g.t / 5) !== Math.floor((g.t - dt) / 5)) logRemote({ what: 'pace', cadence: out.pace.cadence, steps: g.stats.steps, form: Math.round(out.form * 100), shoes: shoesLive(g), base: g.base, t: Math.round(g.t) });
 
     // coach cue every 20 s: the server therapist (Gemini inside the therapist's limits), local rules offline
     if (this.g.t - this.lastCue > 20) {

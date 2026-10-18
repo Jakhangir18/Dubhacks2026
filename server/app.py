@@ -20,7 +20,9 @@ import math
 import os
 import re
 import socket
+import time
 import uuid
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -111,7 +113,7 @@ def clean_event(ev: Any) -> dict[str, Any] | None:
         marks = ev.get("marks")
         if not isinstance(marks, list):
             return None
-        out: list[Any] = []
+        kept: list[Any] = []
         for m in marks[:8]:
             if not isinstance(m, list) or len(m) != 5 or m[0] not in {"cyan", "magenta"}:
                 continue
@@ -120,8 +122,8 @@ def clean_event(ev: Any) -> dict[str, Any] | None:
             except (TypeError, ValueError):
                 continue
             if all(math.isfinite(v) for v in nums):
-                out.append([m[0]] + [max(0.0, min(1.0, v)) for v in nums])
-        return {"kind": "marks", "marks": out, "source": str(ev.get("source", "feet"))[:20]}
+                kept.append([m[0]] + [max(0.0, min(1.0, v)) for v in nums])
+        return {"kind": "marks", "marks": kept, "source": str(ev.get("source", "feet"))[:20]}
     if ev.get("kind") == "frame":
         jpeg = ev.get("jpeg")
         if not isinstance(jpeg, str) or not jpeg.startswith("data:image/jpeg;base64,") or len(jpeg) > MAX_FEED_FRAME_CHARS:
@@ -192,6 +194,29 @@ def clean_batch(batch: list[Any]) -> list[dict[str, Any]]:
     events = [e for e in (clean_event(x) for x in batch[:MAX_EVENTS_PER_BATCH]) if e]
     frames = [e for e in events if e["kind"] == "frame"]
     return [e for e in events if e["kind"] != "frame"] + frames[-1:]
+
+
+# ---------------------------------------------------------------- run log (what the game judged), kept in memory
+run_log: deque[dict[str, Any]] = deque(maxlen=300)
+
+
+@app.post("/api/log")
+async def post_log(request: Request) -> dict[str, Any]:
+    body = await request.body()
+    if len(body) > 2000:
+        raise HTTPException(413)
+    try:
+        entry = json.loads(body)
+    except json.JSONDecodeError as e:
+        raise HTTPException(422) from e
+    if isinstance(entry, dict):
+        run_log.append({"ts": round(time.time(), 1), **{str(k)[:20]: (v if isinstance(v, (int, float, bool, dict)) else str(v)[:60]) for k, v in list(entry.items())[:12]}})
+    return {"ok": True}
+
+
+@app.get("/api/log")
+def get_log(n: int = 50) -> list[dict[str, Any]]:
+    return list(run_log)[-max(1, min(n, 300)):]
 
 
 class EventsIn(BaseModel):
