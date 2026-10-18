@@ -146,7 +146,8 @@ async def coach(summary: dict[str, Any], limits: dict[str, Any]) -> dict[str, An
 def describe(summary: dict[str, Any]) -> str:
     return (f"{summary.get('seconds', 0)} s, {summary.get('steps', 0)} steps, cadence {summary.get('cadence')} per min, "
             f"flowers {summary.get('stompPct')}%, seeds {summary.get('dodgePct')}%, form {summary.get('formPct')}%, "
-            f"high-step lift L {summary.get('highLiftAvgCm', {}).get('L')} cm R {summary.get('highLiftAvgCm', {}).get('R')} cm")
+            f"high-step lift L {summary.get('highLiftAvgCm', {}).get('L')} cm R {summary.get('highLiftAvgCm', {}).get('R')} cm"
+            + (f"; side camera gait: {json.dumps(summary['sideCamera'])[:600]}" if summary.get("sideCamera") else ""))
 
 
 async def plan(player: dict[str, Any], recent: list[dict[str, Any]]) -> dict[str, Any]:

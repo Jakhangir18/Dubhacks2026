@@ -123,6 +123,7 @@ def test_memory_task_does_not_overwrite_panel_edits(offline):
 
 
 def test_side_camera_gait_reaches_the_saved_session():
+    client.put("/api/player/Mia", json={"notes": ""})
     r = client.post("/api/gait", json={"player": "Mia", "summary": {"cadence": 98.5, "kneeBend": {"L": 52, "R": 47},
                                                                      "note": "x" * 500}})
     assert r.json() == {"ok": True}
@@ -131,8 +132,19 @@ def test_side_camera_gait_reaches_the_saved_session():
     assert saved["cadence"] == 98.5 and saved["kneeBend"] == {"L": 52, "R": 47} and len(saved["note"]) == 200
 
 
-def test_stale_gait_is_not_attached(monkeypatch):
-    client.post("/api/gait", json={"player": "Mia", "summary": {"cadence": 90}})
-    monkeypatch.setattr(api.time, "time", lambda: 10**12)
-    client.post("/api/session", json={"player": "Mia", "summary": summary(), "verified": True})
+def test_stale_or_used_gait_is_not_attached(offline):
+    offline.update_player("Mia", gait={"ts": 0, "source": "side-camera", "summary": {"cadence": 90}})
+    client.post("/api/session", json={"player": "Mia", "summary": summary(sideCamera={"forged": 1}), "verified": True})
     assert "sideCamera" not in client.get("/api/sessions/Mia").json()[0]["summary"]
+    client.post("/api/gait", json={"player": "Mia", "summary": {"cadence": 90}})
+    for _ in range(2):
+        client.post("/api/session", json={"player": "Mia", "summary": summary(), "verified": True})
+    first, second = client.get("/api/sessions/Mia").json()[:2]
+    assert "sideCamera" in second["summary"] and "sideCamera" not in first["summary"]   # newest first
+
+
+def test_gait_rules():
+    assert client.post("/api/gait", json={"player": "Nobody", "summary": {"cadence": 90}}).status_code == 404
+    client.put("/api/player/Mia", json={"notes": ""})
+    assert client.post("/api/gait", json={"player": "Mia", "summary": None}).json()["ok"] is False
+    assert api.clean_gait({"big": 10**400, "nan": float("nan")}) == {"big": None, "nan": None}

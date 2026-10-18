@@ -31,8 +31,9 @@ Run the server on the laptop with `--host 0.0.0.0` so the Pi can reach it, and f
 A side-view camera (for example `gait.py` on a second laptop or the Pi) can also send its gait summary, which the therapist note and the saved session use:
 
 - `POST http://<laptop-ip>:8000/api/gait` with body `{"player": "Mia", "source": "side-camera", "summary": {...}}`.
-- `summary` is `GaitTracker.summary()` from `gait.py` as JSON: numbers, short strings, booleans and small nested objects (for example `{"cadence": 98.5, "kneeBend": {"L": 52, "R": 47}}`). Anything else is dropped.
-- Send it at the end of the walk (or every 10 to 20 s; the newest one wins). A summary older than 30 minutes is not attached to a session.
+- `player` must be the name the game and the therapist panel use; an unknown name gets 404.
+- `summary` is `GaitTracker.summary()` from `gait.py` as JSON (its keys: `direction`, `strikes`, `stride`, `flexion`, `cadence`, `asymmetry`): numbers, short strings, booleans and small nested objects. Anything else is dropped. When `summary()` returns `None` (too little seen), the reply is `{"ok": false}`.
+- Send it every 10 to 20 s while the player walks; the newest one wins. The next session saved at Home takes it once; a summary older than 30 minutes is ignored.
 - The session saved at Home then carries it as `summary.sideCamera`, and `therapist.report()` receives it.
 
 ## Test without a camera
