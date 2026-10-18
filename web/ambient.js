@@ -109,6 +109,7 @@ export class AmbientGarden {
     this.progress.value = state.progress || 0;
     this.progress.parentElement.hidden = state.act === 'title' || state.act === 'setup';
     this.prompt.hidden = state.paceOk || state.paused || state.act === 'home' || this.zone.active;
+    this.coach.style.color = state.coachColor || '';
   }
 
   drawImage(index, x, y, w, h = w) {
@@ -172,8 +173,8 @@ export class AmbientGarden {
       c.globalAlpha = this.ripple * .45; c.strokeStyle = '#9df5df'; c.lineWidth = 14;
       c.beginPath(); c.arc(this.centerX, this.centerY, (1 - this.ripple) * Math.max(w, h), 0, Math.PI * 2); c.stroke();
     }
-    const pulse = this.paceOk ? .75 : .55 + .35 * Math.sin(this.elapsed * 4);
-    c.strokeStyle = this.paceOk ? '#bbffc7' : '#ffcb7c';
+    const pulse = this.paceOk ? .75 : .5 + .5 * Math.sin(this.elapsed * Math.PI * 2);
+    c.strokeStyle = this.paceOk ? '#bbffc7' : '#ffb21e';
     c.globalAlpha = pulse * .12; c.lineWidth = 30; c.stroke(this.path);
     c.globalAlpha = pulse * .25; c.lineWidth = 16; c.stroke(this.path);
     c.globalAlpha = pulse; c.lineWidth = 6; c.stroke(this.path);

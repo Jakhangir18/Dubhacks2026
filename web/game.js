@@ -1,5 +1,5 @@
 // Zombie Walk Home: Phaser scenes, art, HUD and input. Rules live in logic.js.
-// Floor projection, top-down: the bottom band is the walking zone; flowers and seeds come from the top.
+// Floor projection: things arrive at the pad's front edge; ghost feet mark the toes below.
 import { newGame, step, addEvent, summary, needCm, startAt, applyParams, RULES } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
@@ -17,7 +17,8 @@ const sound = new GardenSound(Warp.store);
 const clip = new WalkClip();
 
 const C = { green: 0x7cff4f, yellow: 0xffe44d, magenta: 0xff2d95, cyan: 0x2de2ff, orange: 0xff9a1f,
-  white: 0xffffff, red: 0xff4d4d, violet: 0x9b6bff, path: 0x19352f, zone: 0x295d45 };
+  white: 0xffffff, red: 0xff4d4d, violet: 0x9b6bff, path: 0x19352f, zone: 0x295d45,
+  lime: 0x9cff5a, amber: 0xffb21e, dodge: 0x2de2c4, pink: 0xff5fa2 };
 const hex = (c) => `#${c.toString(16).padStart(6, '0')}`;
 const TEXT = { fontFamily: 'Trebuchet MS, system-ui, sans-serif', fontStyle: 'bold', color: '#ffffff',
   stroke: '#19352f', strokeThickness: 8 };
@@ -190,7 +191,7 @@ const ART = {
 };
 // Generated art (Higgsfield, docs/ART_DIRECTION.md) replaces the SVG of the same name; the SVG stays as the fallback.
 const HD = new Set(['fence', 'flower-bell', 'flower-marigold', 'flower-rose', 'foot-l', 'foot-r', 'gus-celebrate', 'gus-idle', 'gus-portrait', 'gus-step', 'house', 'moon', 'pod', 'seed', 'tile-grass-dark', 'tile-grass-light', 'tile-target', 'tree-lime', 'tree-teal']);
-const PLANT_SCALE = 1.55;   // generated plants are drawn larger than the old SVG box
+const PLANT_SCALE = 1.7;   // generated plants are drawn larger than the old SVG box
 const POD_SCALE = 1;
 const FILL = new Set(['fence', 'tile-grass-light', 'tile-grass-dark', 'tile-target']);
 function useHdArt(scene) {
@@ -250,6 +251,84 @@ function makeTextures(scene) {
     done(key, w, h);
   }
   g.destroy();
+  // White outline of the existing SVG footprint, without its fill or arrow.
+  for (const lane of ['l', 'r']) for (const amber of [false, true]) {
+    const key = `foot-ghost-${lane}${amber ? '-amber' : ''}`;
+    if (scene.textures.exists(key)) continue;
+    const canvas = scene.textures.createCanvas(key, 180, 240);
+    const ctx = canvas.getContext();
+    ctx.scale(180 / 80, 240 / 124);
+    if (lane === 'l') { ctx.translate(80, 0); ctx.scale(-1, 1); }
+    ctx.strokeStyle = amber ? '#ffb21e' : '#ffffff'; ctx.lineWidth = 6; ctx.lineJoin = 'round';   // at least 12 px after scaling
+    ctx.stroke(new Path2D('M29 50 Q7 59 17 84 Q25 101 23 106 Q24 117 41 116 Q60 116 60 102 L67 75 Q73 53 55 48Z'));
+    for (const [x, y, rx, ry] of [[21, 33, 11, 14], [43, 24, 10, 13], [62, 31, 8, 11]]) {
+      ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+    canvas.refresh();
+  }
+}
+
+function floorLayout(W, H) {
+  const zoneY = H * 0.54, top = H * 0.085;
+  return { W, H, zoneY, top, rowH: (zoneY - top) / 6,
+    lanes: { L: W * 0.318, R: W * 0.682 }, laneW: W * 0.364, gap: 20,
+    toeY: H - 120, meterBottom: H - 30, meterTop: zoneY + 10 };
+}
+
+function makeFloor(scene, L) {
+  scene.bg = scene.add.graphics().setDepth(-20);
+  scene.bg.fillStyle(0x10241c); scene.bg.fillRect(0, 0, L.W, L.H);
+  const rows = Math.ceil((L.H - L.top) / L.rowH) + 3;
+  scene.board = Array.from({ length: rows * 2 }, () => scene.add.image(0, 0, 'tile-grass-light').setDepth(-18));
+  scene.hitLine = scene.add.graphics().setDepth(2);
+  scene.feet = Object.fromEntries(['L', 'R'].map(lane => [lane,
+    scene.add.image(L.lanes[lane], L.toeY, `foot-ghost-${lane.toLowerCase()}`).setAlpha(0.3).setDepth(12)]));
+  scene.hud = scene.add.graphics().setDepth(30);
+}
+
+function drawFloor(scene, L, travelledCm, t, gated = false) {
+  const rowsTravelled = travelledCm / (RULES.aheadCm / 6);
+  const offset = (rowsTravelled % 1) * L.rowH;
+  const rowIndex = Math.floor(rowsTravelled);
+  for (let i = 0; i < scene.board.length; i++) {
+    const row = Math.floor(i / 2), col = i % 2, tile = scene.board[i];
+    if (scene.rowIndex !== rowIndex) {
+      const parity = ((row - rowIndex + col) % 2 + 2) % 2;
+      tile.setTexture(parity ? 'tile-grass-dark' : 'tile-grass-light')
+        .setDisplaySize(L.laneW - L.gap / 2, L.rowH + 1);
+    }
+    const y = L.top + (row - 1) * L.rowH + offset;
+    tile.setPosition(L.lanes[col ? 'R' : 'L'], y).setAlpha((y > L.zoneY ? 0.4 : 1) * (gated ? 0.4 : 1));
+  }
+  scene.rowIndex = rowIndex;
+  const h = scene.hitLine;
+  const color = gated ? C.amber : C.lime;
+  const pulse = gated ? 0.5 + 0.5 * Math.sin(2 * Math.PI * t) : 0.85 + 0.15 * Math.sin(t * 3);
+  const left = L.lanes.L - L.laneW / 2, width = L.laneW * 2;
+  h.clear();
+  for (const [height, alpha] of [[96, 0.08], [72, 0.18], [48, 0.8]]) {
+    h.fillStyle(color, alpha * pulse); h.fillRoundedRect(left, L.zoneY - height / 2, width, height, 12);
+  }
+  h.fillStyle(gated ? C.amber : C.white, pulse); h.fillRect(left, L.zoneY - 12, width, 24);
+  h.lineStyle(12, gated ? C.amber : C.white, pulse);
+  for (const lane of ['L', 'R']) for (const dx of [-65, 65]) {
+    const x = L.lanes[lane] + dx;
+    h.beginPath(); h.moveTo(x - 20, L.zoneY + 34); h.lineTo(x, L.zoneY + 52);
+    h.lineTo(x + 20, L.zoneY + 34); h.strokePath();
+  }
+}
+
+function drawMeter(h, L, lane, lift, need, color, flash = 0, urgent = false) {
+  const x = L.W * (lane === 'L' ? 0.068 : 0.932);
+  const height = L.meterBottom - L.meterTop, scale = height / 30;
+  h.fillStyle(0x101f30); h.fillRoundedRect(x - 30, L.meterTop, 60, height, 16);
+  h.lineStyle(12, C.white, 0.3); h.strokeRoundedRect(x - 30, L.meterTop, 60, height, 16);
+  const fill = Math.min(30, lift) * scale;
+  h.fillStyle(flash > 0 ? C.white : C.dodge); h.fillRect(x - 24, L.meterBottom - fill, 48, fill);
+  if (need !== null) {
+    h.lineStyle(12, flash > 0 ? C.white : color, urgent || flash > 0 ? 1 : 0.6);
+    h.lineBetween(x - 30, L.meterBottom - need * scale, x + 30, L.meterBottom - need * scale);
+  }
 }
 
 class Preload extends Phaser.Scene {
@@ -312,23 +391,29 @@ class ZonePreview extends Phaser.Scene {
   constructor() { super('zone'); }
   create() {
     const { width: W, height: H } = this.scale;
-    const bg = this.add.graphics();
-    bg.fillStyle(C.path); bg.fillRect(0, 0, W, H);
-    for (let row = 0; row < 6; row++) for (let lane = 0; lane < 2; lane++) {
-      this.add.image(W * (lane ? .67 : .33), H * (.08 + row * .12),
-        (row + lane) % 2 ? 'tile-grass-dark' : 'tile-grass-light').setDisplaySize(W * .33, H * .125);
-    }
-    bg.lineStyle(8, C.yellow); bg.lineBetween(W * .16, H * .78, W * .84, H * .78);
-    this.add.image(W * .33, H * .88, 'foot-l').setDisplaySize(W * .14, W * .14 * 124 / 80);   // the art's own proportions
-    this.add.image(W * .67, H * .88, 'foot-r').setDisplaySize(W * .14, W * .14 * 124 / 80);
-    for (let i = 0; i < 3; i++) {
-      const flower = this.add.image(W * (i % 2 ? .67 : .33), H * .1, ['flower', 'flower-bell', 'flower-rose'][i]).setScale(1.1);
-      this.tweens.add({ targets: flower, y: H * .73, duration: 4000, delay: i * 1200, repeat: -1 });
-    }
+    this.floor = floorLayout(W, H);
+    this.previewT = 0;
+    this.rowIndex = null;
+    makeFloor(this, this.floor);
+    this.flowers = Array.from({ length: 3 }, (_, i) => this.add.image(0, 0,
+      ['flower', 'flower-bell', 'flower-rose'][i]).setScale(PLANT_SCALE, PLANT_SCALE * 1.25).setDepth(5));
     const resize = () => this.scene.restart();
     this.scale.on('resize', resize);
     this.events.once('shutdown', () => this.scale.off('resize', resize));
   }
+  update(_time, deltaMs) {
+    this.previewT += Math.min(0.1, deltaMs / 1000);
+    const L = this.floor, t = this.previewT;
+    drawFloor(this, L, t * 83, t);
+    this.hud.clear();
+    for (const lane of ['L', 'R']) drawMeter(this.hud, L, lane, 4, 8, C.amber);
+    this.flowers.forEach((flower, i) => {
+      const phase = (t / 6 + i / 3) % 1;
+      const y = L.top + phase * (L.H - L.top + 150);
+      flower.setPosition(L.lanes[i % 2 ? 'R' : 'L'], y).setAlpha(y > L.zoneY ? 0.4 : 1);
+    });
+  }
+
 }
 
 // ---------- title ----------
@@ -404,15 +489,11 @@ class Play extends Phaser.Scene {
     this.lastCue = 0;
     this.frameWall = performance.now();
 
-    this.bg = this.add.graphics().setDepth(-20);
-    // A fixed pool: ten rows includes offscreen recycling, about seven are visible above the feet.
-    this.board = Array.from({ length: 20 }, () => this.add.image(0, 0, 'tile-grass-light').setDepth(-18));
-    this.walkingZone = this.add.graphics().setDepth(-10);
-    this.targetTiles = ['L', 'R'].map(() => this.add.image(0, 0, 'tile-target').setDepth(-15));
+    makeFloor(this, this.layout());
     this.pods = { L: this.add.image(0, 0, 'pod').setVisible(false).setScale(POD_SCALE).setDepth(3),
       R: this.add.image(0, 0, 'pod').setVisible(false).setScale(POD_SCALE).setDepth(3) };
-    this.feet = { L: this.add.image(0, 0, 'foot-l').setDepth(12), R: this.add.image(0, 0, 'foot-r').setDepth(12) };
-    this.hud = this.add.graphics().setDepth(30);
+    this.meterFlash = { L: 0, R: 0 };
+    this.aftermath = [];
 
     this.fx = {
       petals: this.add.particles(0, 0, 'petal', { speed: { min: 150, max: 420 }, lifespan: 900, rotate: { min: 0, max: 360 },
@@ -436,6 +517,9 @@ class Play extends Phaser.Scene {
       }
       if (e.kind === 'lift') {
         this.lift[e.foot] = Math.max(this.lift[e.foot], e.liftCm);
+        const next = this.g.things.filter(th => th.lane === e.foot && !th.result)
+          .sort((a, b) => a.distCm - b.distCm)[0];
+        if (next && this.lift[e.foot] >= needCm(this.g, next.kind, e.foot)) this.meterFlash[e.foot] = 0.2;
         const asked = this.g.act === 'garden' ? 'flower' : this.g.act === 'storm' ? 'seed' : null;   // nothing asked in act 1
         if (asked && !this.highSound[e.foot] && e.liftCm >= needCm(this.g, asked, e.foot)) {
           this.highSound[e.foot] = true;
@@ -447,7 +531,7 @@ class Play extends Phaser.Scene {
     this.input.keyboard.on('keydown-SPACE', () => {
       if (zone.active) return;
       this.paused = !this.paused;
-      publishGarden({ paused: this.paused, coach: this.paused ? 'Paused · Space to keep walking' : this.coachLine });
+      publishGarden({ paused: this.paused, coachColor: '', coach: this.paused ? 'Paused · Space to keep walking' : this.coachLine });
       sound.setMusic(!this.paused);
       clip.setPaused(this.paused);
     });
@@ -460,15 +544,7 @@ class Play extends Phaser.Scene {
   layout() {
     const { width: W, height: H } = this.scale;
     if (this.currentLayout?.W === W && this.currentLayout.H === H) return this.currentLayout;
-    const zoneY = H * 0.74;
-    // All words live outside the zone; only reserve room for a whole plant at the front.
-    const top = H * 0.10;
-    const rowH = (zoneY - top) / 6;
-    const lanes = { L: W * 0.33, R: W * 0.67 };
-    const padY = zoneY + rowH * 0.6;
-    const pads = Object.fromEntries(Object.entries(lanes).map(([lane, x]) => [lane,
-      { x: x - W * 0.105, y: padY, w: W * 0.21, h: H - padY - 12 } ]));
-    this.currentLayout = { W, H, zoneY, top, rowH, lanes, pad: (lane) => pads[lane] };
+    this.currentLayout = floorLayout(W, H);
     return this.currentLayout;
   }
 
@@ -487,10 +563,22 @@ class Play extends Phaser.Scene {
     say(a.intro.join(' '));
   }
 
-  showFeedback(text) {
+  showFeedback(text, color) {
     this.feedback = text;
+    this.feedbackColor = hex(color);
     this.feedbackUntil = this.g.t + 1.2;
     this.nextGardenUpdate = 0;
+  }
+
+  laneFlash(lane, color, duration, L) {
+    const flash = this.add.rectangle(L.lanes[lane], (L.top + L.zoneY) / 2,
+      L.laneW - L.gap / 2, L.zoneY - L.top, color, 0.6).setDepth(1);
+    this.tweens.add({ targets: flash, alpha: 0, duration, onComplete: () => flash.destroy() });
+  }
+
+  leaveStamp(art, y, wobble = false) {
+    art.setDepth(4);
+    this.aftermath.push({ art, y, travelled: this.g.travelledCm, wobble });
   }
 
   resolveFx(th, L) {
@@ -498,19 +586,38 @@ class Play extends Phaser.Scene {
     sound.play(th.result !== 'hit' ? 'miss' : th.kind === 'flower' ? 'stomp' : 'dodge');
     if (th.result === 'hit') reaction(th.kind === 'flower' ? 'stomp' : 'dodge');
     const x = L.lanes[th.lane];
-    const y = L.zoneY;
+    const y = this.yFor(th.distCm, L);   // where the thing is now: it resolves a little past the line
+    this.laneFlash(th.lane, th.result === 'hit' ? C.lime : C.amber, th.result === 'hit' ? 200 : 400, L);
     if (th.kind === 'flower' && th.result === 'hit') {
       this.fx.petals.explode(26, x, y);
-      this.showFeedback('SMASH!');
-      // A separate short-lived stamp also works for the last plant of an act.
-      const size = PLANT_SCALE * Math.min(1.15, L.W / 850);   // the same size the flower had in its lane
-      const stamp = this.add.image(x, y, this.flowerKey(th.id)).setDepth(19).setScale(size);
-      this.tweens.add({ targets: stamp, scaleX: size * 1.5, scaleY: size * 0.35, duration: 110, yoyo: true,
-        onComplete: () => { this.tweens.add({ targets: stamp, scale: 0.3, alpha: 0, duration: 160, onComplete: () => stamp.destroy() }); } });
+      this.showFeedback('SMASH!', C.yellow);
+      const size = PLANT_SCALE * Math.min(1.15, L.W / FIELD.width);
+      const stamp = this.add.image(x, y, this.flowerKey(th.id)).setScale(size, size * 1.25);
+      this.leaveStamp(stamp, y);
+      this.tweens.add({ targets: stamp, scaleX: size * 1.2, scaleY: size * 0.35, alpha: 0.5, duration: 110 });
     }
-    else if (th.kind === 'flower') this.showFeedback('Higher step!');
-    else if (th.result === 'hit') { this.fx.sparks.explode(24, x, y); this.cameras.main.flash(140, 190, 255, 235); this.showFeedback('DODGED!'); }
-    else { this.fx.goo.explode(20, x, y); this.cameras.main.shake(160, 0.006); this.showFeedback('SPLAT'); }
+    else if (th.kind === 'flower') {
+      this.showFeedback('HIGHER STEP', C.amber);
+      const stamp = this.add.image(x, y, this.flowerKey(th.id)).setScale(PLANT_SCALE, PLANT_SCALE * 1.25).setAlpha(0.5);
+      this.leaveStamp(stamp, y, true);
+    }
+    else if (th.result === 'hit') {
+      this.fx.sparks.explode(24, x, y); this.cameras.main.flash(140, 190, 255, 235);
+      this.showFeedback('DODGED!', C.dodge);
+      const ring = this.add.ellipse(x, y, 400, 240).setStrokeStyle(16, C.dodge).setScale(0.35).setDepth(19);
+      this.tweens.add({ targets: ring, scale: 1, alpha: 0, duration: 600, onComplete: () => ring.destroy() });
+    }
+    else {
+      this.fx.goo.explode(20, x, y); this.cameras.main.shake(160, 0.006); this.showFeedback('SPLAT', C.pink);
+      const blot = this.add.graphics({ x, y });
+      blot.fillStyle(C.pink, 0.8); blot.fillEllipse(0, 0, 220, 130);
+      for (let i = 0; i < 7; i++) {
+        const angle = i * Math.PI * 2 / 7;
+        blot.fillEllipse(Math.cos(angle) * 100, Math.sin(angle) * 60, 60, 60);
+      }
+      blot.lineStyle(12, 0xffacd0, 0.8); blot.strokeEllipse(0, 0, 180, 100);
+      this.leaveStamp(blot, y);
+    }
   }
 
   progress() {
@@ -574,73 +681,37 @@ class Play extends Phaser.Scene {
       this.askCoach();
     }
 
-    this.drawWorld(L);
-    this.drawThings(L);
+    this.drawWorld(L, out);
+    this.drawThings(L, out);
     this.drawHud(L, out, dt);
   }
 
-  drawWorld(L) {
-    const { W, H } = L;
-    const { rowH } = L;
-    // World distance keeps the checker parity and scenery continuous through recycling and resizing.
-    const rowsTravelled = this.g.travelledCm / (RULES.aheadCm / 6);
-    const offset = (rowsTravelled % 1) * rowH;
-    const rowIndex = Math.floor(rowsTravelled);
-    const resized = this.worldLayout !== L;
-    const recycled = this.rowIndex !== rowIndex;
-    if (resized) {
-      this.worldLayout = L;
-      const b = this.bg;
-      b.clear();
-      b.fillStyle(0x10241c); b.fillRect(0, 0, W, H);   // dark around the lawn: the projector spends its light on the lanes
-      b.fillStyle(C.path); b.fillRoundedRect(W * 0.155, L.top - 10, W * 0.69, H, 18);
-      this.targetTiles.forEach((tile, i) => tile.setPosition(L.lanes[i ? 'R' : 'L'], L.zoneY)
-        .setDisplaySize(W * 0.34, rowH));
-      for (const lane of ['L', 'R']) {
-        this.pods[lane].setPosition(L.lanes[lane], Math.max(66, L.top - 20));   // Pip sits at the far end of its lane, never off the top
-        const pad = L.pad(lane);
-        this.feet[lane].setPosition(L.lanes[lane], pad.y + pad.h / 2)
-          .setScale(Math.min(1.4, (pad.h - 16) / 124, (pad.w - 16) / 80));
-      }
-      // Opaque foot pads keep the walking zone legible on a white projection mat.
-      const z = this.walkingZone;
-      z.clear();
-      z.fillStyle(C.zone); z.fillRect(0, L.zoneY + rowH / 2, W, H - L.zoneY - rowH / 2);
-      z.lineStyle(6, 0xffe778); z.lineBetween(W * 0.16, L.zoneY, W * 0.84, L.zoneY);
-      for (const lane of ['L', 'R']) {
-        const pad = L.pad(lane);
-        z.fillStyle(0x173e37); z.fillRoundedRect(pad.x, pad.y, pad.w, pad.h, 24);
-        z.lineStyle(5, 0x91d970); z.strokeRoundedRect(pad.x, pad.y, pad.w, pad.h, 24);
-      }
-    }
-    for (let row = 0; row < 10; row++) {
-      for (let col = 0; col < 2; col++) {
-        const tile = this.board[row * 2 + col];
-        if (resized || recycled) {
-          const parity = ((row - rowIndex + col) % 2 + 2) % 2;
-          tile.setTexture(parity ? 'tile-grass-dark' : 'tile-grass-light').setDisplaySize(W * 0.34, rowH + 1);
-        }
-        tile.setPosition(L.lanes[col ? 'R' : 'L'], L.top + (row - 1) * rowH + offset);
-      }
-    }
-    this.rowIndex = rowIndex;
+  drawWorld(L, out) {
+    drawFloor(this, L, this.g.travelledCm, this.g.t, !out.pace.ok && this.g.t > 3);
+    for (const lane of ['L', 'R']) this.pods[lane].setPosition(L.lanes[lane], Math.max(66, L.top - 20));
+    this.aftermath = this.aftermath.filter(stamp => {
+      stamp.art.y = stamp.y + (this.g.travelledCm - stamp.travelled) * (L.zoneY - L.top) / RULES.aheadCm;
+      if (stamp.art.y > L.H + 180) { stamp.art.destroy(); return false; }
+      if (stamp.wobble) stamp.art.setAngle(Math.sin(this.g.t * 9) * 9);
+      return true;
+    });
   }
 
   flowerKey(id) { return ['flower', 'flower-bell', 'flower-rose'][(id - 1) % 3]; }
 
-  drawThings(L) {
+  drawThings(L, out) {
     const g = this.g;
     const live = new Set();
     for (const th of g.things) {
       live.add(th.id);
       let s = this.sprites.get(th.id);
       if (!s) {
-        // The glow ring shows only as the thing reaches the feet; the plant stands on the lawn itself.
-        const pad = this.add.ellipse(0, 34, 170, 64, C.yellow, 0.28).setStrokeStyle(8, C.yellow).setVisible(false);
+        const pad = this.add.ellipse(0, 34, 300, 144).setStrokeStyle(12, C.lime, 0.6).setVisible(false);
+        const arc = this.add.graphics({ x: 0, y: 34 }).setScale(1, 0.48);
         const plant = this.add.image(0, 0, th.kind === 'flower' ? this.flowerKey(th.id) : 'seed')
-          .setScale(th.kind === 'flower' ? PLANT_SCALE : 1.3);
+          .setScale(th.kind === 'flower' ? PLANT_SCALE : 2.0);
         // Pads travel with the exact rules position; tile decoration never snaps an obstacle's distance.
-        s = this.add.container(L.lanes[th.lane], L.top, [pad, plant]).setDepth(5);
+        s = this.add.container(L.lanes[th.lane], L.top, [pad, plant, arc]).setDepth(5);
         this.sprites.set(th.id, s);
         if (th.kind === 'seed') {
           sound.play('seed');
@@ -650,13 +721,30 @@ class Play extends Phaser.Scene {
           this.tweens.add({ targets: pod, scaleX: POD_SCALE * 1.2, scaleY: POD_SCALE * 0.8, duration: 120, yoyo: true });
         }
       }
-      const y = this.yFor(Math.max(th.distCm, -40), L);
+      const y = this.yFor(th.distCm, L);
       const near = Math.max(0, 1 - th.distCm / RULES.aheadCm);
       const plant = s.list[1];
-      s.setPosition(L.lanes[th.lane], y).setScale(Math.min(1.15, L.W / 850));
-      s.setAlpha(th.result ? 0.25 : 1);
+      const scale = Math.min(1.15, L.W / FIELD.width);
+      s.setPosition(L.lanes[th.lane], y).setScale(scale, scale * 1.25);
+      s.setVisible(!th.result);
       const pad = s.list[0];
+      // Once open, the window stays open: a pace dip must not flip the cue back or flash the lane again.
+      const windowOpen = s.windowOpen || th.arriveT !== null || th.distCm <= out.speed * RULES.beforeS;
       pad.setVisible(near > 0.72 && !th.result);
+      pad.setStrokeStyle(12, windowOpen ? C.white : C.lime, windowOpen ? 1 : 0.6);
+      pad.setScale(windowOpen ? 1 : 1 + 0.06 * Math.sin(g.t * Math.PI * 6));
+      const arc = s.list[2];
+      arc.clear();
+      if (windowOpen && !th.result) {
+        const arrival = th.arriveT ?? g.t + (out.speed > 0 ? th.distCm / out.speed : 0);   // the world stops when the pace drops
+        const left = Math.max(0, Math.min(1, (arrival + RULES.afterS - g.t) / (RULES.beforeS + RULES.afterS)));
+        if (left > 0) {
+          arc.lineStyle(16, th.kind === 'seed' ? C.pink : C.white);
+          arc.beginPath(); arc.arc(0, 0, 170, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left); arc.strokePath();
+        }
+        if (!s.windowOpen) this.laneFlash(th.lane, C.white, 160, L);
+      }
+      s.windowOpen = windowOpen;
       plant.setVisible(!(th.kind === 'flower' && th.result === 'hit'));
       if (th.kind === 'seed' && !th.result) plant.setRotation(plant.rotation + 0.15);
       else plant.setAngle(Math.sin(g.t * 3 + th.id) * 5);
@@ -667,39 +755,27 @@ class Play extends Phaser.Scene {
   }
 
   drawHud(L, out, dt) {
-    const { W, H } = L;
     const g = this.g;
     const h = this.hud;
     h.clear();
 
-    // next thing per lane: ghost footprint and the lift needed
+    const gated = !out.pace.ok && g.t > 3;
+    const beat = g.t * (g.limits.minCadence + 20) / 60;
     const next = {};
     for (const th of g.things) if (!th.result && (!next[th.lane] || th.distCm < next[th.lane].distCm)) next[th.lane] = th;
     for (const lane of ['L', 'R']) {
       this.footFlash[lane] = Math.max(0, this.footFlash[lane] - dt * 3);
-      this.lift[lane] = Math.max(0, this.lift[lane] - dt * 25);
+      this.meterFlash[lane] = Math.max(0, this.meterFlash[lane] - dt);
       const th = next[lane];
-      const urgent = th && th.distCm < 140;
-      const pulse = urgent ? 0.8 + 0.2 * Math.sin(g.t * 14) : 1;
-      this.feet[lane].setAlpha(Math.max(pulse, this.footFlash[lane]));
-      // Canvas-friendly colored rim: the same urgency cue without a WebGL-only image tint.
-      if (urgent || this.footFlash[lane] > 0) {
-        h.lineStyle(7, urgent ? (th.kind === 'flower' ? C.yellow : C.magenta) : C.white,
-          Math.max(pulse, this.footFlash[lane]));
-        const pad = L.pad(lane);
-        h.strokeRoundedRect(pad.x, pad.y, pad.w, pad.h, 24);
-      }
-      // lift bar beside each footprint: current lift against the target line
-      const bx = lane === 'L' ? L.lanes.L - W * 0.105 - 34 : L.lanes.R + W * 0.105 + 34;   // clear of the pad and its rim
-      const barH = (H - L.zoneY) * 0.8;
-      const by = H - 14;
-      const scale = barH / 30;                       // 30 cm full bar
-      h.fillStyle(0x222222); h.fillRect(bx - 12, by - barH, 24, barH);
-      h.fillStyle(C.cyan); h.fillRect(bx - 12, by - Math.min(30, this.lift[lane]) * scale, 24, Math.min(30, this.lift[lane]) * scale);
-      if (th) {
-        const need = needCm(g, th.kind, lane);
-        h.lineStyle(4, th.kind === 'flower' ? C.yellow : C.magenta); h.lineBetween(bx - 22, by - need * scale, bx + 22, by - need * scale);
-      }
+      const need = th ? needCm(g, th.kind, lane) : null;
+      const urgent = th && 1 - th.distCm / RULES.aheadCm > 0.72;
+      const active = Math.floor(beat) % 2 === (lane === 'L' ? 0 : 1);
+      this.feet[lane].setTexture(`foot-ghost-${lane.toLowerCase()}${gated && active ? '-amber' : ''}`);
+      // Each step lights its footprint briefly, so a working sensor is visible at a glance.
+      this.feet[lane].setAlpha(Math.max(gated && active ? 0.3 + 0.7 * (1 - beat % 1) : 0.3, this.footFlash[lane]));
+      drawMeter(h, L, lane, this.lift[lane], need, th?.kind === 'flower' ? C.amber : C.pink,
+        this.meterFlash[lane], urgent);
+      this.lift[lane] = Math.max(0, this.lift[lane] - dt * 25);
     }
 
     if (g.t >= this.nextGardenUpdate) {
@@ -708,6 +784,7 @@ class Play extends Phaser.Scene {
       publishGarden({ cadence: out.pace.cadence, act: g.act, paceOk: out.pace.ok || g.t <= 3,
         paused: this.paused, title: act?.title || '', score: `${g.score} pts${g.streak >= 5 ? '  x2' : ''}`,
         progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · form ${Math.round(out.form * 100)}%${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
+        coachColor: g.t < this.feedbackUntil ? this.feedbackColor : '',
         coach: g.t < this.feedbackUntil ? this.feedback : g.t < this.actIntroUntil ? act.intro.join(' ') : this.coachLine });
     }
   }
@@ -722,7 +799,7 @@ class Home extends Phaser.Scene {
     if (!data.replay) sound.play('home');
     const s = data.summary;
     publishGarden({ act: 'home', cadence: 0, paceOk: true, paused: false, title: 'HOME BEFORE SUNRISE!',
-      score: `${s.score} pts`, progress: 1, pace: `${s.steps} steps · form ${s.formPct}%`, coach: 'Welcome home, Gus! · R to walk again' });
+      score: `${s.score} pts`, progress: 1, pace: `${s.steps} steps · form ${s.formPct}%`, coachColor: '', coach: 'Welcome home, Gus! · R to walk again' });
     const { width: W, height: H } = this.scale;
     gardenBackdrop(this, W, H);
     this.house = this.add.image(W * 0.62, H * 0.18, 'house');
