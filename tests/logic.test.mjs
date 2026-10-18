@@ -40,10 +40,29 @@ test('cadence below the minimum slows the world and fills act 1 at half rate; st
   assert.ok(g.travelledCm > 0);
   walk(g, 5, 1.0);
   assert.equal(g.act, 'garden');       // about 7 s at half rate (the first steps have no cadence yet)
-  for (let i = 0; i < 40; i++) step(g, DT);   // 2 s with no steps: past stopAfterS, the player has stopped
+  for (let i = 0; i < 120; i++) step(g, DT);  // 6 s with no steps: past stopAfterS and the glide to rest
   const before = g.travelledCm;
   for (let i = 0; i < 20; i++) step(g, DT);   // another second standing still: nothing moves
   assert.equal(g.travelledCm, before);
+});
+
+test('the world speed glides: no jump when the pace starts, flips or stops', () => {
+  const g = newGame({ walkSeconds: 60 }, 1);
+  const speeds = [];
+  const go = (seconds, gap) => { const end = g.t + seconds; while (g.t < end) { walk(g, DT, gap); speeds.push(g.speed); } };
+  go(1.15, 0.6);                       // two steps (at 0 and 0.6 s): no cadence yet
+  assert.equal(g.speed, 0);
+  go(0.1, 0.6);                        // the third step gives a cadence of 100: the world starts, gently
+  assert.ok(g.speed > 0 && g.speed < 0.3 * (100 / 60) * 50 * 0.7, `starts gently, got ${g.speed}`);
+  go(4, 0.6);
+  const steady = g.speed;
+  const nominal = (100 / 60) * 50 * 0.7;   // steps land on frames, so the measured cadence wobbles by a step or two
+  assert.ok(Math.abs(steady - nominal) < 0.05 * nominal, `reaches the cadence speed, got ${steady} for ${nominal}`);
+  for (let i = 1; i < speeds.length; i++) assert.ok(speeds[i] - speeds[i - 1] < 0.1 * steady, 'no jump on the way up');
+  for (let i = 0; i < 40; i++) step(g, DT);   // 2 s without a step: past stopAfterS, the target is 0
+  assert.ok(g.speed > 0 && g.speed < steady, `slows instead of freezing, got ${g.speed}`);
+  for (let i = 0; i < 80; i++) step(g, DT);   // 4 s more: at rest, exactly
+  assert.equal(g.speed, 0);
 });
 
 test('a steady pace with both feet finishes act 1', () => {

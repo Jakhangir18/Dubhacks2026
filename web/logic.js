@@ -35,6 +35,11 @@ export const RULES = {
   slowFloor: 0.7,
   slowFill: 0.5,
   stopAfterS: 1.5,               // no step for this long means the player stopped
+  // The world speed eases towards what the cadence asks (time constants in s), so a pace change, a missed step
+  // or a stop glides instead of jerking the plants; below restCmS with no cadence it is at rest.
+  speedUpS: 0.6,
+  slowDownS: 1.0,
+  restCmS: 1,
   points: { stomp: 10, dodge: 15 },
   // Shoe mode (feet.py boxes on the camera): a flower is smashed when a shoe covers it, a seed splats; a thing
   // that passes the toes resolves the other way. Distances are world cm on the field.
@@ -66,6 +71,7 @@ export function newGame(limits = {}, seed = 1) {
     round: 1,                    // which flowers-and-seeds round (1 to limits.rounds)
     actT: 0,                     // seconds spent in the current act
     walkGoodS: 0,                // act 1 seconds at a good pace
+    speed: 0,                    // world speed in cm/s, eased towards the cadence
     travelledCm: 0,
     nextSpawnCm: 0,
     spawned: 0,
@@ -276,7 +282,10 @@ export function step(g, dt) {
   const scale = speedScale(g);
   const walking = p.cadence > 0;
   const cadence = p.ok ? p.cadence : walking ? Math.max(p.cadence, g.limits.minCadence * RULES.slowFloor) : 0;
-  const speed = (cadence / 60) * RULES.strideCm * scale;   // slow walking slows the world a little; standing still stops it
+  const target = (cadence / 60) * RULES.strideCm * scale;   // slow walking slows the world a little; standing still stops it
+  g.speed += (target - g.speed) * (1 - Math.exp(-dt / (target > g.speed ? RULES.speedUpS : RULES.slowDownS)));
+  if (Math.abs(target - g.speed) < (target === 0 ? RULES.restCmS : 0.01)) g.speed = target;   // settle, never creep
+  const speed = g.speed;
   const moved = speed * dt;
   g.travelledCm += moved;
   const out = { resolved: [], actChanged: false, pace: p, form: f, speed };

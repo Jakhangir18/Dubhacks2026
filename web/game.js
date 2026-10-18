@@ -842,10 +842,14 @@ class Play extends Phaser.Scene {
 
   update(_time, deltaMs) {
     if (this.paused || zone.active) return;
-    const dt = Math.min(1, deltaMs / 1000);   // only a stalled tab is capped: events arrive in real time, game time must keep up
+    const dt = Math.min(0.25, deltaMs / 1000);   // a hitch moves the world a quarter second at most, never a leap
     this.frameWall = performance.now();
     const out = step(this.g, dt);
     const L = this.layout();
+    // The pace warning (amber floor, pulsing line) waits a moment: one missed step must not flash the whole floor.
+    const bad = !out.pace.ok && this.g.t > 3;
+    if (!bad) this.gatedSince = null; else this.gatedSince ??= this.g.t;
+    out.gated = bad && this.g.t - this.gatedSince > 1.2;
 
     if (out.actChanged) {
       if (this.g.act === 'home') {
@@ -878,7 +882,7 @@ class Play extends Phaser.Scene {
   }
 
   drawWorld(L, out) {
-    drawFloor(this, L, this.g.travelledCm, this.g.t, !out.pace.ok && this.g.t > 3);
+    drawFloor(this, L, this.g.travelledCm, this.g.t, out.gated);
     for (const lane of ['L', 'R']) this.pods[lane].setPosition(L.lanes[lane], Math.max(66, L.top - 20));
     this.aftermath = this.aftermath.filter(stamp => {
       stamp.art.y = stamp.y + (this.g.travelledCm - stamp.travelled) * (L.zoneY - L.top) / RULES.aheadCm;
@@ -951,16 +955,22 @@ class Play extends Phaser.Scene {
   drawHud(L, out, dt) {
     // Rings under the detected shoes: the live check that the shoe calibration matches the floor.
     const fresh = shoesLive(this.g) && performance.now() - this.lastShoes < 400;
+    const ease = 1 - Math.exp(-dt / 0.08);   // the ring glides after the box (camera jitter is under 20 cm)
     this.shoeRings.forEach((ring, i) => {
       const s = this.g.shoes[i];
-      ring.setVisible(fresh && !!s);
-      if (s) ring.setPosition(s.xFrac * L.W, this.yFor((s.nearCm + s.farCm) / 2, L));   // where the shoe really is, lane or not
+      const show = fresh && !!s;
+      if (s) {
+        const x = s.xFrac * L.W, y = this.yFor((s.nearCm + s.farCm) / 2, L);   // where the shoe really is, lane or not
+        if (ring.visible) ring.setPosition(ring.x + (x - ring.x) * ease, ring.y + (y - ring.y) * ease);
+        else ring.setPosition(x, y);
+      }
+      ring.setVisible(show);
     });
     const g = this.g;
     const h = this.hud;
     h.clear();
 
-    const gated = !out.pace.ok && g.t > 3;
+    const gated = out.gated;
     const beat = g.t * (g.limits.minCadence + 20) / 60;
     const next = {};
     for (const th of g.things) if (!th.result && (!next[th.lane] || th.distCm < next[th.lane].distCm)) next[th.lane] = th;
