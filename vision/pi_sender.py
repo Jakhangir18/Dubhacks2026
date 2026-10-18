@@ -42,15 +42,19 @@ class Sender:
                 if self.conn is None:
                     self.conn = self._connect()
                 self.conn.request("POST", "/api/events", body=body, headers={"content-type": "application/json"})
-                return json.loads(self.conn.getresponse().read())
-            except (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError):
-                # The kept-alive connection was already closed by the server, so nothing was delivered:
-                # reconnect and send once more.
+            except (BrokenPipeError, ConnectionResetError, http.client.RemoteDisconnected):
+                # Writing failed on a stale kept-alive connection: nothing reached the server, safe to resend once.
                 self._drop()
-                if attempt == 1:
-                    break
+                if attempt == 0:
+                    continue
+                break
+            except (OSError, http.client.HTTPException):
+                self._drop()
+                break
+            # The request is written. From here never resend: the server may already have the events.
+            try:
+                return json.loads(self.conn.getresponse().read())
             except (OSError, http.client.HTTPException, ValueError):
-                # Timeout or bad reply: the server may already have the events, so never resend (no double steps).
                 self._drop()
                 break
         self.errors += 1
