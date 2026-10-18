@@ -717,15 +717,17 @@ class Play extends Phaser.Scene {
       }
     });
     this.events.once('shutdown', () => this.off());
-    this.input.keyboard.on('keydown-SPACE', () => {
-      if (zone.active) return;
-      this.paused = !this.paused;
-      publishGarden({ paused: this.paused, coachColor: '', coach: this.paused ? 'Paused · Space to keep walking' : this.coachLine });
-      this.markPause(this.paused);
-      sound.setMusic(!this.paused);
-      clip.setPaused(this.paused);
-      if (!this.paused) resetShoes(this.g);   // sightings and half swings from before the pause are stale
-    });
+    this.input.keyboard.on('keydown-SPACE', () => { if (!zone.active) this.setPaused(!this.paused); });
+    // A projector that switches itself off moves the window to the laptop screen and out of fullscreen: the window
+    // shrinks. Hold the game until someone presses Space (growing, as on entering fullscreen, is not a loss).
+    this.lastArea = window.innerWidth * window.innerHeight;
+    const onResize = () => {
+      const area = window.innerWidth * window.innerHeight;
+      if (area < this.lastArea * 0.9 && !this.paused && this.sys.isActive()) this.setPaused(true, 'PROJECTOR?', 'Projector lost · Space to keep walking');
+      this.lastArea = area;
+    };
+    window.addEventListener('resize', onResize);
+    this.events.once('shutdown', () => window.removeEventListener('resize', onResize));
     if (settings.greeting) { this.coachLine = settings.greeting; setTimeout(() => say(settings.greeting), 2600); }
     const jump = params.get('act');
     if (jump) { startAt(this.g, jump); params.delete('act'); }   // development shortcut, first game only
@@ -748,6 +750,21 @@ class Play extends Phaser.Scene {
   markPause(on) {
     if (on && this.pauseAt === null) this.pauseAt = this.wallS();
     else if (!on && this.pauseAt !== null) { this.pauses.push([this.pauseAt, this.wallS()]); this.pauseAt = null; }
+  }
+
+  // Pause or resume: the floor shows a banner, the ambient panel the line, the music and the clip stop with it.
+  setPaused(on, banner = 'PAUSED', line = 'Paused · Space to keep walking') {
+    this.paused = on;
+    publishGarden({ paused: on, coachColor: '', coach: on ? line : this.coachLine });
+    this.markPause(on);
+    sound.setMusic(!on);
+    clip.setPaused(on);
+    this.pauseBanner?.destroy();
+    this.pauseBanner = null;
+    if (on) {
+      const { width: W, height: H } = this.scale;
+      this.pauseBanner = this.add.text(W / 2, H * 0.45, `${banner}\npress Space`, { ...txt(96, C.yellow), align: 'center' }).setOrigin(0.5).setDepth(30);
+    } else resetShoes(this.g);   // sightings and half swings from before the pause are stale
   }
 
   // Shoe boxes from feet.py while this game runs: onto the field, into the rules, with the usual step feedback.
