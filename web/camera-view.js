@@ -13,6 +13,18 @@ const CORNERS = ['FRONT-LEFT', 'FRONT-RIGHT', 'BACK-RIGHT', 'BACK-LEFT'];
 const store = window.Warp.store;
 // The saved shoe calibration, read once and after each save (this window is the only writer).
 let saved = { points: store.get(CAM_KEY + '.points', null), picture: store.get(CAM_KEY + '.picture', 'local') };
+// A newer calibration on the server (another window, or set by hand) replaces the local one.
+async function pullShoeCal() {
+  try {
+    const r = await fetch('/api/shoecal'); const cal = r.ok ? await r.json() : null;
+    if (!cal?.h || !(cal.ts > store.get(CAM_KEY + '.ts', 0))) return;
+    store.set(CAM_KEY, cal.h); store.set(CAM_KEY + '.ts', cal.ts);
+    saved = { points: cal.points?.length === 4 ? cal.points : null, picture: cal.picture || 'feed' };
+    store.set(CAM_KEY + '.points', saved.points); store.set(CAM_KEY + '.picture', saved.picture);
+  } catch { /* offline */ }
+}
+pullShoeCal();
+setInterval(pullShoeCal, 4000);
 const $ = (id) => document.getElementById(id);
 const video = $('video');
 const overlay = $('overlay');
@@ -246,6 +258,11 @@ overlay.parentElement.addEventListener('click', (e) => {
   saved = { points: calib.points, picture: feedLive() ? 'feed' : 'local' };   // which picture the corners were clicked on
   store.set(CAM_KEY + '.points', saved.points);
   store.set(CAM_KEY + '.picture', saved.picture);
+  store.set(CAM_KEY + '.ts', Date.now() / 1000);
+  // The server keeps it for every game window and for a hand-set calibration.
+  fetch('/api/shoecal', { method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ h, points: calib.points, picture: saved.picture }) })
+    .then((r) => r.ok && r.json()).then((cal) => { if (cal?.ts) store.set(CAM_KEY + '.ts', cal.ts); }).catch(() => {});
   calib.active = false;
   help.textContent = 'Saved. Walk: the game draws a ring under each shoe; if the rings are off, calibrate again.';
 });
