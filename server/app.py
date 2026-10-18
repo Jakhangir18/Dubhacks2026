@@ -121,6 +121,12 @@ async def post_events(inp: EventsIn) -> dict[str, Any]:
     return {"accepted": len(events), "listeners": listeners}
 
 
+# ---------------------------------------------------------------- therapist, players, sessions, rewards
+from server import api  # imported after load_env() so the store sees MONGODB_URI
+
+app.include_router(api.router)
+
+
 # ---------------------------------------------------------------- static game
 @app.get("/")
 def index() -> FileResponse:
