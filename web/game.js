@@ -3,7 +3,7 @@
 import { ease, plan, endRest, newGame, step, addEvent, addShoes, shoesLive, resetShoes, markHit, summary, needCm, startAt, applyParams, speedScale, SPEED_RANGE, RULES, LIMITS } from './logic.js';
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
-import { connectBridge, SHOES_EVENT, FRAME_EVENT, MARKS_EVENT } from './bridge.js';
+import { connectBridge, CONTROL_EVENT, SHOES_EVENT, FRAME_EVENT, MARKS_EVENT } from './bridge.js';
 import { ENDING_SECONDS, ENDINGS, HOME_STOMP_THRESHOLD, ROUND_LINES, actStory, endingFor, targetTexture } from './lore.js';
 import { GardenSound } from './sound.js';
 import { WalkClip, uploadClip } from './clip.js';
@@ -188,12 +188,18 @@ let autoFoot = 'L';
 // [ and ]: plants slower or faster, live, remembered on this laptop.
 function nudgeSpeed(delta) {
   const play = window.zombieGame?.scene.getScene('play');
-  const now = Number(play?.g?.limits.speedScale ?? settings.limits.speedScale ?? LIMITS.speedScale);
+  const active = play?.sys.isActive() || play?.sys.isPaused();
+  const now = Number((active ? play.g?.limits.speedScale : null) ?? settings.limits.speedScale ?? LIMITS.speedScale);
   const next = Math.round(Math.min(SPEED_RANGE[1], Math.max(SPEED_RANGE[0], now + delta)) * 10) / 10;
   settings.limits.speedScale = next;
-  if (play?.g) play.g.limits.speedScale = next;
+  if (active && play.g) play.g.limits.speedScale = next;
   Warp.store.set('zombiewalk.speedScale', next);
   if (play?.sys.isActive()) play.showFeedback(`PLANT SPEED x${next.toFixed(1)}`, C.cyan);
+}
+
+function toggleVoice() {
+  settings.voice = !settings.voice; Warp.store.set('zombiewalk.voiceOn', settings.voice);
+  if (!settings.voice) { ++speechId; stopVoice(); }
 }
 
 function toggleAutoWalk() {
@@ -381,10 +387,7 @@ window.addEventListener('keydown', (e) => {
     q: () => keyStep('L', 16), e: () => keyStep('R', 16),
     w: toggleAutoWalk, c: openZone, z: openZone,
     f: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()),
-    m: () => {
-      settings.voice = !settings.voice; Warp.store.set('zombiewalk.voiceOn', settings.voice);
-      if (!settings.voice) { ++speechId; stopVoice(); }
-    },
+    m: toggleVoice,
     n: () => sound.toggle(),
     k: () => { const el = document.getElementById('keys'); el.hidden = !el.hidden; },
     v: () => cameraPanel.toggle(),
@@ -748,6 +751,7 @@ class Play extends Phaser.Scene {
     clip.cancel();
     sound.setMusic(true);
     this.paused = false;
+    this.finishing = false;
     this.highSound = { L: false, R: false };
     this.g = newGame(settings.limits);
     this.awaiting = !!data.awaiting; this.readyGame = newGame(); this.readySteps = []; this.countdownAt = null;
@@ -1055,7 +1059,7 @@ class Play extends Phaser.Scene {
     }
     if (!this.sys.isActive() || this.g !== g || !cue) return;
     // A late reply may still adjust the therapist's parameters as before, but must not overwrite a new story beat.
-    if (g.act !== sum.act || g.round !== sum.rounds) return;
+    if (g.act !== sum.act || g.round !== sum.rounds || (speak && this.countdownAt !== null)) return;
     if (g.round > 1) cue = cue.replace(/flowers/gi, 'plants').replace(/flower/gi, 'plant');
     if (speak && g.act === 'rest' && !/Next round in three/i.test(cue)) cue += ' Next round in three!';
     if (speak && g.act === 'rest' && !new RegExp(`round ${g.round - 1} done`, 'i').test(cue)) {
@@ -1080,11 +1084,30 @@ class Play extends Phaser.Scene {
     return 'Great walking, keep it up';
   }
 
+  beginWalk() {
+    if (!this.awaiting) return;
+    this.awaiting = false;
+    this.countdownText.setText('');
+    for (const foot of Object.values(this.feet)) foot.setAlpha(.3);
+    this.showAct();
+  }
+
+  finishWalk(restart = false) {
+    if (this.finishing) return;
+    this.finishing = true;
+    ++speechId; stopVoice();
+    this.markPause(false);
+    this.g.act = 'home';
+    this.nextSegment();
+    const timing = { segments: this.segments, pauses: this.pauses, wallSeconds: this.wallS() };
+    this.scene.start('home', { summary: { ...summary(this.g), perceptron: perceiver.summary(), ...timing }, sessionId: this.sessionId, restart });
+  }
+
   readyStrike() {
     const now = performance.now();
     this.readySteps = this.readySteps.filter(t => now - t <= 3000);
     this.readySteps.push(now);
-    if (this.readySteps.length >= 4) { this.awaiting = false; this.countdownText.setText(''); for (const foot of Object.values(this.feet)) foot.setAlpha(.3); this.showAct(); }
+    if (this.readySteps.length >= 4) this.beginWalk();
   }
 
   update(_time, deltaMs) {
@@ -1107,16 +1130,15 @@ class Play extends Phaser.Scene {
     const L = this.layout();
 
     if (out.actChanged) {
-      this.nextSegment();
       if (this.g.act === 'home') {
         // The scene is about to close: play the sounds, skip visuals that would be torn down at once.
         for (const th of out.resolved) {
           sound.play(th.result !== 'hit' ? 'miss' : th.kind === 'flower' ? 'stomp' : 'dodge');
           if (th.result === 'hit') reaction(th.kind === 'flower' ? 'stomp' : 'dodge');
         }
-        const timing = { segments: this.segments, pauses: this.pauses, wallSeconds: this.wallS() };
-        this.scene.start('home', { summary: { ...summary(this.g), perceptron: perceiver.summary(), ...timing }, sessionId: this.sessionId }); return;
+        this.finishWalk(); return;
       }
+      this.nextSegment();
       this.sprites.forEach((s) => s.destroy());
       this.sprites.clear();
       this.showAct();
@@ -1134,7 +1156,7 @@ class Play extends Phaser.Scene {
     if (out.actChanged && g.act === 'rest') {
       const round = g.round;
       this.askCoach(true).finally(() => {
-        if (this.sys.isActive() && this.g === g && g.act === 'rest' && g.round === round) this.countdownAt = g.t;
+        if (this.sys.isActive() && this.g === g && g.act === 'rest' && g.round === round && this.countdownAt === null) this.countdownAt = g.t;
       });
     }   // between rounds the coach speaks about the round just played
     if (out.bouquet) {   // four petals banked: both lanes light up gold
@@ -1381,8 +1403,10 @@ class Home extends Phaser.Scene {
       data.restarting = true;
       data.cancelled = true; data.uploadAbort?.abort(); clip.cancel();
       playerReady = loadPlayer();
-      playerReady.then(() => { if (this.sys.isActive() || this.sys.isPaused()) this.scene.start('play'); });   // the panel's new limits apply
+      this.scene.start('title');   // the panel's new limits apply
     };
+    this.restartGame = playAgain;
+    if (data.restart) this.time.delayedCall(0, playAgain);
     this.input.keyboard.on('keydown-R', playAgain);
     // Walking again starts the next game by itself, once the card has been on screen for a moment.
     const steps = [];
@@ -1592,4 +1616,74 @@ window.zombieGame.events.on('postrender', () => {
   lastMirror = now;
   mirror.getContext('2d').drawImage(window.zombieGame.canvas, 0, 0, mirror.width, mirror.height);
   send('mirror', { url: mirror.toDataURL('image/jpeg', 0.6) });
+});
+
+// Dashboard telemetry follows the actual scenes, including the title's intro and play's ready gate.
+let lastStateKey = '';
+let lastStateAt = -Infinity;
+let statePosts = Promise.resolve();
+function reportGameState() {
+  const scenes = window.zombieGame.scene;
+  const play = scenes.getScene('play');
+  const home = scenes.getScene('home');
+  const title = scenes.getScene('title');
+  const scene = zone.active ? 'zone' : scenes.isActive('title') ? (title.started ? 'intro' : 'title')
+    : scenes.isActive('play') ? (play.awaiting ? 'ready' : 'play') : scenes.isActive('home') ? 'home' : null;
+  if (!scene) return;
+  const g = ['play', 'ready', 'home'].includes(scene) ? play.g : null;
+  const state = { kind: 'gamestate', scene,
+    act: scene === 'play' && ['walk', 'garden', 'rest'].includes(g.act) ? g.act : null,
+    round: g?.round ?? null, rounds: g ? plan(g).rounds : null,
+    paused: scene === 'play' && play.paused, score: g?.score ?? 0, stompPct: null,
+    t: g?.t ?? 0, sessionId: g ? play.sessionId : null, voice: settings.voice,
+    speed: Number(g?.limits.speedScale ?? settings.limits.speedScale ?? LIMITS.speedScale) };
+  const key = JSON.stringify([state.scene, state.act, state.round, state.paused, state.voice, state.speed]);
+  const now = performance.now();
+  if (key === lastStateKey && now - lastStateAt < 1000) return;
+  lastStateKey = key; lastStateAt = now;
+  const sum = scene === 'home' ? home.homeData.summary : g ? summary(g) : null;
+  state.score = sum?.score ?? 0;
+  state.stompPct = sum?.stompPct ?? null;
+  statePosts = statePosts.then(() => withTimeout(api('/api/events', { events: [state] }), 3000)).catch(() => {});
+}
+window.zombieGame.events.on('poststep', reportGameState);
+setInterval(reportGameState, 1000);
+
+const controlIds = new Set();
+window.addEventListener(CONTROL_EVENT, ({ detail: ev }) => {
+  if (!ev.id || controlIds.has(ev.id)) return;
+  controlIds.add(ev.id);
+  const scenes = window.zombieGame.scene;
+  const play = scenes.getScene('play');
+  const playing = scenes.isActive('play') && !zone.active;
+  switch (ev.cmd) {
+    case 'start':
+      if (scenes.isActive('title')) scenes.getScene('title').go();
+      else if (playing && play.awaiting) play.beginWalk();
+      break;
+    case 'pause': case 'resume':
+      if (playing && !play.awaiting) play.setPaused(ev.cmd === 'pause');
+      break;
+    case 'next':
+      if (playing && play.g.act === 'rest' && play.countdownAt === null) {
+        play.countdownAt = play.g.t;
+        ++speechId; stopVoice();
+      }
+      break;
+    case 'end': if (playing && !play.awaiting) play.finishWalk(); break;
+    case 'restart':
+      if (zone.active) break;
+      if (playing) play.finishWalk(true);
+      else if (scenes.isActive('home')) scenes.getScene('home').restartGame();
+      else if (scenes.isActive('title')) {
+        playerReady = loadPlayer();
+        scenes.getScene('title').scene.restart();
+      }
+      break;
+    case 'voice': toggleVoice(); break;
+    case 'faster': nudgeSpeed(0.1); break;
+    case 'slower': nudgeSpeed(-0.1); break;
+    case 'autowalk': toggleAutoWalk(); break;
+  }
+  reportGameState();
 });
