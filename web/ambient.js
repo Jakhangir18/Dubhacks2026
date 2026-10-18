@@ -1,5 +1,5 @@
 // Static garden canvases are painted on asset load / resize only; animation is capped at 30 fps.
-import { coachNumbers, ENDING_SECONDS } from './lore.js';
+import { coachNumbers, ENDING_SECONDS, ENDINGS } from './lore.js';
 const $ = id => document.getElementById(id);
 const setText = (node, value) => { if (node.textContent !== value) node.textContent = value; };
 const clamp = x => Math.max(0, Math.min(1, x));
@@ -101,7 +101,11 @@ export class AmbientGarden {
     } else if (state.act === 'title') {
       setText($('story-prompt'), 'Walk to start'); setText($('story-detail'), '4 steps · or press Enter');
     } else if (state.act === 'home') {
-      setText($('story-prompt'), 'Home before sunrise!'); setText($('story-detail'), 'Your walk summary is next');
+      const ending = ENDINGS[state.ending] || ENDINGS.home;
+      setText($('story-ending-eyebrow'), state.ending === 'almost' ? 'ONE WARM DAWN AWAY…' : 'THREE PATCHES LATER…');
+      setText($('story-ending-title'), ending.storyTitle);
+      setText($('story-ending-detail'), ending.storyDetail);
+      setText($('story-prompt'), ending.prompt); setText($('story-detail'), ending.detail);
     }
   }
 
@@ -195,6 +199,19 @@ export class AmbientGarden {
     c.restore();
   }
 
+  mayaWindow(c, x, y, size, time) {
+    const sway = Math.sin(time * 5) * size * .05;
+    c.save();
+    c.fillStyle = '#ffe59a'; c.shadowColor = '#ffbe62'; c.shadowBlur = size * .6;
+    c.fillRect(x - size / 2, y - size / 2, size, size); c.shadowBlur = 0;
+    c.strokeStyle = '#633b44'; c.lineWidth = Math.max(3, size * .1); c.strokeRect(x - size / 2, y - size / 2, size, size);
+    c.beginPath(); c.rect(x - size / 2, y - size / 2, size, size); c.clip();
+    this.art(c, 'maya', x + sway, y + size * .18, size * 1.15, size * 1.15);
+    c.restore();
+    c.strokeStyle = '#633b44'; c.lineWidth = Math.max(2, size * .055);
+    c.beginPath(); c.moveTo(x, y - size / 2); c.lineTo(x, y + size / 2); c.moveTo(x - size / 2, y); c.lineTo(x + size / 2, y); c.stroke();
+  }
+
   drawStory(c) {
     const w = this.w, h = this.h, t = this.storyTime;
     if (this.act === 'title') {
@@ -208,22 +225,31 @@ export class AmbientGarden {
     } else {
       c.drawImage(this.garden, 0, 0);
       const finish = this.act === 'home';
-      const fraction = finish ? 2 / 3 + smooth(t / 3) / 3 : (this.state.round - 1) / (this.state.rounds || 3);
+      const almost = finish && this.state.ending === 'almost';
+      const fraction = almost ? .48 + smooth(t / 1.7) * .18 : finish ? 2 / 3 + smooth(t / 3) / 3 : (this.state.round - 1) / (this.state.rounds || 3);
       const x = w * (.08 + fraction * .70);
-      if (finish) {
+      if (almost) {
+        const dawn = c.createRadialGradient(w * .84, h * .57, h * .02, w * .84, h * .57, h * .52);
+        dawn.addColorStop(0, `rgba(255, 213, 132, ${.62 * smooth(t / 2)})`);
+        dawn.addColorStop(.48, `rgba(249, 142, 112, ${.28 * smooth(t / 2)})`);
+        dawn.addColorStop(1, 'rgba(249, 142, 112, 0)');
+        c.fillStyle = dawn; c.fillRect(0, 0, w, h);
+        this.art(c, 'house', w * .84, h * .47, h * .56, h * .61);
+      } else if (finish) {
         // Door swings inward as Gus arrives. Bright interior sits over the closed-door artwork.
         const open = smooth((t - 1.8) / 1.1), doorX = w * .84 - h * .048, doorY = h * .51;
         c.fillStyle = '#ffe9a0'; c.fillRect(doorX - h * .029, doorY, h * .058, h * .135);
         c.fillStyle = '#75523b'; c.fillRect(doorX - h * .029, doorY, h * .058 * (1 - open), h * .135);
       }
-      this.gus(c, x, h * .80, t, finish && t < 3);
-      this.maya(c, w * .86, h * .56, h * .135, finish && t > 2.5 ? t : 0);
+      this.gus(c, x, h * .80, t, finish && (!almost && t < 3 || almost && t < 1.7));
+      if (almost) this.mayaWindow(c, w * .84 + h * .22, h * .50, h * .075, t);
+      else this.maya(c, w * .86, h * .56, h * .135, finish && t > 2.5 ? t : 0);
       if (!finish) {
         c.textAlign = 'center'; c.font = `bold ${Math.max(28, h * .032)}px Trebuchet MS`;
         c.strokeStyle = '#173b32'; c.lineWidth = 7; c.fillStyle = '#fff1a4';
         const label = `${this.state.round - 1}/${this.state.rounds || 3} HOME`;
         c.strokeText(label, x, h * .84); c.fillText(label, x, h * .84);
-      } else if (t > 2.6) {
+      } else if (!almost && t > 2.6) {
         const colors = ['#ffdb62', '#ed80bc', '#b3ff79', '#80e4e4'];
         for (let i = 0; i < 36; i++) {
           const age = ((t - 2.6) * .4 + i / 36) % 1;

@@ -4,7 +4,7 @@ import { ease, plan, newGame, step, addEvent, addShoes, shoesLive, resetShoes, m
 import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
 import { connectBridge, SHOES_EVENT, FRAME_EVENT, MARKS_EVENT } from './bridge.js';
-import { ENDING, ENDING_SECONDS, ROUND_LINES, actStory, targetTexture } from './lore.js';
+import { ENDING_SECONDS, ENDINGS, HOME_STOMP_THRESHOLD, ROUND_LINES, actStory, endingFor, targetTexture } from './lore.js';
 import { GardenSound } from './sound.js';
 import { WalkClip, uploadClip } from './clip.js';
 import { WalkingZone } from './zone.js';
@@ -669,7 +669,9 @@ class Boot extends Phaser.Scene {
       return;
     }
     if (params.get('auto') === '1' && !autoWalk) toggleAutoWalk();
-    const sample = { score: 180, formPct: 82, steps: 412, cadence: 96, stompPct: 75, dodgePct: 70, highLiftAvgCm: { L: 13.5, R: 11 } };
+    const previewEnding = params.get('ending');
+    const sample = { score: 180, formPct: 82, steps: 412, cadence: 96,
+      stompPct: previewEnding === 'almost' ? HOME_STOMP_THRESHOLD - 1 : 75, dodgePct: 70, highLiftAvgCm: { L: 13.5, R: 11 } };
     const first = params.get('scene');
     if (first === 'home') this.scene.start('home', { summary: sample });   // development: preview the end screen
     else this.scene.start(first === 'play' ? 'play' : 'title');
@@ -1039,6 +1041,9 @@ class Play extends Phaser.Scene {
     // A late reply may still adjust the therapist's parameters as before, but must not overwrite a new story beat.
     if (g.act !== sum.act || g.round !== sum.rounds) return;
     if (g.round > 1) cue = cue.replace(/flowers/gi, 'plants').replace(/flower/gi, 'plant');
+    if (speak && g.act === 'rest' && !new RegExp(`round ${g.round - 1} done`, 'i').test(cue)) {
+      cue = `Round ${g.round - 1} done. ${cue}`;
+    }
     this.coachLine = cue;
     this.nextGardenUpdate = 0;
     logRemote({ what: 'cue', say: cue, act: g.act, round: g.round, t: Math.round(g.t) });
@@ -1275,8 +1280,10 @@ class Home extends Phaser.Scene {
     sound.setMusic(false);
     if (!data.replay) sound.play('home');
     const s = data.summary;
-    publishGarden({ act: 'home', cadence: 0, paceOk: true, paused: false, title: 'HOME BEFORE SUNRISE!',
-      score: `${s.score} pts`, progress: 1, pace: `${s.steps} steps · form ${s.formPct}%`, coachColor: '', coach: 'Welcome home, Gus! · Walk to play again' });
+    this.endingKind = endingFor(s.stompPct);
+    const ending = ENDINGS[this.endingKind];
+    publishGarden({ act: 'home', ending: this.endingKind, cadence: 0, paceOk: true, paused: false, title: ending.title,
+      score: `${s.score} pts`, progress: 1, pace: `${s.steps} steps · form ${s.formPct}%`, coachColor: '', coach: `${ending.storyDetail} · Walk to play again` });
     const { width: W, height: H } = this.scale;
     gardenBackdrop(this, W, H);
     this.house = this.add.image(W * 0.62, H * 0.18, 'house');
@@ -1290,8 +1297,8 @@ class Home extends Phaser.Scene {
     const style = (size, color = C.white) => ({ ...txt(size, color),
       wordWrap: { width: W * 0.84 - 32, useAdvancedWrap: true }, align: 'center' });
     const text = (value, size, color) => this.add.text(W / 2, 0, value, style(size, color)).setOrigin(0.5, 0);
-    this.heading = text('HOME!', small ? 48 : 64, C.green);
-    this.ending = text(ENDING, bodySize, C.yellow);
+    this.heading = text(ending.heading, small ? 48 : 64, C.green);
+    this.ending = text(ending.summary, bodySize, C.yellow);
     const lines = [
       `Score ${s.score}   ·   Form ${s.formPct}%`,
       `${s.steps} steps   ·   ${s.cadence} steps/min`,
@@ -1325,7 +1332,7 @@ class Home extends Phaser.Scene {
     }
     if (data.result) this.showResult(data.result);
     if (data.gaitStatus) this.showGait();
-    say(`${ENDING} ${s.stompPct ?? 0} percent of plants stomped. Great walking.`, { personal: true });
+    say(`${ending.summary} ${s.stompPct ?? 0} percent of plants stomped. Great walking.`, { personal: true });
     const playAgain = () => {
       // Once per walk, and not under the zone setup. The flag lives on this walk's data, not on the scene: Phaser
       // reuses the scene for every game, and a flag left on it from the last walk ignored every later restart.

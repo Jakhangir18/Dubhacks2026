@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { newGame, step, addEvent, summary } from '../web/logic.js';
-import { actStory, targetTexture, coachNumbers } from '../web/lore.js';
+import { HOME_STOMP_THRESHOLD, actStory, targetTexture, coachNumbers, endingFor } from '../web/lore.js';
+
+test('ending selection sends 60 percent and above home, otherwise almost home', () => {
+  assert.equal(endingFor(HOME_STOMP_THRESHOLD - 1), 'almost');
+  assert.equal(endingFor(HOME_STOMP_THRESHOLD), 'home');
+  assert.equal(endingFor(HOME_STOMP_THRESHOLD + 1), 'home');
+});
 
 test('three demo rounds have distinct skins and name the completed round at rest, with 18 flower judgments', () => {
   const g = newGame({ walkSeconds: 8, gardenPlants: 6, stormSeeds: 0, rounds: 3 });

@@ -26,8 +26,34 @@ export const ACTS = {
   },
 };
 
+export const HOME_STOMP_THRESHOLD = 60;
 export const ENDING = 'Home before sunrise! Maya is cheering for you.';
+export const ENDINGS = {
+  home: {
+    title: 'HOME BEFORE SUNRISE!',
+    heading: 'HOME!',
+    summary: ENDING,
+    prompt: 'Home before sunrise!',
+    detail: 'Your walk summary is next',
+    storyTitle: 'Welcome home, Gus!',
+    storyDetail: 'You did it! — Maya',
+  },
+  almost: {
+    title: 'ALMOST HOME!',
+    heading: 'ALMOST HOME!',
+    summary: 'Rest now. Gus gets home next time.',
+    prompt: 'Almost home!',
+    detail: 'Your walk summary is next',
+    storyTitle: 'ALMOST HOME!',
+    storyDetail: 'Rest now. Gus gets home next time.',
+  },
+};
 export const ENDING_SECONDS = 6;
+
+// Presentation only: the game rules and recorded walk data never change with its ending.
+export function endingFor(stompPct) {
+  return Number(stompPct) >= HOME_STOMP_THRESHOLD ? 'home' : 'almost';
+}
 
 // Presentation only: every round still uses the same flower judging and golden/bouquet rules.
 export const ROUND_LINES = {
