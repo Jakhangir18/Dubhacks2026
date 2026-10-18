@@ -15,15 +15,15 @@
   <div id="stage"></div>
   <section id="garden-hud" aria-label="Walking progress">
     <div class="hud-heading"><strong id="act-title"></strong><strong id="score"></strong></div>
+    <strong id="walk-prompt" hidden>KEEP WALKING</strong>
+    <div id="coach"></div>
     <label class="home-progress">HOME <progress id="home-progress" max="1" value="0"></progress></label>
     <div id="pace"></div>
-    <div id="coach"></div>
-    <strong id="walk-prompt" hidden>KEEP WALKING</strong>
   </section>
   <section id="zone-setup" hidden aria-label="Mark your walking zone">
     <div id="setup-copy">
       <h1>Mark your walking zone</h1>
-      <p>Front = the end of the pad closest to the projector and camera; plants come from the front.</p>
+      <p>Back corners at your toes. Front corners on the floor 1 m past the pad.</p>
       <p>Drag the front corners first, then the back corners. Leave space in front for the large game text.</p>
       <div class="setup-actions"><button id="rotate-zone" type="button">Rotate 90°</button><button id="save-zone" type="button">Done · Enter</button></div>
       <p id="zone-help" role="status"></p>
