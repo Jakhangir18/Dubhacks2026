@@ -32,11 +32,12 @@ A phone camera watches your feet. Stomps and dodges count only for a timed lift 
 - **Game:** Phaser 3 in the browser, own art drawn in code, high contrast for a dim projector; four-corner calibration warps the game onto the mat.
 - **Camera:** MediaPipe Pose in the browser on a phone used as a webcam; our step detector turns landmarks into lift and strike events (per-foot ground level, clearance at the lowest point of the foot, scale from the player's height).
 - **Perceptron:** after each flower or seed, up to eight timestamped frames of the lower legs (cropped at the knees, no face) go to `perceptron-mk1.5` as `video_frames` with a strict JSON schema; a second schema checks form every 10 s. Only with the parent's or therapist's consent.
+- **Perceptron lab:** at the end of each walk a leg-only sample (up to 32 frames) goes through four Perceptron capabilities at once: video clipping marks every high step on a timeline, object tracking follows both feet, the Detect API points at feet, flowers and seeds on a key frame, and Multilook writes a share caption, a gait note for the therapist and a safety line. The therapist panel draws all of it on the frame.
 - **Projection zone:** the player marks the walking zone's four corners on the floor at the start (front corners first); the game is warped into that trapezoid and an animated garden fills the rest of the projection.
 - **Raspberry Pi path:** any camera computer can post the same foot events to the laptop server (HTTP or WebSocket).
 - **Server:** FastAPI relays events, runs the coach, stores players and sessions (MongoDB Atlas), keeps long-term memory per player (Backboard), calls Perceptron, and serves the clip and QR code.
 - **Safety and honesty:** limits clamp everything the model proposes; wellness wording only (coordination, balance, mobility); children play on the floor, never on a treadmill; camera video never leaves the device.
-- **Tests:** [N] automated tests (game rules, step detector, server), end-to-end runs in headless Chromium.
+- **Tests:** 68 automated tests (49 server, 19 game rules and step detector), plus end-to-end runs in headless Chromium with a fake camera.
 
 ## Challenges
 
@@ -46,12 +47,13 @@ A phone camera watches your feet. Stomps and dodges count only for a timed lift 
 
 ## Accomplishments
 
-- [fill in after testing: the first time the projected flower splashed under a real foot]
+- The first time a projected flower splashed under a real foot on the walking pad.
+- Perceptron agreeing with our own camera step by step, with every frame cropped below the knees.
 - A therapist's limits that the AI cannot exceed.
 
 ## What we learned
 
-[fill in]
+A single phone camera cannot measure millimetres, but it can measure centimetre lifts and timing, and that is enough for a game. Grading a step against the player's own normal step is fairer than any fixed threshold. A second model that disagrees with your detector is more useful than one that agrees, because it shows where the camera is unsure.
 
 ## What's next
 

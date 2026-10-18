@@ -37,8 +37,11 @@ def players() -> list[str]:
 
 
 @router.get("/player/{name}")
-def get_player(name: str) -> dict[str, Any]:
-    return store.player(name)
+def get_player(name: str, reports: bool = False) -> dict[str, Any]:
+    player = store.player(name)
+    if not reports:
+        player.pop("perceptronReports", None)   # key frames are heavy; only the therapist panel asks for them
+    return player
 
 
 class PlayerIn(BaseModel):

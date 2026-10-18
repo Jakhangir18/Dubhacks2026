@@ -8,6 +8,7 @@ const EVERY_MS = 200;
 const KEEP_MS = 2400;
 const STEP_WINDOW_MS = 1600;
 const MAX_FRAMES = 8;           // server/perceive.py MAX_FRAMES
+const MAX_SESSION_FRAMES = 32;  // server/perceive.py MAX_SESSION_FRAMES
 const FORM_EVERY_MS = 10000;
 const LEG = [25, 26, 27, 28, 29, 30, 31, 32];   // knees, ankles, heels, toes
 const KNEES = [25, 26];
@@ -81,7 +82,7 @@ export class Perceiver {
     const url = this.canvas.toDataURL('image/jpeg', 0.7);
     this.frames.push({ url, tsMs: now });
     if (now - this.lastSample >= this.sampleEvery) {
-      if (this.sessionFrames.length === 32) {
+      if (this.sessionFrames.length === MAX_SESSION_FRAMES) {
         this.sessionFrames = this.sessionFrames.filter((_, i) => i % 2 === 0);
         this.sampleEvery *= 2;
       }

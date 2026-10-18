@@ -170,7 +170,7 @@
       $('lab-caption').textContent = report.caption || 'Caption unavailable.';
       $('lab-gait').textContent = report.gaitNote || 'Gait note unavailable.';
       $('lab-safety').textContent = report.safety || 'Safety observation unavailable.';
-      $('lab-usage').textContent = `${report.usage?.requests ?? 0} requests · Reasoning effort: low for clipping, tracking and Multilook; none for Detect API.`;
+      $('lab-usage').textContent = `${report.usage?.requests ?? 0} requests · Reasoning effort: low for clipping and tracking; none for Multilook and the Detect API.`;
       $('lab-detect').textContent = report.points == null ? 'Detect API · unavailable' : `Detect API · ${report.points.length} labelled points`;
       $('lab-tracks').textContent = report.tracks == null ? 'Object tracking · unavailable' : 'Object tracking · left foot cyan / right foot pink';
       const tracks = report.tracks || {};
@@ -213,7 +213,7 @@
       const image = new Image();
       image.onload = () => draw(image);
       image.onerror = () => draw(null);
-      image.src = report.keyFrame;
+      if (report.keyFrame) image.src = report.keyFrame; else draw(null);
     }
 
     function drawRewards() {
@@ -243,7 +243,7 @@
 
     async function load(name) {
       if (!name) return;
-      player = await api(`/api/player/${encodeURIComponent(name)}`);
+      player = await api(`/api/player/${encodeURIComponent(name)}?reports=1`);
       fill(player);
       await sessions(player.name);
       say(`loaded ${player.name}`);

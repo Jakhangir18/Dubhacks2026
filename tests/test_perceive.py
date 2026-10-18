@@ -212,7 +212,8 @@ def test_session_consent_budget_and_body_cap(monkeypatch):
         assert perceive.allow_call()
     assert client.post("/api/perceive/session", json=body).json() == {"source": "off"}
     assert not posts
-    assert client.get("/api/player/Mia").json()["perceptronReports"] == []
+    assert client.get("/api/player/Mia?reports=1").json()["perceptronReports"] == []
+    assert "perceptronReports" not in client.get("/api/player/Mia").json()   # the game never downloads key frames
     for path in ("/api/perceive", "/api/perceive/session"):
         assert client.post(path, content=b"{}", headers={"content-length": "999999999"}).status_code == 413
         assert client.post(path, content=iter([b"{}"]), headers={"content-type": "application/json"}).status_code == 413
@@ -298,7 +299,7 @@ def test_session_subcall_failure_keeps_other_results(monkeypatch):
         }
     assert peak == 4
     assert len(posts) == len(perceive._calls) == 24
-    player = client.get("/api/player/Mia").json()
+    player = client.get("/api/player/Mia?reports=1").json()
     assert len(player["perceptronReports"]) == 5
     assert player["perceptronReports"][0] == out
     assert player["notes"] == "keep these notes" and player["perceptronConsent"]

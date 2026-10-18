@@ -744,6 +744,7 @@ class Home extends Phaser.Scene {
     window.dispatchEvent(new CustomEvent('zombiewalk:session', { detail: s }));
     if (params.get('scene') === 'home') return;   // preview only, nothing to save
     if (s.perceptron) {
+      data.labStatus = 'Perceptron lab is reviewing your walk…';   // kept across a zone-setup pause
       data.labTask = perceiver.sessionReport().then((report) => {
         data.labReport = report;
         data.caption = report?.caption || null;
@@ -829,13 +830,13 @@ class Home extends Phaser.Scene {
     this.textures.addImage('walk-qr', share.image);
     this.qrImage = this.add.image(0, 0, 'walk-qr').setInteractive({ useHandCursor: true });
     this.qrImage.on('pointerdown', () => window.open(share.url, '_blank', 'noopener'));
-    this.shareText.setText(this.homeData.caption || 'Scan to get your walk clip');
+    this.shareText.setText('Scan to get your walk clip');
     this.layoutCard();
   }
 
   showLab() {
-    this.labText.setText(this.homeData.labStatus || '');
-    if (this.qrImage && this.homeData.caption) this.shareText.setText(this.homeData.caption);
+    // The caption goes with the lab line; the line under the QR keeps telling the player to scan.
+    this.labText.setText([this.homeData.labStatus, this.homeData.caption && `“${this.homeData.caption}”`].filter(Boolean).join('\n'));
     this.layoutCard();
   }
 
