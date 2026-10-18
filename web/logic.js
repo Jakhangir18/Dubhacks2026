@@ -14,6 +14,7 @@ export const LIMITS = {          // set by the therapist (Therapist panel); the 
   liftRange: [6, 18],            // the coach may move liftCm only inside this range
   spacingCm: 140,                // distance between plants
   spacingRange: [90, 220],
+  speedScale: 1,                 // how fast plants come, times the walking speed (0.3 to 2)
 };
 
 export const RULES = {
@@ -159,7 +160,8 @@ export function step(g, dt) {
   const p = pace(g);
   const f = form(p);
   if (g.act !== 'home') { g.formSum += f * dt; g.formN += dt; }   // time-weighted, independent of frame rate
-  const speed = p.ok ? (p.cadence / 60) * RULES.strideCm : 0;   // the world waits when the pace drops
+  const scale = Math.min(2, Math.max(0.3, Number(g.limits.speedScale) || 1));
+  const speed = p.ok ? (p.cadence / 60) * RULES.strideCm * scale : 0;   // the world waits when the pace drops
   const moved = speed * dt;
   g.travelledCm += moved;
   const out = { resolved: [], actChanged: false, pace: p, form: f, speed };

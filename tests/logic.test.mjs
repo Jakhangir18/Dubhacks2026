@@ -173,3 +173,20 @@ test('equal step times on one foot still give an asymmetry value', () => {
   g.t = 1.3;
   assert.notEqual(pace(g).asym, null);
 });
+
+test('plant speed scales the world speed inside its limits', () => {
+  const at = (speedScale) => {
+    const g = newGame({ speedScale }, 1);
+    let out;
+    for (let i = 0; i < 40; i++) {           // a steady 100 steps per minute, both feet
+      addEvent(g, { foot: i % 2 ? 'R' : 'L', kind: 'strike', t: g.t });
+      out = step(g, 0.3);
+    }
+    return out.speed;
+  };
+  const normal = at(1);
+  assert.ok(normal > 0);
+  assert.ok(Math.abs(at(0.5) - normal / 2) < 1e-9);
+  assert.ok(Math.abs(at(5) - normal * 2) < 1e-9);      // capped at 2
+  assert.ok(Math.abs(at(0.1) - normal * 0.3) < 1e-9);  // floor at 0.3
+});

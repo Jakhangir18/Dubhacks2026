@@ -26,11 +26,7 @@ export class WalkingZone {
     this.width = innerWidth; this.height = innerHeight;
     const saved = Warp.store.get(Warp.CORNERS_KEY, null);
     this.saved = valid(saved);
-    this.corners = this.saved ? saved : [
-      // A long, narrow trapezoid like a walking pad seen from the projector; the game field is portrait.
-      [innerWidth * .43, innerHeight * .42], [innerWidth * .57, innerHeight * .42],   // below the setup instructions
-      [innerWidth * .66, innerHeight * .94], [innerWidth * .34, innerHeight * .94],
-    ];
+    this.corners = this.saved ? saved : WalkingZone.defaults();
     const size = Warp.store.get(SIZE_KEY, null);
     if (this.saved && size?.width > 0 && size?.height > 0 && JSON.stringify(size.corners) === JSON.stringify(saved)) {
       for (const p of this.corners) { p[0] *= innerWidth / size.width; p[1] *= innerHeight / size.height; }
@@ -41,6 +37,10 @@ export class WalkingZone {
       this.mountHandles(); this.apply();
     };
     document.getElementById('save-zone').onclick = () => this.finish();
+    document.getElementById('reset-zone').onclick = () => {
+      this.corners = WalkingZone.defaults();
+      this.mountHandles(); this.apply();
+    };
     window.addEventListener('resize', () => {
       for (const p of this.corners) { p[0] *= innerWidth / this.width; p[1] *= innerHeight / this.height; }
       this.width = innerWidth; this.height = innerHeight;
@@ -58,6 +58,12 @@ export class WalkingZone {
     this.apply();
   }
 
+  // A long, narrow trapezoid like a walking pad seen from the projector, below the setup instructions.
+  static defaults() {
+    return [[innerWidth * .43, innerHeight * .42], [innerWidth * .57, innerHeight * .42],
+      [innerWidth * .66, innerHeight * .94], [innerWidth * .34, innerHeight * .94]];
+  }
+
   apply() {
     Warp.apply(this.stage, this.corners);
     window.dispatchEvent(new CustomEvent('zombiewalk:zone', { detail: this.corners }));
@@ -67,6 +73,8 @@ export class WalkingZone {
     if (this.active) return;
     this.active = true; this.onDone = onDone;
     this.help.textContent = '';
+    // A corner dragged off screen, or saved on another display, comes back inside so it can be grabbed.
+    this.corners = this.corners.map(([x, y]) => [Math.max(30, Math.min(innerWidth - 30, x)), Math.max(30, Math.min(innerHeight - 30, y))]);
     this.setup.hidden = false;
     document.body.classList.add('setting-zone');
     this.mountHandles(); this.apply();
@@ -91,7 +99,7 @@ export class WalkingZone {
       const position = () => {
         const p = this.corners[index];
         handle.style.left = `${p[0]}px`; handle.style.top = `${p[1]}px`;
-        handle.classList.toggle('label-left', p[0] > innerWidth / 2);
+        handle.classList.toggle('label-left', index === 0 || index === 3);   // left corners label to the left, so labels never overlap
         handle.classList.toggle('label-above', p[1] > innerHeight * .7);
       };
       const move = (x, y) => {

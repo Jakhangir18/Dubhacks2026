@@ -28,7 +28,7 @@ const txt = (size, color = C.white) => ({ ...TEXT, fontSize: `${Math.max(24, siz
 // URL options for development and screenshots: ?scene=play&act=garden&auto=1
 const params = new URLSearchParams(location.search);
 const settings = {
-  voice: Warp.store.get('zombiewalk.voice', true),
+  voice: Warp.store.get('zombiewalk.voiceOn', false),   // spoken lines are off until the team picks a voice (M)
   limits: {},                                       // the current player's limits from the server (therapist panel)
   player: Warp.store.get('zombiewalk.player', 'Player'),
   greeting: null,
@@ -56,6 +56,8 @@ async function loadPlayer() {
   settings.perceptron = player.status === 'fulfilled' && player.value.perceptronConsent === true &&
     status.status === 'fulfilled' && status.value.perceptron === true;
   if (params.get('demo') === '1') Object.assign(settings.limits, DEMO);
+  const speed = Warp.store.get('zombiewalk.speedScale', null);   // the operator's [ ] setting wins on this laptop
+  if (Number.isFinite(speed)) settings.limits.speedScale = speed;
   settings.greeting = plan.status === 'fulfilled' ? plan.value.say : null;
 }
 let playerReady = loadPlayer();
@@ -97,6 +99,17 @@ function keyStep(foot, liftCm) {
 }
 let autoWalk = null;
 let autoFoot = 'L';
+// [ and ]: plants slower or faster, live, remembered on this laptop.
+function nudgeSpeed(delta) {
+  const play = window.zombieGame?.scene.getScene('play');
+  const now = Number(play?.g?.limits.speedScale ?? settings.limits.speedScale ?? 1);
+  const next = Math.round(Math.min(2, Math.max(0.3, now + delta)) * 10) / 10;
+  settings.limits.speedScale = next;
+  if (play?.g) play.g.limits.speedScale = next;
+  Warp.store.set('zombiewalk.speedScale', next);
+  if (play?.sys.isActive()) play.showFeedback(`PLANT SPEED x${next.toFixed(1)}`, C.cyan);
+}
+
 function toggleAutoWalk() {
   if (autoWalk) { clearInterval(autoWalk); autoWalk = null; return; }
   autoWalk = setInterval(() => { keyStep(autoFoot, 4); autoFoot = autoFoot === 'L' ? 'R' : 'L'; }, 600);
@@ -166,12 +179,13 @@ window.addEventListener('keydown', (e) => {
     w: toggleAutoWalk, c: openZone, z: openZone,
     f: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()),
     m: () => {
-      settings.voice = !settings.voice; Warp.store.set('zombiewalk.voice', settings.voice);
+      settings.voice = !settings.voice; Warp.store.set('zombiewalk.voiceOn', settings.voice);
       if (!settings.voice) { ++speechId; window.speechSynthesis?.cancel(); sound.duck(false); }
     },
     n: () => sound.toggle(),
     k: () => { const el = document.getElementById('keys'); el.hidden = !el.hidden; },
     v: () => cameraPanel.toggle(),
+    '[': () => nudgeSpeed(-0.1), ']': () => nudgeSpeed(0.1),
   };
   if (zone.active && ['a', 'd', 'q', 'e', 'w', 'c', 'z'].includes(k)) return;
   if (map[k]) { map[k](); e.preventDefault(); }
@@ -207,6 +221,10 @@ function useHdArt(scene) {
     else {
       const s = Math.min(w / img.width, h / img.height);   // contain: the art keeps its proportions inside the old box
       ctx.drawImage(img, (w - img.width * s) / 2, (h - img.height * s) / 2, img.width * s, img.height * s);
+    }
+    if (key === 'tile-grass-dark') {   // lift the dark checker: on a 150-lumen projector it read as almost black
+      ctx.globalCompositeOperation = 'screen'; ctx.fillStyle = '#3c6a2c'; ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'source-over';
     }
     canvas.refresh();
     scene.textures.remove(hd);   // the full-size source is not needed again
@@ -783,7 +801,7 @@ class Play extends Phaser.Scene {
       const act = ACTS[g.act];
       publishGarden({ cadence: out.pace.cadence, act: g.act, paceOk: out.pace.ok || g.t <= 3,
         paused: this.paused, title: act?.title || '', score: `${g.score} pts${g.streak >= 5 ? '  x2' : ''}`,
-        progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · form ${Math.round(out.form * 100)}%${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
+        progress: this.progress(), pace: `${out.pace.cadence} steps/min · min ${g.limits.minCadence} · speed x${(g.limits.speedScale ?? 1).toFixed(1)} · form ${Math.round(out.form * 100)}%${perceiver.used ? ` · ${perceiver.badge()}` : ''}`,
         coachColor: g.t < this.feedbackUntil ? this.feedbackColor : '',
         coach: g.t < this.feedbackUntil ? this.feedback : g.t < this.actIntroUntil ? act.intro.join(' ') : this.coachLine });
     }
