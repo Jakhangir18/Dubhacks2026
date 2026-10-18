@@ -1,5 +1,21 @@
 # web
 
+## Play the game
+
+```bash
+cd web
+python3 -m http.server 8000      # any static server works; modules need http, not file://
+# open http://localhost:8000 in Chrome (on the projector window), press F
+```
+
+Keyboard play (no camera needed): **A / D** normal step, **Q / E** high step (stomp a flower, dodge a seed), **W** auto-walk, **Space** pause, **C** drag the corners onto the mat (same calibration as the check page), **M** voice on or off.
+
+Useful URLs: `?demo=1` short game for judges, `?scene=play&act=garden&auto=1` jump to act 2 with auto-walk, `?scene=home` preview the end screen.
+
+How it plays: act 1 walk home (keep at least 80 steps per minute; your normal step height is measured here), act 2 high-step onto the flowers in your foot's lane, act 3 lift the foot the seed is aiming at. Heights are relative to your own normal step, and the lift bars beside the footprints show your lift against the line you need.
+
+Files: `logic.js` rules (tested), `game.js` Phaser scenes and art, `bus.js` foot events (keyboard now, camera and Raspberry Pi next), `warp.js` projector corners.
+
 ## Projector check (works now, no server needed)
 
 1. Download the repo (or just `web/calibrate.html` and `web/warp.js` into one folder).

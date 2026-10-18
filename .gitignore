@@ -3,3 +3,7 @@ out/
 __pycache__/
 models/
 *.pt
+data/
+node_modules/
+.env
+.claude/
