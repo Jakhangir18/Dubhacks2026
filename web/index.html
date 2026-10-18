@@ -12,7 +12,7 @@
     .warp-handle { position: absolute; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%;
       background: #ff2d95; border: 3px solid #fff; color: #fff; font: 700 12px system-ui; display: grid;
       place-items: center; cursor: grab; pointer-events: auto; touch-action: none; }
-    #keys { position: fixed; left: 12px; bottom: 10px; z-index: 20; color: #9aa; font-size: 13px;
+    #keys { position: fixed; left: 12px; right: 12px; bottom: 10px; z-index: 20; color: #9aa; font-size: 13px;
       background: rgba(0,0,0,.6); padding: 6px 10px; border-radius: 8px; }
     #keys b { color: #7CFF4F; }
   </style>
@@ -25,7 +25,7 @@
   <div id="handles"></div>
   <div id="keys">
     <b>A/D</b> step · <b>Q/E</b> high step · <b>W</b> auto-walk · <b>Space</b> pause · <b>C</b> corners ·
-    <b>F</b> fullscreen · <b>M</b> voice on/off · <b>V</b> camera · <b>K</b> hide keys · <span id="bridge">bridge offline</span>
+    <b>F</b> fullscreen · <b>M</b> voice on/off · <b>N</b> sound/music · <b>V</b> camera · <b>K</b> hide keys · <span id="bridge">bridge offline</span>
   </div>
   <script type="module" src="game.js"></script>
 </body>

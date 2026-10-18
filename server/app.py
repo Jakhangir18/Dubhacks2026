@@ -14,14 +14,20 @@ Environment (.env next to this repo root, never committed):
 
 from __future__ import annotations
 
+import io
 import json
 import math
 import os
+import re
+import socket
+import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+import segno
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -125,6 +131,115 @@ async def post_events(inp: EventsIn) -> dict[str, Any]:
 from server import api  # imported after load_env() so the store sees MONGODB_URI
 
 app.include_router(api.router)
+
+
+# ---------------------------------------------------------------- local canvas highlights (no camera uploads)
+CLIPS = ROOT / "data" / "clips"
+MAX_CLIP_BYTES = 30 * 1024 * 1024
+CLIP_TYPES = {"video/webm": ".webm", "video/mp4": ".mp4"}
+
+
+def lan_ip() -> str:
+    """Ask the routing table for a LAN address; UDP connect sends no packets."""
+    if host := os.environ.get("CLIP_HOST"):
+        return host
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("10.255.255.255", 1))
+            return sock.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+
+
+MAX_CLIPS = 50                       # keep the newest clips only, so uploads can never fill the disk
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", ""}
+
+
+def prune_clips() -> None:
+    files = sorted((p for p in CLIPS.glob("*") if p.suffix in {".webm", ".mp4"}), key=lambda p: p.stat().st_mtime)
+    for old in files[:-MAX_CLIPS]:
+        old.unlink(missing_ok=True)
+
+
+def host_name(host: str) -> str:
+    """Hostname part of a Host header, IPv6 aware: '[::1]:8000' -> '::1', 'a.ts.net:8443' -> 'a.ts.net'."""
+    host = host.strip()
+    if host.startswith("["):
+        return host[1:host.find("]")] if "]" in host else host
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
+def clip_url(request: Request, clip_id: str) -> str:
+    # Forwarded headers count only from a proxy on this machine (Tailscale serve); anyone else could spoof them.
+    via_local_proxy = request.client is not None and request.client.host in {"127.0.0.1", "::1"}
+    fwd_host = request.headers.get("x-forwarded-host", "").split(",")[0].strip() if via_local_proxy else ""
+    host = fwd_host or request.headers.get("host", "")
+    if host_name(host) not in LOCAL_HOSTS:
+        # Opened by a real name (Tailscale serve, a LAN IP): phones reach the same address.
+        proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip() if via_local_proxy else ""
+        return f"{proto or request.url.scheme}://{host}/clips/{clip_id}"
+    port = request.url.port or (443 if request.url.scheme == "https" else 80)
+    return f"{request.url.scheme}://{lan_ip()}:{port}/clips/{clip_id}"
+
+
+@app.post("/api/clip", status_code=201)
+async def post_clip(request: Request) -> dict[str, str]:
+    media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if media_type not in CLIP_TYPES:
+        raise HTTPException(415, "Only video/webm and video/mp4 are accepted")
+    length = request.headers.get("content-length")
+    if length is not None:
+        try:
+            size = int(length)
+        except ValueError:
+            raise HTTPException(400, "Invalid content-length") from None
+        if size > MAX_CLIP_BYTES:
+            raise HTTPException(413, "Clip exceeds 30 MB")
+    CLIPS.mkdir(parents=True, exist_ok=True)
+    clip_id = uuid.uuid4().hex
+    part = CLIPS / f"{clip_id}.part"
+    size = 0
+    head = b""
+    try:
+        # Stream to disk instead of holding up to 30 MB per upload in memory.
+        with part.open("wb") as out:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > MAX_CLIP_BYTES:
+                    raise HTTPException(413, "Clip exceeds 30 MB")
+                if len(head) < 12:
+                    head = (head + chunk)[:12]
+                out.write(chunk)
+        valid = (head[:4] == b"\x1a\x45\xdf\xa3" if media_type == "video/webm"
+                 else len(head) >= 12 and head[4:8] == b"ftyp")
+        if not valid:
+            raise HTTPException(415, "Body does not match the video container")
+        part.rename(CLIPS / f"{clip_id}{CLIP_TYPES[media_type]}")
+    finally:
+        part.unlink(missing_ok=True)
+    await run_in_threadpool(prune_clips)
+    return {"id": clip_id, "url": clip_url(request, clip_id)}
+
+
+@app.get("/clips/{clip_id}")
+def get_clip(clip_id: str) -> FileResponse:
+    if not re.fullmatch(r"[0-9a-f]{32}", clip_id):
+        raise HTTPException(404, "Clip not found")
+    for media_type, suffix in CLIP_TYPES.items():
+        path = CLIPS / f"{clip_id}{suffix}"
+        if path.is_file():
+            return FileResponse(path, media_type=media_type, filename=f"walk-{clip_id}{suffix}",
+                                content_disposition_type="inline")
+    raise HTTPException(404, "Clip not found")
+
+
+@app.get("/api/qr")
+def qr(url: str) -> Response:
+    if len(url) > 1024 or not url.startswith(("http://", "https://")):
+        raise HTTPException(400, "Expected an HTTP URL of at most 1024 characters")
+    svg = io.BytesIO()
+    segno.make(url, micro=False, error="m").save(svg, kind="svg", scale=6, border=4, light="white")
+    return Response(svg.getvalue(), media_type="image/svg+xml")
 
 
 # ---------------------------------------------------------------- static game
