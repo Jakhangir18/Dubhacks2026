@@ -5,9 +5,13 @@ import { emitFoot, onFoot } from './bus.js';
 import { mountCameraPanel } from './camera-panel.js';
 import { connectBridge } from './bridge.js';
 import { ACTS, ENDING } from './lore.js';
+import { GardenSound } from './sound.js';
+import { WalkClip, uploadClip } from './clip.js';
 
 const Phaser = window.Phaser;
 const Warp = window.Warp;
+const sound = new GardenSound(Warp.store);
+const clip = new WalkClip();
 
 const C = { green: 0x7cff4f, yellow: 0xffe44d, magenta: 0xff2d95, cyan: 0x2de2ff, orange: 0xff9a1f,
   white: 0xffffff, red: 0xff4d4d, violet: 0x9b6bff, path: 0x19352f, zone: 0x295d45 };
@@ -49,14 +53,19 @@ async function loadPlayer() {
 let playerReady = loadPlayer();
 if (params.get('demo') === '1') Object.assign(settings.limits, DEMO);   // ?demo=1: a short game for judges
 
+let speechId = 0;
 function say(text) {
   if (!settings.voice || !window.speechSynthesis) return;
+  const id = ++speechId;
   try {
     speechSynthesis.cancel();
+    sound.duck(false);
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 1.05;
+    u.onstart = () => { if (id === speechId) sound.duck(true); };
+    u.onend = u.onerror = () => { if (id === speechId) sound.duck(false); };
     speechSynthesis.speak(u);
-  } catch { /* no audio device */ }
+  } catch { sound.duck(false); }
 }
 
 // ---------- keyboard input (development and fallback) ----------
@@ -91,6 +100,7 @@ function toggleCorners() {
 }
 
 window.addEventListener('keydown', (e) => {
+  sound.unlock();
   if (e.repeat || ['INPUT', 'SELECT'].includes(e.target.tagName)) return;   // a held key must not fake a stream of steps
   const k = e.key.toLowerCase();
   const map = {
@@ -98,7 +108,11 @@ window.addEventListener('keydown', (e) => {
     q: () => keyStep('L', 16), e: () => keyStep('R', 16),
     w: toggleAutoWalk, c: toggleCorners,
     f: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()),
-    m: () => { settings.voice = !settings.voice; Warp.store.set('zombiewalk.voice', settings.voice); },
+    m: () => {
+      settings.voice = !settings.voice; Warp.store.set('zombiewalk.voice', settings.voice);
+      if (!settings.voice) { ++speechId; window.speechSynthesis?.cancel(); sound.duck(false); }
+    },
+    n: () => sound.toggle(),
     k: () => { const el = document.getElementById('keys'); el.hidden = !el.hidden; },
     v: () => cameraPanel.toggle(),
   };
@@ -247,6 +261,7 @@ class Title extends Phaser.Scene {
   restartOnResize() { if (!this.started) this.scene.restart(); }
   go() {
     if (this.started) return;
+    sound.unlock();
     this.started = true;
     playerReady.then(() => this.scene.start('play'));
   }
@@ -257,6 +272,10 @@ class Play extends Phaser.Scene {
   constructor() { super('play'); }
 
   create() {
+    clip.cancel();
+    sound.setMusic(true);
+    this.paused = false;
+    this.highSound = { L: false, R: false };
     this.g = newGame(settings.limits, Date.now() % 100000);
     this.sprites = new Map();
     this.marchPhase = 0;
@@ -310,11 +329,21 @@ class Play extends Phaser.Scene {
       // so a slow frame rate does not bunch steps together.
       const e = addEvent(this.g, { ...ev, t: this.g.t + (performance.now() - this.frameWall) / 1000 });
       if (!e) return;
-      if (e.kind === 'strike') this.footFlash[e.foot] = 1;
-      if (e.kind === 'lift') this.lift[e.foot] = Math.max(this.lift[e.foot], e.liftCm);
+      if (e.kind === 'strike') {
+        this.footFlash[e.foot] = 1;
+        this.highSound[e.foot] = false;
+        sound.play('step');
+      }
+      if (e.kind === 'lift') {
+        this.lift[e.foot] = Math.max(this.lift[e.foot], e.liftCm);
+        if (!this.highSound[e.foot] && e.liftCm >= needCm(this.g, this.g.act === 'garden' ? 'flower' : 'seed', e.foot)) {
+          this.highSound[e.foot] = true;
+          sound.play('high');
+        }
+      }
     });
     this.events.once('shutdown', () => this.off());
-    this.input.keyboard.on('keydown-SPACE', () => { this.paused = !this.paused; });
+    this.input.keyboard.on('keydown-SPACE', () => { this.paused = !this.paused; sound.setMusic(!this.paused); });
     if (settings.greeting) { this.coachText.setText(settings.greeting); setTimeout(() => say(settings.greeting), 2600); }
     const jump = params.get('act');
     if (jump) { startAt(this.g, jump); params.delete('act'); }   // development shortcut, first game only
@@ -344,6 +373,8 @@ class Play extends Phaser.Scene {
   showAct() {
     const a = ACTS[this.g.act];
     if (!a) return;
+    sound.play('act');
+    if (this.g.act === 'storm') clip.start(this.game.canvas, sound.capture?.stream);
     this.tweens.killTweensOf([this.banner, this.intro]);
     this.banner.setText(a.title).setAlpha(1);
     this.intro.setText(a.intro.join('\n')).setAlpha(1);
@@ -358,6 +389,7 @@ class Play extends Phaser.Scene {
   }
 
   resolveFx(th, L) {
+    sound.play(th.result !== 'hit' ? 'miss' : th.kind === 'flower' ? 'stomp' : 'dodge');
     const x = L.lanes[th.lane];
     const y = L.zoneY;
     if (th.kind === 'flower' && th.result === 'hit') {
@@ -414,7 +446,10 @@ class Play extends Phaser.Scene {
     const L = this.layout();
 
     if (out.actChanged) {
-      if (this.g.act === 'home') { this.scene.start('home', { summary: summary(this.g) }); return; }
+      if (this.g.act === 'home') {
+        for (const th of out.resolved) this.resolveFx(th, L);
+        this.scene.start('home', { summary: summary(this.g) }); return;
+      }
       this.sprites.forEach((s) => s.destroy());
       this.sprites.clear();
       this.showAct();
@@ -512,6 +547,7 @@ class Play extends Phaser.Scene {
         s = this.add.container(L.lanes[th.lane], L.top, [pad, plant]).setDepth(5);
         this.sprites.set(th.id, s);
         if (th.kind === 'seed') {
+          sound.play('seed');
           const pod = this.pods[th.lane];
           this.tweens.add({ targets: pod, scaleX: 1, scaleY: 0.65, duration: 120, yoyo: true });
         }
@@ -615,6 +651,9 @@ class Play extends Phaser.Scene {
 class Home extends Phaser.Scene {
   constructor() { super('home'); }
   create(data) {
+    this.homeData = data;
+    sound.setMusic(false);
+    if (!data.replay) sound.play('home');
     const s = data.summary;
     const { width: W, height: H } = this.scale;
     gardenBackdrop(this, W, H);
@@ -625,7 +664,7 @@ class Home extends Phaser.Scene {
       tint: [C.yellow, C.green, C.cyan, C.magenta], scale: { start: 1.2, end: 0 } });
     this.card = this.add.graphics();
     const small = H < 700;
-    const bodySize = small ? 22 : 26;
+    const bodySize = small ? 20 : 26;
     const style = (size, color = C.white) => ({ ...txt(size, color),
       wordWrap: { width: W * 0.84 - 32, useAdvancedWrap: true }, align: 'center' });
     const text = (value, size, color) => this.add.text(W / 2, 0, value, style(size, color)).setOrigin(0.5, 0);
@@ -639,17 +678,26 @@ class Home extends Phaser.Scene {
     ];
     this.stats = lines.map((line) => text(line, bodySize));
     // Measure a three-line slot before replacing the sample with the asynchronous note.
-    this.noteText = text('Ag\nAg\nAg', 22, C.cyan);
+    this.noteText = text('Ag\nAg\nAg', small ? 18 : 22, C.cyan);
     this.noteHeight = this.noteText.height;
     this.noteText.setText(data.result ? data.result.note || '' : 'The coach is writing your note…');
-    this.rewardText = text('Ag', bodySize, C.magenta);
+    this.rewardText = text('Ag\nAg', bodySize, C.magenta);
     this.rewardHeight = this.rewardText.height;
     this.rewardText.setText('');
     this.footer = text('Press R to walk again', small ? 22 : 24, C.yellow);
+    this.shareText = text(data.shareStatus || 'Preparing your walk clip…', small ? 20 : 24, C.yellow);
+    this.qrImage = null;
     this.layoutCard();
+    if (data.share) this.showShare(data.share);
+    if (!data.clipTask) {
+      data.clipTask = this.prepareClip(data);
+    }
     if (data.result) this.showResult(data.result);
     say(`${ENDING} ${s.stompPct ?? 0} percent of flowers stomped. Great walking.`);
-    this.input.keyboard.on('keydown-R', () => { playerReady = loadPlayer(); this.scene.start('title'); });
+    this.input.keyboard.on('keydown-R', () => {
+      data.cancelled = true; data.uploadAbort?.abort(); clip.cancel();
+      playerReady = loadPlayer(); this.scene.start('title');
+    });
     const again = () => this.scene.restart(data);
     this.scale.once('resize', again);
     this.events.once('shutdown', () => this.scale.off('resize', again));
@@ -671,16 +719,26 @@ class Home extends Phaser.Scene {
   layoutCard() {
     const { width: W, height: H } = this.scale;
     const gap = H < 700 ? 3 : 5;
+    const qrWidth = W < 1000 ? 184 : 220;
+    const textWidth = W * 0.84 - 56 - qrWidth;
+    const textX = W * 0.08 + 16 + textWidth / 2;
+    const qrX = W * 0.92 - 16 - qrWidth / 2;
     const items = [this.heading, this.ending, ...this.stats, this.noteText, this.rewardText, this.footer];
+    for (const item of items) item.setScale(1).setWordWrapWidth(textWidth);
+    const reservedHeight = (item) => Math.max(item.height,
+      item === this.noteText ? this.noteHeight : item === this.rewardText ? this.rewardHeight : 0);
+    const naturalHeight = items.reduce((sum, item) => sum + reservedHeight(item) + gap, 28);
+    const fit = Math.min(1, (H - 84) / naturalHeight);
     let cursor = 14;
     for (const item of items) {
-      item.setPosition(W / 2, cursor);
-      const reserved = item === this.noteText ? this.noteHeight : item === this.rewardText ? this.rewardHeight : 0;
-      cursor += Math.max(item.height, reserved) + gap;
+      item.setScale(fit).setPosition(textX, cursor);
+      cursor += reservedHeight(item) * fit + gap;
     }
-    const cardH = cursor - gap + 14;
-    const top = Math.max(12, Math.min(H * 0.34, H - cardH - 40));
+    const cardH = Math.max(cursor - gap + 14, qrWidth + 110);
+    const top = Math.max(12, Math.min(H * 0.30, H - cardH - 60));
     for (const item of items) item.y += top;
+    this.shareText.setWordWrapWidth(qrWidth).setPosition(qrX, top + cardH / 2 + (this.qrImage ? qrWidth / 2 + 12 : -30));
+    if (this.qrImage) this.qrImage.setPosition(qrX, top + cardH / 2).setDisplaySize(qrWidth, qrWidth);
     this.card.clear();
     this.card.fillStyle(C.path); this.card.fillRoundedRect(W * 0.08, top, W * 0.84, cardH, 26);
     this.card.lineStyle(5, 0xffe2a2); this.card.strokeRoundedRect(W * 0.08, top, W * 0.84, cardH, 26);
@@ -692,6 +750,39 @@ class Home extends Phaser.Scene {
     this.tweens.add({ targets: this.gus, y: this.gus.y - Math.min(12, top * 0.08), angle: 5,
       duration: 420, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
     this.confetti.setPosition(W / 2, top / 2);
+  }
+
+  async prepareClip(data) {
+    try {
+      // Let the celebration and home arrival appear in the final recording.
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      if (data.cancelled) return;
+      const blob = await clip.finish();
+      if (data.cancelled) return;
+      if (!blob) throw new Error('Recording unavailable on this browser or preview.');
+      data.shareStatus = 'Sharing your walk clip…';
+      if (this.sys.isActive() && this.homeData === data) this.shareText.setText(data.shareStatus);
+      data.uploadAbort = new AbortController();
+      const timer = setTimeout(() => data.uploadAbort.abort(), 30000);
+      try { data.share = await uploadClip(blob, data.uploadAbort.signal); }
+      finally { clearTimeout(timer); }
+      if (!data.cancelled && this.sys.isActive() && this.homeData === data) this.showShare(data.share);
+    } catch (error) {
+      data.shareStatus = error.message.startsWith('Recording unavailable') ? 'Play act 3 to record a clip on a supported browser.' : 'Clip sharing unavailable. Check the local server and play again.';
+      if (!data.cancelled && this.sys.isActive() && this.homeData === data) {
+        this.shareText.setText(data.shareStatus); this.layoutCard();
+      }
+    }
+  }
+
+  showShare(share) {
+    if (this.qrImage) this.qrImage.destroy();
+    if (this.textures.exists('walk-qr')) this.textures.remove('walk-qr');
+    this.textures.addImage('walk-qr', share.image);
+    this.qrImage = this.add.image(0, 0, 'walk-qr').setInteractive({ useHandCursor: true });
+    this.qrImage.on('pointerdown', () => window.open(share.url, '_blank', 'noopener'));
+    this.shareText.setText('Scan to get your walk clip');
+    this.layoutCard();
   }
 
   showResult(result) {

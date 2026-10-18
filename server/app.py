@@ -14,14 +14,20 @@ Environment (.env next to this repo root, never committed):
 
 from __future__ import annotations
 
+import io
 import json
 import math
 import os
+import re
+import socket
+import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+import segno
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -125,6 +131,84 @@ async def post_events(inp: EventsIn) -> dict[str, Any]:
 from server import api  # imported after load_env() so the store sees MONGODB_URI
 
 app.include_router(api.router)
+
+
+# ---------------------------------------------------------------- local canvas highlights (no camera uploads)
+CLIPS = ROOT / "data" / "clips"
+MAX_CLIP_BYTES = 30 * 1024 * 1024
+CLIP_TYPES = {"video/webm": ".webm", "video/mp4": ".mp4"}
+
+
+def lan_ip() -> str:
+    """Ask the routing table for a LAN address; UDP connect sends no packets."""
+    if host := os.environ.get("CLIP_HOST"):
+        return host
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("10.255.255.255", 1))
+            return sock.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+
+
+def save_clip(clip_id: str, suffix: str, body: bytearray) -> None:
+    CLIPS.mkdir(parents=True, exist_ok=True)
+    (CLIPS / f"{clip_id}{suffix}").write_bytes(body)
+
+
+@app.post("/api/clip", status_code=201)
+async def post_clip(request: Request) -> dict[str, str]:
+    media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if media_type not in CLIP_TYPES:
+        raise HTTPException(415, "Only video/webm and video/mp4 are accepted")
+    length = request.headers.get("content-length")
+    if length is not None:
+        try:
+            size = int(length)
+        except ValueError:
+            raise HTTPException(400, "Invalid content-length") from None
+        if size > MAX_CLIP_BYTES:
+            raise HTTPException(413, "Clip exceeds 30 MB")
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > MAX_CLIP_BYTES:
+            raise HTTPException(413, "Clip exceeds 30 MB")
+        body.extend(chunk)
+    valid = (body[:4] == b"\x1a\x45\xdf\xa3" if media_type == "video/webm"
+             else len(body) >= 12 and body[4:8] == b"ftyp")
+    if not valid:
+        raise HTTPException(415, "Body does not match the video container")
+    clip_id = uuid.uuid4().hex
+    await run_in_threadpool(save_clip, clip_id, CLIP_TYPES[media_type], body)
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    hostname = host.split(":")[0]
+    if hostname and hostname not in {"localhost", "127.0.0.1", "::1"}:
+        # Opened by a real name (Tailscale serve, a LAN IP): phones reach the same address.
+        scheme = request.headers.get("x-forwarded-proto") or request.url.scheme
+        return {"id": clip_id, "url": f"{scheme}://{host}/clips/{clip_id}"}
+    port = request.url.port or (443 if request.url.scheme == "https" else 80)
+    return {"id": clip_id, "url": f"{request.url.scheme}://{lan_ip()}:{port}/clips/{clip_id}"}
+
+
+@app.get("/clips/{clip_id}")
+def get_clip(clip_id: str) -> FileResponse:
+    if not re.fullmatch(r"[0-9a-f]{32}", clip_id):
+        raise HTTPException(404, "Clip not found")
+    for media_type, suffix in CLIP_TYPES.items():
+        path = CLIPS / f"{clip_id}{suffix}"
+        if path.is_file():
+            return FileResponse(path, media_type=media_type, filename=f"walk-{clip_id}{suffix}",
+                                content_disposition_type="inline")
+    raise HTTPException(404, "Clip not found")
+
+
+@app.get("/api/qr")
+def qr(url: str) -> Response:
+    if len(url) > 1024 or not url.startswith(("http://", "https://")):
+        raise HTTPException(400, "Expected an HTTP URL of at most 1024 characters")
+    svg = io.BytesIO()
+    segno.make(url, micro=False, error="m").save(svg, kind="svg", scale=6, border=4, light="white")
+    return Response(svg.getvalue(), media_type="image/svg+xml")
 
 
 # ---------------------------------------------------------------- static game
