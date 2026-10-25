@@ -4,6 +4,8 @@
 
 DubHacks '26, University of Washington, Oct 17–18 2026.
 
+**Demo:** https://youtu.be/fvdUs95cf9k?si=6nJp7oQKFCtkT_uO
+
 ## Technologies we use and how
 
 Sponsor technologies first, in the order we lean on them. Every line names the file that does it and whether it runs by default in the demo.
